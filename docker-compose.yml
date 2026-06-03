@@ -1,0 +1,163 @@
+# Full Tracely stack. One command:
+#   docker compose up -d --build --wait        (host 8000 free)
+#   TRACELY_BACKEND_PORT=8088 docker compose up -d --build --wait   (host 8000 busy)
+# Then open http://localhost:3000 (or ${TRACELY_WEB_PORT}).
+
+x-app-env: &app-env
+  TRACELY_ENV: docker
+  DATABASE_URL: postgresql+asyncpg://tracely:tracely@postgres:5432/tracely
+  ALEMBIC_DATABASE_URL: postgresql+psycopg://tracely:tracely@postgres:5432/tracely
+  CLICKHOUSE_HOST: clickhouse
+  CLICKHOUSE_PORT: "8123"
+  CLICKHOUSE_USER: default
+  CLICKHOUSE_PASSWORD: ""
+  CLICKHOUSE_DATABASE: tracely
+  REDIS_URL: redis://redis:6379/0
+  S3_ENDPOINT_URL: http://minio:9000
+  S3_REGION: us-east-1
+  S3_ACCESS_KEY_ID: tracely
+  S3_SECRET_ACCESS_KEY: tracely-secret
+  S3_BUCKET: tracely-events
+  S3_EVENT_PREFIX: events/
+
+services:
+  # ── infra ────────────────────────────────────────────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    ports:
+      - "8123:8123"
+      - "9009:9000"
+    environment:
+      CLICKHOUSE_DB: tracely
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      - ./.data/clickhouse:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  postgres:
+    image: postgres:17
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: tracely
+      POSTGRES_PASSWORD: tracely
+      POSTGRES_DB: tracely
+    volumes:
+      - ./.data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracely"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: tracely
+      MINIO_ROOT_PASSWORD: tracely-secret
+    volumes:
+      - ./.data/minio:/data
+
+  minio-init:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 tracely tracely-secret; do echo waiting for minio; sleep 1; done &&
+      mc mb -p local/tracely-events &&
+      echo 'bucket ready';
+      "
+
+  # ── app ──────────────────────────────────────────────────────────────────
+  # one-shot: ClickHouse + Alembic migrations, then seed the default project/key
+  migrate:
+    image: tracely-backend
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    environment: *app-env
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "python -m tracely.ch_migrate && (cd backend && alembic upgrade head) && python -m tracely.seed"]
+    restart: "no"
+
+  backend:
+    image: tracely-backend
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    command: ["uvicorn", "tracely.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "${TRACELY_BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  worker:
+    image: tracely-backend
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    command: ["celery", "-A", "tracely_workers.worker", "worker", "--pool=solo", "--loglevel=info"]
+
+  frontend:
+    image: tracely-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    command: ["pnpm", "exec", "next", "dev", "-H", "0.0.0.0"]
+    environment:
+      TRACELY_API: http://backend:8000     # server-side fetch uses the compose network
+      TRACELY_KEY: tracely_dev_key
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${TRACELY_WEB_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 40s

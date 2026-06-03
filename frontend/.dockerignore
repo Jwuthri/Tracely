@@ -1,0 +1,4 @@
+node_modules
+.next
+pnpm-workspace.yaml
+pnpm-lock.yaml

@@ -1,0 +1,76 @@
+"""Minimal read API for the trace list + waterfall (ClickHouse-backed)."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends
+
+from tracely.api.auth import get_project_id
+from tracely.clickhouse import get_async_client
+from tracely.schemas import SpanOut, TraceDetail
+
+router = APIRouter(prefix="/api")
+
+
+@router.get("/traces")
+async def list_traces(limit: int = 20, project_id: str = Depends(get_project_id)) -> list[dict]:
+    client = await get_async_client()
+    res = await client.query(
+        """
+        SELECT trace_id,
+               min(start_time)                       AS ts,
+               count()                               AS spans,
+               anyIf(name, parent_span_id = '')      AS root_name,
+               anyIf(agent_id, parent_span_id = '')  AS agent_id,
+               maxIf(1, level = 'ERROR')             AS has_error
+        FROM events
+        WHERE project_id = {p:String}
+        GROUP BY trace_id
+        ORDER BY ts DESC
+        LIMIT {n:UInt32}
+        """,
+        parameters={"p": project_id, "n": limit},
+    )
+    return [dict(zip(res.column_names, row)) for row in res.result_rows]
+
+
+@router.get("/traces/{trace_id}")
+async def get_trace(trace_id: str, project_id: str = Depends(get_project_id)) -> TraceDetail:
+    client = await get_async_client()
+    res = await client.query(
+        """
+        SELECT span_id, parent_span_id, name, type, level, status_message,
+               start_time, end_time, agent_id, agent_run_id, turn_id, step_name,
+               model_id, input, output
+        FROM events FINAL
+        WHERE project_id = {p:String} AND trace_id = {t:String}
+        ORDER BY start_time
+        """,
+        parameters={"p": project_id, "t": trace_id},
+    )
+    spans: list[SpanOut] = []
+    for row in res.result_rows:
+        d = dict(zip(res.column_names, row))
+        latency = None
+        if d.get("end_time") and d.get("start_time"):
+            latency = (d["end_time"] - d["start_time"]).total_seconds() * 1000.0
+        spans.append(
+            SpanOut(
+                span_id=d["span_id"],
+                parent_span_id=d["parent_span_id"],
+                name=d["name"],
+                type=d["type"],
+                level=d["level"],
+                status_message=d["status_message"],
+                start_time=d["start_time"],
+                end_time=d["end_time"],
+                latency_ms=latency,
+                agent_id=d["agent_id"],
+                agent_run_id=d["agent_run_id"],
+                turn_id=d["turn_id"],
+                step_name=d["step_name"],
+                model_id=d["model_id"],
+                input=d["input"],
+                output=d["output"],
+            )
+        )
+    return TraceDetail(trace_id=trace_id, spans=spans)

@@ -1,0 +1,25 @@
+# uv workspace root (not itself a package).
+[project]
+name = "tracely-monorepo"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6"]
+
+[tool.uv.workspace]
+members = ["backend", "workers", "sdk"]
+
+[tool.uv.sources]
+tracely-backend = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

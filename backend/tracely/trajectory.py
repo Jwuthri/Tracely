@@ -1,0 +1,104 @@
+"""Trajectory model + matcher (the heart of trace-native regression testing).
+
+Canonical types per design 00-canonical-decisions.md §7.2; match modes per `agentevals`
+(strict / unordered / subset / superset). A trajectory is built from a trace's span rows.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import asdict, dataclass, field
+from typing import Any
+
+# observation `type` -> trajectory StepKind
+_KIND = {
+    "GENERATION": "llm", "TOOL": "tool", "AGENT": "agent", "SUBAGENT": "subagent",
+    "RETRIEVER": "retriever", "CHAIN": "step", "GUARDRAIL": "guardrail",
+    "EMBEDDING": "llm", "EVALUATOR": "step", "SPAN": "step", "EVENT": "other",
+}
+
+
+def step_kind(observation_type: str) -> str:
+    return _KIND.get((observation_type or "").upper(), "other")
+
+
+def canonical_hash(obj: Any) -> str:
+    """RFC8785-flavored canonical JSON -> short sha256 (lookup/identity key)."""
+    blob = json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+@dataclass
+class TrajectoryStep:
+    span_id: str
+    parent_span_id: str
+    kind: str
+    name: str
+    level: str
+    status: str
+    tool_calls: list[str] = field(default_factory=list)
+    output: Any = None
+
+
+@dataclass
+class Trajectory:
+    trace_id: str
+    agent_run_id: str
+    steps: list[TrajectoryStep] = field(default_factory=list)
+
+    def to_json(self) -> dict:
+        return {
+            "trace_id": self.trace_id,
+            "agent_run_id": self.agent_run_id,
+            "steps": [asdict(s) for s in self.steps],
+        }
+
+
+def build_trajectory(spans: list[dict]) -> Trajectory:
+    """Build a Trajectory from ordered ClickHouse span rows (ascending start_time)."""
+    trace_id = spans[0].get("trace_id", "") if spans else ""
+    run_id = ""
+    steps: list[TrajectoryStep] = []
+    for s in spans:
+        is_root = s.get("parent_span_id", "") == "" or s.get("is_app_root")
+        if not run_id and is_root:
+            run_id = s.get("agent_run_id", "") or trace_id
+        level = s.get("level", "DEFAULT")
+        steps.append(
+            TrajectoryStep(
+                span_id=s.get("span_id", ""),
+                parent_span_id=s.get("parent_span_id", ""),
+                kind=step_kind(s.get("type", "")),
+                name=s.get("name", ""),
+                level=level,
+                status="error" if level == "ERROR" else "ok",
+                tool_calls=list(s.get("tool_call_names") or []),
+                output=s.get("output"),
+            )
+        )
+    return Trajectory(trace_id=trace_id, agent_run_id=run_id or trace_id, steps=steps)
+
+
+def tool_sequence(traj: Trajectory) -> list[str]:
+    """The ordered tool names the agent actually executed (TOOL-type spans)."""
+    return [st.name for st in traj.steps if st.kind == "tool"]
+
+
+def erroring_steps(traj: Trajectory) -> list[str]:
+    return [st.name for st in traj.steps if st.level == "ERROR"]
+
+
+def tools_satisfied(mode: str, produced: list[str], reference: list[str]) -> tuple[bool, list[str], list[str]]:
+    """agentevals match modes over the tool sequence. Returns (ok, missing, extra)."""
+    missing = [t for t in reference if t not in produced]
+    extra = [t for t in produced if t not in reference]
+    if mode == "strict":
+        ok = produced == reference
+    elif mode == "unordered":
+        ok = sorted(produced) == sorted(reference)
+    elif mode == "subset":          # produced calls no tools beyond the reference set
+        ok = len(extra) == 0
+    else:                            # superset (default): every reference tool is present
+        ok = len(missing) == 0
+    return ok, missing, extra

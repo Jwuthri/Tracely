@@ -1,0 +1,18 @@
+# Shared image for backend (API), worker, and the one-shot migrate job.
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN pip install --no-cache-dir uv
+
+WORKDIR /app
+# workspace metadata + lockfile first (better layer caching)
+COPY pyproject.toml uv.lock ./
+COPY backend ./backend
+COPY workers ./workers
+COPY sdk ./sdk
+COPY scripts ./scripts
+RUN uv sync --frozen --all-packages
+
+# put the venv on PATH so `uvicorn` / `celery` / `alembic` / `python` resolve directly
+ENV PATH="/app/.venv/bin:${PATH}"
+EXPOSE 8000

@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Hanken Grotesk";
+  --font-mono: "JetBrains Mono";
+  --font-display: "Bricolage Grotesque";
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    background-color: #090b10;
+    background-image:
+      radial-gradient(1000px 560px at 8% -10%, rgba(34, 211, 238, 0.07), transparent 60%),
+      radial-gradient(820px 520px at 102% -6%, rgba(122, 162, 255, 0.05), transparent 55%);
+    background-attachment: fixed;
+  }
+  ::selection {
+    background: rgba(34, 211, 238, 0.25);
+    color: #d6fbff;
+  }
+  ::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1d2434;
+    border-radius: 9px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #2b3448;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer utilities {
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+    background-size: 46px 46px;
+    background-position: -1px -1px;
+  }
+  .card {
+    @apply rounded-xl border border-line bg-ink-800/70 backdrop-blur-sm;
+  }
+  .hairline {
+    @apply border-b border-line/70;
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+  /* staggered list reveal: set style={{animationDelay}} on items with .reveal */
+  .reveal {
+    @apply animate-fadeup;
+  }
+}
