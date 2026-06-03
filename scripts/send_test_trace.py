@@ -10,7 +10,12 @@ import time
 import urllib.request
 
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
-from opentelemetry.proto.common.v1.common_pb2 import AnyValue, InstrumentationScope, KeyValue
+from opentelemetry.proto.common.v1.common_pb2 import (
+    AnyValue,
+    ArrayValue,
+    InstrumentationScope,
+    KeyValue,
+)
 from opentelemetry.proto.resource.v1.resource_pb2 import Resource
 from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Span
 
@@ -26,15 +31,34 @@ def kv(k: str, v) -> KeyValue:
     return KeyValue(key=k, value=AnyValue(string_value=str(v)))
 
 
+def kv_arr(k: str, items) -> KeyValue:
+    return KeyValue(
+        key=k,
+        value=AnyValue(array_value=ArrayValue(values=[AnyValue(string_value=str(x)) for x in items])),
+    )
+
+
 def main() -> None:
-    # FIXED=1 -> the "fixed" run: same agent/input, but get_weather SUCCEEDS (no error).
-    # Use it to demo a regression case replaying PASS after the failure is fixed.
+    # Three demo runs of the same agent/input:
+    #   default   -> get_weather ERRORS                 (explicit failure)
+    #   FIXED=1   -> get_weather SUCCEEDS               (the fix; gate PASS)
+    #   SILENT=1  -> model requests get_weather but it NEVER runs  (SILENT failure:
+    #                no error span, but the requested tool was not executed)
     fixed = os.environ.get("FIXED", "") not in ("", "0", "false")
-    # Deterministic base time so re-sending the same demo trace dedups in ClickHouse
-    # (ReplacingMergeTree's sort key includes start_time). Real spans are emitted once.
-    now = 1_717_400_000_000_000_000 + (1_000_000_000 if fixed else 0)
-    trace_id = (0xF0FFEE if fixed else 0xC0FFEE).to_bytes(16, "big")
+    silent = os.environ.get("SILENT", "") not in ("", "0", "false")
+    env = os.environ.get("ENV", "")  # e.g. "ci" for a CI run; empty -> prod
+
+    # Deterministic base time so re-sending dedups; distinct trace id per variant/env.
+    base = 0x511EE7 if silent else (0xF0FFEE if fixed else 0xC0FFEE)
+    now = 1_717_400_000_000_000_000 + (1_000_000_000 if fixed else 2_000_000_000)
+    trace_id = (base + (0x010000 if env == "ci" else 0)).to_bytes(16, "big")
     root_id, llm_id, tool_id = (1).to_bytes(8, "big"), (2).to_bytes(8, "big"), (3).to_bytes(8, "big")
+
+    answer = (
+        "Sorry, I couldn't fetch the weather right now."
+        if (not fixed and not silent)
+        else "It's 64°F and sunny in San Francisco."
+    )
 
     root = Span(name="planner", trace_id=trace_id, span_id=root_id,
                 start_time_unix_nano=now, end_time_unix_nano=now + 5_000_000)
@@ -48,23 +72,33 @@ def main() -> None:
                            kv("gen_ai.request.model", "gpt-4o"),
                            kv("gen_ai.usage.input_tokens", 812),
                            kv("gen_ai.usage.output_tokens", 96),
-                           kv("tracely.agent.id", "planner")])
+                           kv("tracely.agent.id", "planner"),
+                           kv("tracely.input", "what's the weather in SF?"),
+                           kv("tracely.output", answer),
+                           kv_arr("tracely.tool_calls", ["get_weather"])])  # model REQUESTS the tool
 
-    tool = Span(name="get_weather", trace_id=trace_id, span_id=tool_id, parent_span_id=root_id,
-                start_time_unix_nano=now + 3_500_000, end_time_unix_nano=now + 4_000_000)
-    if not fixed:
-        tool.status.code = 2  # ERROR — the demo "failure" signal
-        tool.status.message = "upstream timeout"
-    tool.attributes.extend([kv("gen_ai.operation.name", "execute_tool"),
-                            kv("gen_ai.tool.name", "get_weather"),
-                            kv("tracely.agent.id", "planner")])
+    spans = [root, llm]
+    if not silent:
+        tool = Span(name="get_weather", trace_id=trace_id, span_id=tool_id, parent_span_id=root_id,
+                    start_time_unix_nano=now + 3_500_000, end_time_unix_nano=now + 4_000_000)
+        if not fixed:
+            tool.status.code = 2  # ERROR
+            tool.status.message = "upstream timeout"
+        tool.attributes.extend([kv("gen_ai.operation.name", "execute_tool"),
+                                kv("gen_ai.tool.name", "get_weather"),
+                                kv("tracely.agent.id", "planner"),
+                                kv("tracely.output", '{"tempF": 64}')])
+        spans.append(tool)
+
+    if env:
+        for sp in spans:
+            sp.attributes.append(kv("tracely.env", env))
 
     req = ExportTraceServiceRequest(resource_spans=[
         ResourceSpans(
             resource=Resource(attributes=[kv("service.name", "demo"),
                                           kv("telemetry.sdk.language", "python")]),
-            scope_spans=[ScopeSpans(scope=InstrumentationScope(name="demo"),
-                                    spans=[root, llm, tool])],
+            scope_spans=[ScopeSpans(scope=InstrumentationScope(name="demo"), spans=spans)],
         )
     ])
 
@@ -74,9 +108,10 @@ def main() -> None:
         headers={"Content-Type": "application/x-protobuf", "Authorization": f"Bearer {KEY}"},
     )
     resp = urllib.request.urlopen(request)
-    print(f"POST /v1/traces -> {resp.status}")
+    kind = "silent-failure" if silent else ("fixed" if fixed else "failing")
+    suffix = f", env={env}" if env else ""
+    print(f"POST /v1/traces -> {resp.status}  ({kind}{suffix})")
     print(f"trace_id (hex): {trace_id.hex()}")
-    print(f"Read it:  curl -s -H 'Authorization: Bearer {KEY}' {API}/api/traces/{trace_id.hex()}")
 
 
 if __name__ == "__main__":

@@ -126,6 +126,16 @@ def _model_parameters(attrs: dict[str, Any]) -> str:
     return json.dumps(params) if params else ""
 
 
+def _tool_call_names(attrs: dict[str, Any], otype: str) -> list[str]:
+    """Tools the model requested. From `tracely.tool_calls` (array) on any span, else
+    the tool name on a TOOL span."""
+    tc = attrs.get("tracely.tool_calls")
+    if isinstance(tc, list):
+        return [str(x) for x in tc if x]
+    name = _first(attrs, ["gen_ai.tool.name", "tool.name"])
+    return [str(name)] if (otype == TOOL and name) else []
+
+
 def _map_span(resource_attrs: dict[str, Any], scope_name: str, scope_version: str,
               span: Any, project_id: str) -> dict[str, Any]:
     a = {**resource_attrs, **_attrs(list(span.attributes))}
@@ -178,7 +188,7 @@ def _map_span(resource_attrs: dict[str, Any], scope_name: str, scope_version: st
         "model_id": str(_first(a, ["gen_ai.response.model", "gen_ai.request.model", "llm.model_name", "tracely.model"]) or ""),
         "model_parameters": _model_parameters(a),
         "usage_details": _usage(a),
-        "tool_call_names": [str(_first(a, ["gen_ai.tool.name", "tool.name"]))] if otype == TOOL and _first(a, ["gen_ai.tool.name", "tool.name"]) else [],
+        "tool_call_names": _tool_call_names(a, otype),
         # io
         "input": _to_str(_first(a, ["tracely.input", "langfuse.observation.input", "input.value", "gen_ai.prompt", "input"])),
         "output": _to_str(_first(a, ["tracely.output", "langfuse.observation.output", "output.value", "gen_ai.completion", "output"])),

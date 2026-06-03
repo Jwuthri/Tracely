@@ -30,6 +30,12 @@ async def stats(project_id: str = Depends(get_project_id)) -> dict:
             parameters={"p": project_id},
         ).result_rows
         failing = int(f[0][0]) if f else 0
+        af = c.query(
+            "SELECT uniqExact(trace_id) FROM scores FINAL WHERE project_id = {p:String} "
+            "AND source = 'EVAL' AND verdict = 'FAIL'",
+            parameters={"p": project_id},
+        ).result_rows
+        auto_failures = int(af[0][0]) if af else 0
         with SyncSessionLocal() as s:
             agents = s.execute(
                 select(func.count()).select_from(Agent).where(Agent.project_id == project_id)
@@ -37,7 +43,8 @@ async def stats(project_id: str = Depends(get_project_id)) -> dict:
             cases = s.execute(
                 select(func.count()).select_from(EvaluationCase).where(EvaluationCase.project_id == project_id)
             ).scalar() or 0
-        return {"traces": traces, "spans": spans, "failing_traces": failing, "agents": int(agents), "cases": int(cases)}
+        return {"traces": traces, "spans": spans, "failing_traces": failing,
+                "auto_failures": auto_failures, "agents": int(agents), "cases": int(cases)}
 
     return await run_in_threadpool(work)
 

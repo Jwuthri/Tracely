@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { usePathname } from "next/navigation";
-import { IconActivity, IconGrid, IconShield } from "./icons";
+import { IconActivity, IconGate, IconGrid, IconShield } from "./icons";
 
 const NAV = [
   {
@@ -15,6 +15,10 @@ const NAV = [
   {
     group: "Test",
     items: [{ href: "/cases", label: "Regression cases", Icon: IconShield }],
+  },
+  {
+    group: "Ship",
+    items: [{ href: "/gates", label: "CI gates", Icon: IconGate }],
   },
 ];
 

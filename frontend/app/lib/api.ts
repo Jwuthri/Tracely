@@ -93,3 +93,38 @@ export async function getStats(): Promise<Stats> {
   if (!res.ok) return { traces: 0, spans: 0, failing_traces: 0, agents: 0, cases: 0 };
   return res.json();
 }
+
+export type GateCaseResult = {
+  title: string;
+  verdict: string;
+  candidate_trace_id: string;
+  evaluation_case_id: string;
+  detail: Record<string, unknown>;
+};
+
+export type GateRun = {
+  id: string;
+  agent: string | null;
+  env: string;
+  git_ref: string;
+  pr_number: number | null;
+  status: string;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  created_at: string | null;
+  cases?: GateCaseResult[];
+};
+
+export async function getGates(): Promise<GateRun[]> {
+  const res = await fetch(`${API}/api/gates`, { headers, cache: "no-store" });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function getGate(gateId: string): Promise<GateRun | null> {
+  const res = await fetch(`${API}/api/gates/${gateId}`, { headers, cache: "no-store" });
+  if (!res.ok) return null;
+  return res.json();
+}

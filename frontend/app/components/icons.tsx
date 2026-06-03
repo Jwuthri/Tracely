@@ -95,3 +95,18 @@ export const IconError = (p: P) => (
     <path d="M12 8v4m0 4h.01" />
   </svg>
 );
+
+export const IconCopy = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15V5a2 2 0 0 1 2-2h8" />
+  </svg>
+);
+
+export const IconGate = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M5 4v16" />
+    <path d="M5 5h11l-2 3 2 3H5" />
+    <path d="m16 16 2 2 4-4" />
+  </svg>
+);

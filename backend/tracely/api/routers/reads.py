@@ -30,7 +30,17 @@ async def list_traces(limit: int = 20, project_id: str = Depends(get_project_id)
         """,
         parameters={"p": project_id, "n": limit},
     )
-    return [dict(zip(res.column_names, row)) for row in res.result_rows]
+    rows = [dict(zip(res.column_names, row)) for row in res.result_rows]
+    # attach the auto-eval verdict per trace
+    ev = await client.query(
+        "SELECT trace_id, maxIf(1, verdict = 'FAIL') AS fail FROM scores FINAL "
+        "WHERE project_id = {p:String} AND source = 'EVAL' GROUP BY trace_id",
+        parameters={"p": project_id},
+    )
+    verdict = {r[0]: ("FAIL" if r[1] else "PASS") for r in ev.result_rows}
+    for r in rows:
+        r["eval"] = verdict.get(r["trace_id"])
+    return rows
 
 
 @router.get("/traces/{trace_id}")
@@ -73,4 +83,14 @@ async def get_trace(trace_id: str, project_id: str = Depends(get_project_id)) ->
                 output=d["output"],
             )
         )
-    return TraceDetail(trace_id=trace_id, spans=spans)
+    sres = await client.query(
+        "SELECT name, evaluation_level, observation_id, value, verdict, comment, data_type "
+        "FROM scores FINAL WHERE project_id = {p:String} AND trace_id = {t:String} AND source = 'EVAL' "
+        "ORDER BY evaluation_level, name",
+        parameters={"p": project_id, "t": trace_id},
+    )
+    scores = [dict(zip(sres.column_names, row)) for row in sres.result_rows]
+    eval_verdict = (
+        "FAIL" if any(s["verdict"] == "FAIL" for s in scores) else ("PASS" if scores else None)
+    )
+    return TraceDetail(trace_id=trace_id, spans=spans, scores=scores, eval_verdict=eval_verdict)

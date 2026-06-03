@@ -1,5 +1,6 @@
 import { getCase } from "../../lib/api";
 import { ReplayControls } from "../../components/ReplayControls";
+import { CopyId } from "../../components/CopyId";
 import { Badge, statusVariant, TypeChip, verdictVariant } from "../../components/ui";
 import { IconArrowLeft } from "../../components/icons";
 
@@ -36,7 +37,7 @@ export default async function CasePage({ params }: { params: Promise<{ caseId: s
         <Meta k="Level" v={c.level} />
         <Meta k="Match mode" v={c.match_mode} />
         <Meta k="Origin" v={c.origin} />
-        <Meta k="Source" v={`${c.source_trace_id.slice(0, 10)}…`} href={`/traces/${c.source_trace_id}`} />
+        <Meta k="Source trace" v={<CopyId value={c.source_trace_id} label="source trace" chars={14} />} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -108,9 +109,9 @@ export default async function CasePage({ params }: { params: Promise<{ caseId: s
                   className="grid grid-cols-[70px_1fr_auto] items-center gap-3 border-b border-line/50 px-4 py-2.5 text-[12px] last:border-0"
                 >
                   <Badge variant={verdictVariant(r.verdict)}>{r.verdict}</Badge>
-                  <span className="truncate font-mono text-[11.5px] text-fg-muted">
-                    {r.candidate_trace_id.slice(0, 16)}…
-                    {errs.length > 0 && <span className="ml-2 text-fail">errors: {errs.join(", ")}</span>}
+                  <span className="flex min-w-0 items-center gap-2 font-mono text-[11.5px] text-fg-muted">
+                    <CopyId value={r.candidate_trace_id} label="trace id" chars={16} />
+                    {errs.length > 0 && <span className="truncate text-fail">errors: {errs.join(", ")}</span>}
                   </span>
                   <span className="font-mono text-[11px] text-fg-faint">{r.created_at?.slice(11, 19)}</span>
                 </div>
@@ -129,7 +130,7 @@ function Head({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Meta({ k, v, href }: { k: string; v: string; href?: string }) {
+function Meta({ k, v, href }: { k: string; v: React.ReactNode; href?: string }) {
   const inner = (
     <div className="px-4 py-3">
       <div className="font-mono text-[10px] uppercase tracking-wider text-fg-faint">{k}</div>

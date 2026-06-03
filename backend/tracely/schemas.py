@@ -42,3 +42,5 @@ class SpanOut(BaseModel):
 class TraceDetail(BaseModel):
     trace_id: str
     spans: list[SpanOut]
+    scores: list[dict] = []
+    eval_verdict: str | None = None

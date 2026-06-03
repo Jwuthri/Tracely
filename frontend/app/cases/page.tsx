@@ -1,5 +1,7 @@
 import { getCases } from "../lib/api";
 import { Badge, statusVariant, verdictVariant } from "../components/ui";
+import { CopyId } from "../components/CopyId";
+import { RowLink } from "../components/RowLink";
 import { IconChevron } from "../components/icons";
 
 export default async function CasesPage() {
@@ -30,15 +32,16 @@ export default async function CasesPage() {
           </div>
         ) : (
           cases.map((c, i) => (
-            <a
+            <RowLink
               key={c.id}
               href={`/cases/${c.id}`}
               className="group grid grid-cols-[1fr_130px_120px_90px_36px] items-center gap-3 border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-white/[0.025]"
-              style={{ animationDelay: `${120 + i * 25}ms` }}
             >
-              <span className="flex min-w-0 flex-col">
+              <span className="flex min-w-0 flex-col gap-0.5">
                 <span className="truncate text-[13.5px] text-fg">{c.title || "case"}</span>
-                <span className="font-mono text-[10.5px] text-fg-faint">src {c.source_trace_id.slice(0, 12)}…</span>
+                <span className="flex items-center gap-1.5 font-mono text-[10.5px] text-fg-faint">
+                  src <CopyId value={c.source_trace_id} label="source trace" />
+                </span>
               </span>
               <span>
                 <Badge variant={statusVariant(c.status)} dot>
@@ -54,7 +57,7 @@ export default async function CasesPage() {
               </span>
               <span>{c.last_verdict ? <Badge variant={verdictVariant(c.last_verdict)}>{c.last_verdict}</Badge> : <span className="font-mono text-[11px] text-fg-faint">—</span>}</span>
               <IconChevron className="h-4 w-4 justify-self-end text-fg-faint transition-colors group-hover:text-signal" />
-            </a>
+            </RowLink>
           ))
         )}
       </div>

@@ -1,6 +1,7 @@
 import { getTrace } from "../../lib/api";
 import { PromoteButton } from "../../components/PromoteButton";
 import { Waterfall } from "../../components/Waterfall";
+import { CopyId } from "../../components/CopyId";
 import { Badge } from "../../components/ui";
 import { IconArrowLeft } from "../../components/icons";
 
@@ -29,8 +30,8 @@ export default async function TracePage({ params }: { params: Promise<{ traceId:
               <h1 className="font-display text-[24px] font-extrabold tracking-tight">{root?.name ?? "trace"}</h1>
               {hasError ? <Badge variant="fail" dot>error</Badge> : <Badge variant="ok" dot>ok</Badge>}
             </div>
-            <div className="mt-2 flex items-center gap-4 font-mono text-[11.5px] text-fg-faint">
-              <span>{traceId.slice(0, 22)}…</span>
+            <div className="mt-2.5 flex flex-wrap items-center gap-3 font-mono text-[11.5px] text-fg-faint">
+              <CopyId value={traceId} label="trace id" chars={22} />
               <span>{spans.length} spans</span>
               <span>{totalMs < 1000 ? `${Math.round(totalMs)}ms` : `${(totalMs / 1000).toFixed(2)}s`}</span>
             </div>

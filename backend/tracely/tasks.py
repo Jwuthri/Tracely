@@ -42,7 +42,22 @@ def ingest_otlp_blob(self, project_id: str, key: str, content_type: str) -> dict
         client = clickhouse.get_client()
         clickhouse.insert_rows(client, "events", EVENT_COLUMNS, to_rows(events))
         log.info("ingested", project_id=project_id, key=key, events=len(events))
+
+        # Online evaluation: fire (debounced) once per trace so late spans settle first.
+        for trace_id in {ev.get("trace_id") for ev in events if ev.get("trace_id")}:
+            evaluate_run_task.apply_async((project_id, trace_id), countdown=4)
+
         return {"events": len(events)}
     except Exception as exc:  # transient failures -> retry with backoff
         log.warning("ingest_failed", key=key, error=str(exc))
+        raise self.retry(exc=exc)
+
+
+@celery_app.task(name="tracely.evaluate_run", bind=True, max_retries=3, default_retry_delay=3)
+def evaluate_run_task(self, project_id: str, trace_id: str) -> dict:
+    from tracely import eval_runner
+
+    try:
+        return eval_runner.evaluate_run(project_id, trace_id)
+    except Exception as exc:
         raise self.retry(exc=exc)

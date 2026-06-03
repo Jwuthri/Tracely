@@ -37,6 +37,13 @@ class Settings(BaseSettings):
 
     ingestion_delay_seconds: int = 0
 
+    # online evaluation
+    eval_latency_budget_ms: int = 60000
+    # optional LLM-as-judge (auto quality eval); skipped if no key is set
+    llm_judge_api_key: str = ""
+    llm_judge_base_url: str = "https://api.openai.com/v1"
+    llm_judge_model: str = "gpt-4o-mini"
+
 
 @lru_cache
 def get_settings() -> Settings:

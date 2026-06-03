@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { useState } from "react";
 import type { SpanOut } from "../lib/api";
+import { CopyId } from "./CopyId";
 import { IconError } from "./icons";
 import { Badge, TypeChip } from "./ui";
 
@@ -116,8 +117,8 @@ export function Waterfall({ spans }: { spans: SpanOut[] }) {
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-2.5">
-      <dt className="text-fg-faint">{k}</dt>
-      <dd className="truncate font-mono text-fg">{v}</dd>
+      <dt className="shrink-0 text-fg-faint">{k}</dt>
+      <dd className="min-w-0 font-mono text-fg">{v}</dd>
     </div>
   );
 }
@@ -163,10 +164,12 @@ function SpanPanel({ span }: { span: SpanOut | null }) {
       <dl className="divide-y divide-line/50 text-[12px]">
         <Row k="Duration" v={fmtMs(span.latency_ms)} />
         {span.model_id && <Row k="Model" v={span.model_id} />}
-        {span.turn_id && <Row k="Turn" v={span.turn_id} />}
-        {span.agent_run_id && <Row k="Run" v={`${span.agent_run_id.slice(0, 16)}…`} />}
-        {span.status_message && <Row k="Status" v={<span className="text-fail">{span.status_message}</span>} />}
-        <Row k="Span" v={span.span_id} />
+        {span.turn_id && <Row k="Turn id" v={<CopyId value={span.turn_id} label="turn id" />} />}
+        {span.agent_run_id && <Row k="Run id" v={<CopyId value={span.agent_run_id} label="run id" />} />}
+        {span.status_message && (
+          <Row k="Status" v={<span className="text-fail">{span.status_message}</span>} />
+        )}
+        <Row k="Span id" v={<CopyId value={span.span_id} label="span id" />} />
       </dl>
       {input && <Block title="Input" body={input} />}
       {output && <Block title="Output" body={output} />}

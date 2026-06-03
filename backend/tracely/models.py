@@ -163,3 +163,35 @@ class CaseReplay(Base):
     verdict: Mapped[str] = mapped_column(String(8))  # PASS|FAIL|SKIP
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── CI/CD gate (run an agent's regression suite on a PR -> PASS/FAIL) ─────────────
+
+
+class GateRun(Base):
+    __tablename__ = "gate_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    env: Mapped[str] = mapped_column(String(16), default="ci")
+    git_ref: Mapped[str] = mapped_column(String(80), default="")
+    pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(12), default="RUNNING")  # RUNNING|PASS|FAIL|ERROR
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    passed: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    skipped: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class GateCase(Base):
+    __tablename__ = "gate_cases"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    gate_run_id: Mapped[str] = mapped_column(ForeignKey("gate_runs.id"), index=True)
+    evaluation_case_id: Mapped[str] = mapped_column(ForeignKey("evaluation_cases.id"))
+    candidate_trace_id: Mapped[str] = mapped_column(String(64), default="")
+    verdict: Mapped[str] = mapped_column(String(8))  # PASS|FAIL|SKIP
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)

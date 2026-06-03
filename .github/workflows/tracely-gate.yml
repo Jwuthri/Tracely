@@ -1,0 +1,39 @@
+name: Tracely regression gate
+
+# Gate every PR on the agent's regression suite: a PR that changes the agent must not
+# reproduce any promoted production failure (fail-to-pass), or the check fails.
+
+on:
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 1) Run YOUR agent's CI harness so it emits traces to Tracely for this PR,
+      #    tagged tracely.env=ci (ideally tracely.agent.version=${{ github.sha }}).
+      #    Replace this step with your real run/eval. For the demo we emit a sample:
+      - name: Emit CI traces (demo)
+        env:
+          TRACELY_API: ${{ secrets.TRACELY_API }}
+          TRACELY_KEY: ${{ secrets.TRACELY_KEY }}
+          ENV: ci
+          FIXED: "1" # the fixed run -> gate should PASS (drop FIXED to see it FAIL)
+        run: |
+          pip install opentelemetry-proto
+          python scripts/send_test_trace.py
+
+      # 2) Gate the PR on the agent's regression suite (exits non-zero on FAIL).
+      - name: Tracely gate
+        env:
+          TRACELY_API: ${{ secrets.TRACELY_API }}
+          TRACELY_KEY: ${{ secrets.TRACELY_KEY }}
+          TRACELY_AGENT: planner
+          PR_NUMBER: ${{ github.event.number }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: python scripts/tracely_gate.py
