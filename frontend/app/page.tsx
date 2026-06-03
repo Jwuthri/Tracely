@@ -30,12 +30,18 @@ export default async function Dashboard() {
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Traces" value={stats.traces} sub={`${stats.spans} spans`} delay={0} />
-        <StatCard label="Agents" value={stats.agents} sub="auto-registered" delay={60} />
         <StatCard
-          label="Failing traces"
-          value={stats.failing_traces}
-          accent={stats.failing_traces ? "text-fail" : "text-fg"}
-          sub="level=ERROR signals"
+          label="Failure clusters"
+          value={stats.open_clusters}
+          accent={stats.open_clusters ? "text-warn" : "text-fg"}
+          sub="open · to triage"
+          delay={60}
+        />
+        <StatCard
+          label="Auto failures"
+          value={stats.auto_failures}
+          accent={stats.auto_failures ? "text-fail" : "text-fg"}
+          sub="auto-detected, incl. silent"
           delay={120}
         />
         <StatCard label="Regression cases" value={stats.cases} accent="text-signal" sub="forever-running" delay={180} />

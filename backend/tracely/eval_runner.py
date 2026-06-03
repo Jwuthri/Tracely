@@ -53,6 +53,18 @@ def evaluate_run(project_id: str, trace_id: str) -> dict:
             r.data_type, r.value, "", r.verdict, r.level, r.comment, now, now,
         ])
     clickhouse.insert_rows(client, "scores", _SCORE_COLS, rows)
-    failures = sum(1 for r in results if r.verdict == "FAIL")
-    log.info("evaluated", trace_id=trace_id, scores=len(results), failures=failures)
-    return {"scores": len(results), "failures": failures}
+
+    # Cluster this run with similar failures (cheap structural signature).
+    fail_results = [r for r in results if r.verdict == "FAIL"]
+    if fail_results and root.get("agent_id"):
+        try:
+            from tracely import cluster
+            from tracely.db import SyncSessionLocal
+
+            with SyncSessionLocal() as s:
+                cluster.cluster_failure(s, project_id, root["agent_id"], trace_id, fail_results, spans)
+        except Exception as exc:  # clustering must never break ingestion
+            log.warning("cluster_failed", trace_id=trace_id, error=str(exc))
+
+    log.info("evaluated", trace_id=trace_id, scores=len(results), failures=len(fail_results))
+    return {"scores": len(results), "failures": len(fail_results)}

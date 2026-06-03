@@ -10,6 +10,17 @@ export type TraceRow = {
   root_name: string;
   agent_id: string;
   has_error: number;
+  eval?: string | null;
+};
+
+export type EvalScore = {
+  name: string;
+  evaluation_level: string;
+  observation_id: string | null;
+  value: number | null;
+  verdict: string;
+  comment: string;
+  data_type: string;
 };
 
 export type SpanOut = {
@@ -37,9 +48,16 @@ export async function getTraces(): Promise<TraceRow[]> {
   return res.json();
 }
 
-export async function getTrace(traceId: string): Promise<{ trace_id: string; spans: SpanOut[] }> {
+export type TraceDetailData = {
+  trace_id: string;
+  spans: SpanOut[];
+  scores: EvalScore[];
+  eval_verdict: string | null;
+};
+
+export async function getTrace(traceId: string): Promise<TraceDetailData> {
   const res = await fetch(`${API}/api/traces/${traceId}`, { headers, cache: "no-store" });
-  if (!res.ok) return { trace_id: traceId, spans: [] };
+  if (!res.ok) return { trace_id: traceId, spans: [], scores: [], eval_verdict: null };
   return res.json();
 }
 
@@ -84,13 +102,44 @@ export type Stats = {
   traces: number;
   spans: number;
   failing_traces: number;
+  auto_failures: number;
+  open_clusters: number;
   agents: number;
   cases: number;
 };
 
 export async function getStats(): Promise<Stats> {
   const res = await fetch(`${API}/api/stats`, { headers, cache: "no-store" });
-  if (!res.ok) return { traces: 0, spans: 0, failing_traces: 0, agents: 0, cases: 0 };
+  if (!res.ok)
+    return { traces: 0, spans: 0, failing_traces: 0, auto_failures: 0, open_clusters: 0, agents: 0, cases: 0 };
+  return res.json();
+}
+
+export type ClusterMember = { trace_id: string; is_medoid: boolean };
+
+export type FailureCluster = {
+  id: string;
+  agent: string | null;
+  label: string;
+  taxonomy: string;
+  count: number;
+  status: string;
+  candidate_case_id: string | null;
+  signature: string;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  members?: ClusterMember[];
+};
+
+export async function getClusters(): Promise<FailureCluster[]> {
+  const res = await fetch(`${API}/api/clusters`, { headers, cache: "no-store" });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function getCluster(id: string): Promise<FailureCluster | null> {
+  const res = await fetch(`${API}/api/clusters/${id}`, { headers, cache: "no-store" });
+  if (!res.ok) return null;
   return res.json();
 }
 

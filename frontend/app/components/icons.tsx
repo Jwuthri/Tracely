@@ -110,3 +110,10 @@ export const IconGate = (p: P) => (
     <path d="m16 16 2 2 4-4" />
   </svg>
 );
+
+export const IconLayers = (p: P) => (
+  <svg {...base(p)}>
+    <path d="m12 3 9 5-9 5-9-5 9-5Z" />
+    <path d="m3 13 9 5 9-5" />
+  </svg>
+);

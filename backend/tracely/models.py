@@ -195,3 +195,35 @@ class GateCase(Base):
     candidate_trace_id: Mapped[str] = mapped_column(String(64), default="")
     verdict: Mapped[str] = mapped_column(String(8))  # PASS|FAIL|SKIP
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+# ── Failure clustering (group similar auto-detected failures) ─────────────────────
+
+
+class FailureCluster(Base):
+    __tablename__ = "failure_clusters"
+    __table_args__ = (
+        UniqueConstraint("project_id", "agent_id", "cluster_key", name="uq_cluster_project_agent_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    cluster_key: Mapped[str] = mapped_column(String(64), index=True)  # sha256 of the signature
+    label: Mapped[str] = mapped_column(String(256), default="")
+    taxonomy: Mapped[str] = mapped_column(String(64), default="")
+    signature: Mapped[str] = mapped_column(String(2000), default="")
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="OPEN")  # OPEN|PROMOTED|IGNORED|MERGED
+    candidate_case_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClusterMember(Base):
+    __tablename__ = "cluster_members"
+
+    cluster_id: Mapped[str] = mapped_column(ForeignKey("failure_clusters.id"), primary_key=True)
+    trace_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    is_medoid: Mapped[bool] = mapped_column(Boolean, default=False)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

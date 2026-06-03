@@ -51,7 +51,12 @@ def main() -> None:
     # Deterministic base time so re-sending dedups; distinct trace id per variant/env.
     base = 0x511EE7 if silent else (0xF0FFEE if fixed else 0xC0FFEE)
     now = 1_717_400_000_000_000_000 + (1_000_000_000 if fixed else 2_000_000_000)
-    trace_id = (base + (0x010000 if env == "ci" else 0)).to_bytes(16, "big")
+    if os.environ.get("RANDOM", "") not in ("", "0", "false"):
+        import secrets
+
+        trace_id = secrets.token_bytes(16)  # a distinct failing run (for cluster demos)
+    else:
+        trace_id = (base + (0x010000 if env == "ci" else 0)).to_bytes(16, "big")
     root_id, llm_id, tool_id = (1).to_bytes(8, "big"), (2).to_bytes(8, "big"), (3).to_bytes(8, "big")
 
     answer = (

@@ -9,6 +9,7 @@ const LABELS: Record<string, string> = {
   traces: "Traces",
   cases: "Regression cases",
   gates: "CI gates",
+  clusters: "Failure clusters",
 };
 
 function crumbs(path: string) {

@@ -50,7 +50,15 @@ export default async function TracesPage() {
                 <span className="truncate text-[13.5px] text-fg">{t.root_name || "trace"}</span>
                 <CopyId value={t.trace_id} label="trace id" />
               </span>
-              <span>{t.has_error ? <Badge variant="fail" dot>error</Badge> : <Badge variant="ok" dot>ok</Badge>}</span>
+              <span>
+                {t.has_error ? (
+                  <Badge variant="fail" dot>error</Badge>
+                ) : t.eval === "FAIL" ? (
+                  <Badge variant="fail" dot>failing</Badge>
+                ) : (
+                  <Badge variant="ok" dot>ok</Badge>
+                )}
+              </span>
               <span className="text-right font-mono text-[12px] text-fg-muted">{t.spans}</span>
               <span className="text-right font-mono text-[11.5px] text-fg-faint">{ago(t.ts)}</span>
               <IconChevron className="h-4 w-4 justify-self-end text-fg-faint transition-colors group-hover:text-signal" />

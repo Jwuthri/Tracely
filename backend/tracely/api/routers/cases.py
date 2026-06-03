@@ -11,7 +11,7 @@ from starlette.concurrency import run_in_threadpool
 from tracely import clickhouse, regression
 from tracely.api.auth import get_project_id
 from tracely.db import SyncSessionLocal
-from tracely.models import Agent, CaseReplay, EvaluationCase
+from tracely.models import Agent, CaseReplay, EvaluationCase, FailureCluster
 
 router = APIRouter(prefix="/api")
 
@@ -32,7 +32,7 @@ async def stats(project_id: str = Depends(get_project_id)) -> dict:
         failing = int(f[0][0]) if f else 0
         af = c.query(
             "SELECT uniqExact(trace_id) FROM scores FINAL WHERE project_id = {p:String} "
-            "AND source = 'EVAL' AND verdict = 'FAIL'",
+            "AND source = 'EVAL' AND verdict = 'FAIL' AND evaluation_case_id = ''",
             parameters={"p": project_id},
         ).result_rows
         auto_failures = int(af[0][0]) if af else 0
@@ -43,8 +43,14 @@ async def stats(project_id: str = Depends(get_project_id)) -> dict:
             cases = s.execute(
                 select(func.count()).select_from(EvaluationCase).where(EvaluationCase.project_id == project_id)
             ).scalar() or 0
+            open_clusters = s.execute(
+                select(func.count()).select_from(FailureCluster).where(
+                    FailureCluster.project_id == project_id, FailureCluster.status == "OPEN"
+                )
+            ).scalar() or 0
         return {"traces": traces, "spans": spans, "failing_traces": failing,
-                "auto_failures": auto_failures, "agents": int(agents), "cases": int(cases)}
+                "auto_failures": auto_failures, "open_clusters": int(open_clusters),
+                "agents": int(agents), "cases": int(cases)}
 
     return await run_in_threadpool(work)
 

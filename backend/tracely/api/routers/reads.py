@@ -34,7 +34,7 @@ async def list_traces(limit: int = 20, project_id: str = Depends(get_project_id)
     # attach the auto-eval verdict per trace
     ev = await client.query(
         "SELECT trace_id, maxIf(1, verdict = 'FAIL') AS fail FROM scores FINAL "
-        "WHERE project_id = {p:String} AND source = 'EVAL' GROUP BY trace_id",
+        "WHERE project_id = {p:String} AND source = 'EVAL' AND evaluation_case_id = '' GROUP BY trace_id",
         parameters={"p": project_id},
     )
     verdict = {r[0]: ("FAIL" if r[1] else "PASS") for r in ev.result_rows}
@@ -86,6 +86,7 @@ async def get_trace(trace_id: str, project_id: str = Depends(get_project_id)) ->
     sres = await client.query(
         "SELECT name, evaluation_level, observation_id, value, verdict, comment, data_type "
         "FROM scores FINAL WHERE project_id = {p:String} AND trace_id = {t:String} AND source = 'EVAL' "
+        "AND evaluation_case_id = '' "  # online evals only (exclude regression/gate verdicts)
         "ORDER BY evaluation_level, name",
         parameters={"p": project_id, "t": trace_id},
     )

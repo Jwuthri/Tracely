@@ -1,14 +1,16 @@
 import { getTrace } from "../../lib/api";
 import { PromoteButton } from "../../components/PromoteButton";
 import { Waterfall } from "../../components/Waterfall";
+import { Evaluations } from "../../components/Evaluations";
 import { CopyId } from "../../components/CopyId";
 import { Badge } from "../../components/ui";
 import { IconArrowLeft } from "../../components/icons";
 
 export default async function TracePage({ params }: { params: Promise<{ traceId: string }> }) {
   const { traceId } = await params;
-  const { spans } = await getTrace(traceId);
+  const { spans, scores, eval_verdict } = await getTrace(traceId);
   const hasError = spans.some((s) => s.level === "ERROR");
+  const failing = hasError || eval_verdict === "FAIL";
   const root = spans.find((s) => s.parent_span_id === "") ?? spans[0];
 
   const durations = spans
@@ -28,7 +30,11 @@ export default async function TracePage({ params }: { params: Promise<{ traceId:
           <div>
             <div className="flex items-center gap-3">
               <h1 className="font-display text-[24px] font-extrabold tracking-tight">{root?.name ?? "trace"}</h1>
-              {hasError ? <Badge variant="fail" dot>error</Badge> : <Badge variant="ok" dot>ok</Badge>}
+              {failing ? (
+                <Badge variant="fail" dot>{hasError ? "error" : "failing"}</Badge>
+              ) : (
+                <Badge variant="ok" dot>ok</Badge>
+              )}
             </div>
             <div className="mt-2.5 flex flex-wrap items-center gap-3 font-mono text-[11.5px] text-fg-faint">
               <CopyId value={traceId} label="trace id" chars={22} />
@@ -36,11 +42,15 @@ export default async function TracePage({ params }: { params: Promise<{ traceId:
               <span>{totalMs < 1000 ? `${Math.round(totalMs)}ms` : `${(totalMs / 1000).toFixed(2)}s`}</span>
             </div>
           </div>
-          {hasError && <PromoteButton traceId={traceId} />}
+          {failing && <PromoteButton traceId={traceId} />}
         </div>
       </header>
 
-      <div className="reveal" style={{ animationDelay: "100ms" }}>
+      <div className="reveal" style={{ animationDelay: "80ms" }}>
+        <Evaluations scores={scores} verdict={eval_verdict} />
+      </div>
+
+      <div className="reveal" style={{ animationDelay: "140ms" }}>
         <Waterfall spans={spans} />
       </div>
     </div>

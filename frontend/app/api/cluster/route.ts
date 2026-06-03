@@ -1,0 +1,15 @@
+import { NextRequest, NextResponse } from "next/server";
+
+const API = process.env.TRACELY_API ?? "http://localhost:8000";
+const KEY = process.env.TRACELY_KEY ?? "tracely_dev_key";
+
+export async function POST(req: NextRequest) {
+  const { clusterId, action } = await req.json();
+  const act = action === "ignore" ? "ignore" : "promote";
+  const r = await fetch(`${API}/api/clusters/${clusterId}/${act}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${KEY}` },
+  });
+  const data = await r.json();
+  return NextResponse.json(data, { status: r.status });
+}
