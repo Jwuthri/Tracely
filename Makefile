@@ -50,6 +50,9 @@ demo-failures: ## seed a mix of failing runs (errors + silent + hallucinations) 
 	@for i in 1 2 3 4 5; do TRACELY_API=$(TRACELY_API) RANDOM=1 HALLUCINATE=1 uv run python scripts/send_test_trace.py; done
 	@echo "seeded — now hit 'Analyze failures' in the UI (or POST /api/clusters/rebuild)"
 
+gate:        ## run the CI/CD regression gate locally for an agent (TRACELY_AGENT=planner)
+	TRACELY_API=$(TRACELY_API) uv run tracely gate $${TRACELY_AGENT:-planner} --env $${GATE_ENV:-ci}
+
 sdk-example: ## emit the demo trace via the Tracely SDK
 	uv run python sdk/example.py
 
