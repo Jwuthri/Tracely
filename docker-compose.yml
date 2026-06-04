@@ -19,6 +19,8 @@ x-app-env: &app-env
   S3_SECRET_ACCESS_KEY: tracely-secret
   S3_BUCKET: tracely-events
   S3_EVENT_PREFIX: events/
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  LLM_JUDGE_API_KEY: ${OPENAI_API_KEY:-}
 
 services:
   # ── infra ────────────────────────────────────────────────────────────────
@@ -41,7 +43,7 @@ services:
       retries: 30
 
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:pg17   # postgres 17 + the `vector` extension
     ports:
       - "5432:5432"
     environment:
@@ -118,6 +120,10 @@ services:
       minio-init:
         condition: service_completed_successfully
     command: ["uvicorn", "tracely.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:                       # editable install -> live source for fast iteration
+      - ./backend:/app/backend
+      - ./workers:/app/workers
+      - ./sdk:/app/sdk
     ports:
       - "${TRACELY_BACKEND_PORT:-8000}:8000"
     healthcheck:
@@ -140,6 +146,10 @@ services:
       minio-init:
         condition: service_completed_successfully
     command: ["celery", "-A", "tracely_workers.worker", "worker", "--pool=solo", "--loglevel=info"]
+    volumes:                       # editable install -> live source for fast iteration
+      - ./backend:/app/backend
+      - ./workers:/app/workers
+      - ./sdk:/app/sdk
 
   frontend:
     image: tracely-frontend

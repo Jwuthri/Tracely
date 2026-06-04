@@ -10,10 +10,20 @@ from starlette.concurrency import run_in_threadpool
 
 from tracely import regression
 from tracely.api.auth import get_project_id
+from tracely.config import settings
 from tracely.db import SyncSessionLocal
 from tracely.models import Agent, ClusterMember, FailureCluster
+from tracely.tasks import rebuild_clusters_task
 
 router = APIRouter(prefix="/api")
+
+
+@router.post("/clusters/rebuild")
+async def rebuild(project_id: str = Depends(get_project_id)) -> dict:
+    if not settings.openai_api_key:
+        raise HTTPException(status_code=400, detail="Set OPENAI_API_KEY to enable embedding + agent analysis")
+    rebuild_clusters_task.delay(project_id)
+    return {"status": "started"}
 
 
 def _cluster_dict(cl: FailureCluster, agent_slug: str | None = None, members: list | None = None) -> dict[str, Any]:
@@ -23,6 +33,10 @@ def _cluster_dict(cl: FailureCluster, agent_slug: str | None = None, members: li
         "agent": agent_slug,
         "label": cl.label,
         "taxonomy": cl.taxonomy,
+        "description": cl.description,
+        "proposed_fix": cl.proposed_fix,
+        "severity": cl.severity,
+        "method": cl.method,
         "count": cl.count,
         "status": cl.status,
         "candidate_case_id": cl.candidate_case_id,
@@ -78,7 +92,9 @@ async def get_cluster(cluster_id: str, project_id: str = Depends(get_project_id)
                 .scalars()
                 .all()
             )
-            members = [{"trace_id": m.trace_id, "is_medoid": m.is_medoid} for m in mem]
+            members = [
+                {"trace_id": m.trace_id, "is_medoid": m.is_medoid, "summary": m.summary} for m in mem
+            ]
             agent = s.get(Agent, cl.agent_id)
             return _cluster_dict(cl, agent.slug if agent else None, members)
 
@@ -99,7 +115,7 @@ async def promote_cluster(cluster_id: str, project_id: str = Depends(get_project
             if not med:
                 return ("err", "cluster has no members")
             try:
-                case = regression.promote_trace(s, project_id, med.trace_id)
+                case = regression.promote_trace(s, project_id, med.trace_id, title=cl.label)
             except regression.NotFound as e:
                 return ("err", str(e))
             cl.status = "PROMOTED"

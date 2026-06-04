@@ -1,4 +1,4 @@
-.PHONY: help infra-up infra-down infra-prune install migrate migrate-ch migrate-pg seed backend workers frontend test send-trace sdk-example fmt
+.PHONY: help infra-up infra-down infra-prune install migrate migrate-ch migrate-pg seed backend workers frontend test send-trace demo-failures sdk-example fmt
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -41,6 +41,14 @@ test:        ## run backend tests
 
 send-trace:  ## post a sample OTLP trace to the running API
 	uv run python scripts/send_test_trace.py
+
+# Override the target when the API is not on :8000 — e.g. `make demo-failures TRACELY_API=http://localhost:8088`
+TRACELY_API ?= http://localhost:8000
+demo-failures: ## seed a mix of failing runs (errors + silent + hallucinations) for the clustering demo
+	@for i in 1 2 3 4 5; do TRACELY_API=$(TRACELY_API) RANDOM=1 uv run python scripts/send_test_trace.py; done
+	@for i in 1 2 3 4 5 6 7 8 9; do TRACELY_API=$(TRACELY_API) RANDOM=1 SILENT=1 uv run python scripts/send_test_trace.py; done
+	@for i in 1 2 3 4 5; do TRACELY_API=$(TRACELY_API) RANDOM=1 HALLUCINATE=1 uv run python scripts/send_test_trace.py; done
+	@echo "seeded — now hit 'Analyze failures' in the UI (or POST /api/clusters/rebuild)"
 
 sdk-example: ## emit the demo trace via the Tracely SDK
 	uv run python sdk/example.py

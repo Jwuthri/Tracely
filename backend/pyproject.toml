@@ -19,6 +19,15 @@ dependencies = [
   "structlog>=24.1",
   "fastapi>=0.111",
   "uvicorn[standard]>=0.30",
+  # failure-intelligence: embeddings + clustering + LangGraph agents
+  "pgvector>=0.3",
+  "numpy>=1.26",
+  "scikit-learn>=1.4",
+  "umap-learn>=0.5.5",
+  "hdbscan>=0.8.38",
+  "langgraph>=0.3",
+  "langchain>=0.3.20",
+  "langchain-openai>=0.3",
 ]
 
 [build-system]

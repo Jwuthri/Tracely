@@ -61,3 +61,10 @@ def evaluate_run_task(self, project_id: str, trace_id: str) -> dict:
         return eval_runner.evaluate_run(project_id, trace_id)
     except Exception as exc:
         raise self.retry(exc=exc)
+
+
+@celery_app.task(name="tracely.rebuild_clusters", bind=True, max_retries=0)
+def rebuild_clusters_task(self, project_id: str) -> dict:
+    from tracely import fi
+
+    return fi.rebuild_clusters(project_id)

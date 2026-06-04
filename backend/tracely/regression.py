@@ -104,7 +104,9 @@ def _get_or_create_suite(session: Session, project_id: str, agent_id: str) -> Ev
     return suite
 
 
-def promote_trace(session: Session, project_id: str, trace_id: str) -> EvaluationCase:
+def promote_trace(
+    session: Session, project_id: str, trace_id: str, title: str | None = None
+) -> EvaluationCase:
     client = clickhouse.get_client()
     spans = read_trace_spans(client, project_id, trace_id)
     if not spans:
@@ -137,7 +139,7 @@ def promote_trace(session: Session, project_id: str, trace_id: str) -> Evaluatio
 
     case = EvaluationCase(
         id=str(uuid.uuid4()), project_id=project_id, agent_id=agent_id, level="AGENT_RUN",
-        title=root.get("name", "") or "case", input_digest=digest, status="DRAFT", origin="MANUAL",
+        title=title or root.get("name", "") or "case", input_digest=digest, status="DRAFT", origin="MANUAL",
         source_trace_id=trace_id, source_span_id=root.get("span_id", ""),
         agent_version_first_failed=root.get("agent_version_id") or None,
         fixture_bundle_s3_key=fixture_key, reference_trajectory=traj.to_json(),

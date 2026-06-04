@@ -1,0 +1,50 @@
+name: "Tracely regression gate"
+description: >
+  Replay an agent's PROMOTED regression suite (tests promoted from real production
+  failures) against this PR's CI traces and post a pass/fail commit status + PR comment.
+
+inputs:
+  agent:
+    description: "Agent slug whose promoted regression suite to run"
+    required: true
+  api:
+    description: "Tracely API base URL (e.g. https://tracely.your-co.dev)"
+    required: true
+  key:
+    description: "Tracely API / ingest key"
+    required: true
+  web-url:
+    description: "Tracely web base URL, used for the 'view gate run' link in the PR comment"
+    required: false
+    default: ""
+  env:
+    description: "tracely.env tag the CI traces were emitted with"
+    required: false
+    default: "ci"
+  github-token:
+    description: "Token used to post the commit status and PR comment"
+    required: false
+    default: ${{ github.token }}
+  sdk-spec:
+    description: >
+      pip spec for the Tracely SDK (which provides the `tracely` CLI). Defaults to PyPI;
+      override with a VCS spec until published, e.g. 'tracely-sdk @ git+https://github.com/your-org/tracely#subdirectory=sdk'.
+    required: false
+    default: "tracely-sdk"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Tracely CLI
+      shell: bash
+      run: pip install --quiet --disable-pip-version-check "${{ inputs.sdk-spec }}"
+
+    - name: Run regression gate
+      shell: bash
+      env:
+        TRACELY_API: ${{ inputs.api }}
+        TRACELY_KEY: ${{ inputs.key }}
+        TRACELY_WEB_URL: ${{ inputs.web-url }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      # the CLI auto-detects GitHub Actions and posts the status + comment; exit code gates the job
+      run: tracely gate --agent "${{ inputs.agent }}" --env "${{ inputs.env }}"

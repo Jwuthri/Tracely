@@ -8,6 +8,9 @@ dependencies = [
   "opentelemetry-exporter-otlp-proto-http>=1.25",
 ]
 
+[project.scripts]
+tracely = "tracely_sdk.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

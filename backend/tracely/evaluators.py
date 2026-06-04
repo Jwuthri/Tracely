@@ -132,11 +132,17 @@ class LlmJudgeEvaluator:
         if not settings.llm_judge_api_key:
             return []  # skipped — no key
         user_in = ctx.root.get("input") or _first_io(ctx.spans, "input")
-        answer = ctx.root.get("output") or _first_io(ctx.spans, "output")
+        answer = _answer(ctx)
         if not answer:
             return []
+        # tool results the agent had in hand — the answer must stay faithful to these
+        tool_outputs = [
+            f"{s.get('name')}: {s.get('output')}"
+            for s in ctx.spans
+            if s.get("type") == TOOL and s.get("output")
+        ]
         try:
-            score, reason = _judge(user_in or "", answer)
+            score, reason = _judge(user_in or "", answer, tool_outputs)
         except Exception as exc:  # never break ingestion on judge failure
             log.warning("llm_judge_failed", error=str(exc))
             return []
@@ -152,11 +158,31 @@ def _first_io(spans: list[dict], key: str) -> str:
     return ""
 
 
-def _judge(user_in: str, answer: str) -> tuple[float, str]:
+def _answer(ctx: RunContext) -> str:
+    """The agent's own final answer — prefer the root/non-tool output; a tool's raw payload
+    (e.g. {"tempF": 64}) is not the answer and must not be graded as if it were."""
+    if ctx.root.get("output"):
+        return str(ctx.root["output"])
+    for s in reversed(ctx.spans):
+        if s.get("output") and s.get("type") != TOOL:
+            return str(s["output"])
+    return _first_io(ctx.spans, "output")
+
+
+def _judge(user_in: str, answer: str, tool_outputs: list[str] | None = None) -> tuple[float, str]:
+    grounding = ""
+    if tool_outputs:
+        joined = "\n".join(f"- {t}" for t in tool_outputs)
+        grounding = (
+            "\n\nTool results the agent had available (the answer must be consistent with "
+            f"these — flag any answer that contradicts or ignores them):\n{joined}"
+        )
     prompt = (
-        "You are grading an AI agent's answer for correctness and helpfulness. "
-        "Respond with strict JSON {\"score\": 0..1, \"reason\": \"...\"}.\n\n"
-        f"User request:\n{user_in[:2000]}\n\nAgent answer:\n{answer[:2000]}"
+        "You are grading an AI agent's answer for correctness, faithfulness to its tool "
+        "results, and helpfulness. Give a LOW score to answers that are unhelpful, self-"
+        "contradictory, absurd, or that state facts not supported by (or contradicting) the "
+        "tool results. Respond with strict JSON {\"score\": 0..1, \"reason\": \"...\"}.\n\n"
+        f"User request:\n{user_in[:2000]}\n\nAgent answer:\n{answer[:2000]}{grounding}"
     )
     body = json.dumps({
         "model": settings.llm_judge_model,

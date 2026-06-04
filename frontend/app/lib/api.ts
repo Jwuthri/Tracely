@@ -115,13 +115,17 @@ export async function getStats(): Promise<Stats> {
   return res.json();
 }
 
-export type ClusterMember = { trace_id: string; is_medoid: boolean };
+export type ClusterMember = { trace_id: string; is_medoid: boolean; summary?: string };
 
 export type FailureCluster = {
   id: string;
   agent: string | null;
   label: string;
   taxonomy: string;
+  description?: string;
+  proposed_fix?: string;
+  severity?: string;
+  method?: string;
   count: number;
   status: string;
   candidate_case_id: string | null;

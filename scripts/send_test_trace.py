@@ -39,18 +39,24 @@ def kv_arr(k: str, items) -> KeyValue:
 
 
 def main() -> None:
-    # Three demo runs of the same agent/input:
-    #   default   -> get_weather ERRORS                 (explicit failure)
-    #   FIXED=1   -> get_weather SUCCEEDS               (the fix; gate PASS)
-    #   SILENT=1  -> model requests get_weather but it NEVER runs  (SILENT failure:
-    #                no error span, but the requested tool was not executed)
+    # Four demo runs of the same agent/input:
+    #   default       -> get_weather ERRORS              (explicit failure)
+    #   FIXED=1       -> get_weather SUCCEEDS            (the fix; gate PASS)
+    #   SILENT=1      -> model requests get_weather but it NEVER runs  (SILENT failure:
+    #                    no error span, but the requested tool was not executed)
+    #   HALLUCINATE=1 -> get_weather SUCCEEDS but the model fabricates a wrong, self-
+    #                    contradictory answer (quality failure caught by the LLM judge,
+    #                    not by any structural check)
     fixed = os.environ.get("FIXED", "") not in ("", "0", "false")
     silent = os.environ.get("SILENT", "") not in ("", "0", "false")
+    hallucinate = os.environ.get("HALLUCINATE", "") not in ("", "0", "false")
     env = os.environ.get("ENV", "")  # e.g. "ci" for a CI run; empty -> prod
 
     # Deterministic base time so re-sending dedups; distinct trace id per variant/env.
-    base = 0x511EE7 if silent else (0xF0FFEE if fixed else 0xC0FFEE)
-    now = 1_717_400_000_000_000_000 + (1_000_000_000 if fixed else 2_000_000_000)
+    base = 0xFACADE if hallucinate else 0x511EE7 if silent else 0xF0FFEE if fixed else 0xC0FFEE
+    now = 1_717_400_000_000_000_000 + (
+        3_000_000_000 if hallucinate else 1_000_000_000 if fixed else 2_000_000_000
+    )
     if os.environ.get("RANDOM", "") not in ("", "0", "false"):
         import secrets
 
@@ -59,11 +65,16 @@ def main() -> None:
         trace_id = (base + (0x010000 if env == "ci" else 0)).to_bytes(16, "big")
     root_id, llm_id, tool_id = (1).to_bytes(8, "big"), (2).to_bytes(8, "big"), (3).to_bytes(8, "big")
 
-    answer = (
-        "Sorry, I couldn't fetch the weather right now."
-        if (not fixed and not silent)
-        else "It's 64°F and sunny in San Francisco."
-    )
+    if hallucinate:
+        # tool succeeds, but the model confidently fabricates an absurd, contradictory answer
+        answer = (
+            "It's 9000°F and snowing heavily in San Francisco right now, "
+            "and the midnight sun is blazing over the bay."
+        )
+    elif fixed or silent:
+        answer = "It's 64°F and sunny in San Francisco."
+    else:
+        answer = "Sorry, I couldn't fetch the weather right now."
 
     root = Span(name="planner", trace_id=trace_id, span_id=root_id,
                 start_time_unix_nano=now, end_time_unix_nano=now + 5_000_000)
@@ -86,7 +97,7 @@ def main() -> None:
     if not silent:
         tool = Span(name="get_weather", trace_id=trace_id, span_id=tool_id, parent_span_id=root_id,
                     start_time_unix_nano=now + 3_500_000, end_time_unix_nano=now + 4_000_000)
-        if not fixed:
+        if not fixed and not hallucinate:
             tool.status.code = 2  # ERROR
             tool.status.message = "upstream timeout"
         tool.attributes.extend([kv("gen_ai.operation.name", "execute_tool"),
@@ -113,7 +124,12 @@ def main() -> None:
         headers={"Content-Type": "application/x-protobuf", "Authorization": f"Bearer {KEY}"},
     )
     resp = urllib.request.urlopen(request)
-    kind = "silent-failure" if silent else ("fixed" if fixed else "failing")
+    kind = (
+        "hallucinated-answer" if hallucinate
+        else "silent-failure" if silent
+        else "fixed" if fixed
+        else "failing"
+    )
     suffix = f", env={env}" if env else ""
     print(f"POST /v1/traces -> {resp.status}  ({kind}{suffix})")
     print(f"trace_id (hex): {trace_id.hex()}")

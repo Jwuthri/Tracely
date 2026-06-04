@@ -862,3 +862,41 @@ sequenceDiagram
 4. **Baseline metrics come from the production `AgentVersion`'s last clean `GateRun` on the same suites** (cached in ClickHouse `scores`), not from re-replaying production each PR. If a suite changed since the baseline's run, the baseline for *that* suite is `n/a` until the next production gate.
 5. **Cost/latency gates are meaningful only for live cases.** Record-replay cases report ~0 cost / seconds; the decision engine marks cost/latency `is_na` when a gate has no live cases — siblings building dashboards must not render those as real zeros.
 6. **One `isProduction=true` per agent** is a hard invariant enforced transactionally on promote; doc 02's migrations must add the partial-unique constraint.
+
+---
+
+## 10. Implemented (MVP) — the gate, the CLI, the PR check
+
+The minimal end-to-end gate is built and wired to GitHub:
+
+```
+PR opened ─▶ CI replays the agent on the promoted suite (emits traces, tracely.env=ci)
+         ─▶ `tracely gate --agent <slug>` ─▶ POST /api/gate (gate.run_gate)
+              · match each PROMOTED EvaluationCase to its ci candidate by input_digest
+              · replay -> evaluate_case (fail-to-pass: missing tool / error / trajectory)
+              · aggregate -> GateRun.status PASS|FAIL
+         ─▶ CLI exits 0/1 AND posts a commit status `tracely/regression-gate`
+              + an upserted PR comment linking back to {WEB_URL}/gates/{id}
+```
+
+- **CLI** — `sdk/tracely_sdk/cli.py`, shipped as the `tracely` console script (stdlib-only, so it
+  installs with the SDK and runs anywhere CI does). `tracely gate --agent planner` triggers the
+  gate, prints a per-case table, and exits non-zero on FAIL. Inside GitHub Actions it auto-posts;
+  `--dry-run` prints the exact GitHub API calls; `--no-github` stays local. Resolves repo / PR / head
+  SHA from the Actions event payload (status goes on the PR **head**, not the merge commit).
+- **GitHub status = the blocking check.** `POST /repos/{repo}/statuses/{sha}` with
+  `context=tracely/regression-gate`, `state=success|failure`, `target_url` → the gate in the UI. Mark
+  it a required check to block merge. The PR **comment** (upserted via a `<!-- tracely-gate -->`
+  marker, never duplicated) carries the human-readable per-case table and the "promoted from a real
+  production failure" framing.
+- **Composite Action** — `.github/actions/tracely-gate/action.yml` pip-installs the SDK and runs the
+  gate; `.github/workflows/tracely-gate.example.yml` shows the two-step flow (replay harness →
+  gate). Needs `permissions: { statuses: write, pull-requests: write }`.
+- **Case titles** now carry the failure-cluster label (`promote_trace(title=cluster.label)`), so the
+  PR comment reads "get_weather requested but not executed", not the agent slug.
+
+**Still net-new (next):** the **replay harness** is the user's responsibility today (their CI runs
+the agent on each case input and emits ci traces) — a generic `tracely replay` that fetches case
+inputs + fixtures and drives a user-supplied entrypoint is the natural follow-up. Score-delta /
+cost / latency gates (`decide_gate` beyond fail-to-pass) and the canary-as-GateRun loop remain per
+the design above.

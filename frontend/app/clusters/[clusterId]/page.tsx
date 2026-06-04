@@ -38,9 +38,14 @@ export default async function ClusterPage({ params }: { params: Promise<{ cluste
           </div>
           <div>
             <div className="font-display text-[20px] font-extrabold leading-tight text-fg">{c.label}</div>
-            <div className="mt-1 flex items-center gap-2.5 font-mono text-[11.5px] text-fg-faint">
+            <div className="mt-1 flex flex-wrap items-center gap-2.5 font-mono text-[11.5px] text-fg-faint">
               <span>{c.taxonomy}</span>·<span>{c.agent}</span>·
               <Badge variant={clusterVariant(c.status)} dot>{c.status}</Badge>
+              {c.severity && (
+                <Badge variant={c.severity === "high" ? "fail" : c.severity === "medium" ? "warn" : "neutral"}>
+                  {c.severity}
+                </Badge>
+              )}
             </div>
           </div>
         </div>
@@ -56,29 +61,43 @@ export default async function ClusterPage({ params }: { params: Promise<{ cluste
         </a>
       )}
 
-      <section className="reveal card overflow-hidden" style={{ animationDelay: "100ms" }}>
-        <div className="border-b border-line px-4 py-3 text-[13px] font-semibold text-fg">Signature</div>
-        <pre className="overflow-auto px-4 py-3 font-mono text-[11.5px] leading-relaxed text-fg-muted">
-          {c.signature}
-        </pre>
-      </section>
+      {c.description && (
+        <section className="reveal card overflow-hidden" style={{ animationDelay: "90ms" }}>
+          <div className="border-b border-line px-4 py-3 text-[13px] font-semibold text-fg">Analysis</div>
+          <p className="px-4 py-3.5 text-[13.5px] leading-relaxed text-fg-muted">{c.description}</p>
+        </section>
+      )}
+      {c.proposed_fix && (
+        <section className="reveal card overflow-hidden" style={{ animationDelay: "110ms" }}>
+          <div className="border-b border-line px-4 py-3 text-[13px] font-semibold text-signal">Proposed fix</div>
+          <p className="px-4 py-3.5 text-[13.5px] leading-relaxed text-fg-muted">{c.proposed_fix}</p>
+        </section>
+      )}
+      {c.signature && (
+        <section className="reveal card overflow-hidden" style={{ animationDelay: "130ms" }}>
+          <div className="border-b border-line px-4 py-3 text-[13px] font-semibold text-fg">Signature</div>
+          <pre className="overflow-auto px-4 py-3 font-mono text-[11.5px] leading-relaxed text-fg-muted">
+            {c.signature}
+          </pre>
+        </section>
+      )}
 
       <section className="reveal card overflow-hidden" style={{ animationDelay: "140ms" }}>
         <div className="border-b border-line px-4 py-3 text-[13px] font-semibold text-fg">
           Members <span className="font-mono text-[11px] text-fg-faint">({members.length})</span>
         </div>
         {members.map((m, i) => (
-          <div
-            key={i}
-            className="flex items-center justify-between gap-3 border-b border-line/50 px-4 py-2.5 text-[12.5px] last:border-0"
-          >
-            <span className="flex items-center gap-2.5">
-              <a href={`/traces/${m.trace_id}`} className="font-mono text-[12px] text-signal hover:underline">
-                {m.trace_id.slice(0, 18)}…
-              </a>
-              {m.is_medoid && <Badge variant="signal">representative</Badge>}
-            </span>
-            <CopyId value={m.trace_id} label="trace id" />
+          <div key={i} className="border-b border-line/50 px-4 py-2.5 text-[12.5px] last:border-0">
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-2.5">
+                <a href={`/traces/${m.trace_id}`} className="font-mono text-[12px] text-signal hover:underline">
+                  {m.trace_id.slice(0, 18)}…
+                </a>
+                {m.is_medoid && <Badge variant="signal">representative</Badge>}
+              </span>
+              <CopyId value={m.trace_id} label="trace id" />
+            </div>
+            {m.summary && <p className="mt-1.5 text-[12px] leading-relaxed text-fg-muted">{m.summary}</p>}
           </div>
         ))}
       </section>

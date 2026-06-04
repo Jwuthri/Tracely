@@ -6,6 +6,11 @@ name: Tracely regression gate
 on:
   pull_request:
 
+permissions:
+  contents: read
+  statuses: write        # post the tracely/regression-gate commit status (the blocking check)
+  pull-requests: write   # upsert the results comment on the PR
+
 jobs:
   gate:
     runs-on: ubuntu-latest
@@ -28,12 +33,13 @@ jobs:
           pip install opentelemetry-proto
           python scripts/send_test_trace.py
 
-      # 2) Gate the PR on the agent's regression suite (exits non-zero on FAIL).
+      # 2) Gate the PR. The `tracely` CLI (from the SDK) triggers the gate, exits non-zero on
+      #    FAIL, and — inside Actions — posts the commit status + PR comment automatically.
       - name: Tracely gate
         env:
           TRACELY_API: ${{ secrets.TRACELY_API }}
           TRACELY_KEY: ${{ secrets.TRACELY_KEY }}
-          TRACELY_AGENT: planner
-          PR_NUMBER: ${{ github.event.number }}
-          GITHUB_SHA: ${{ github.sha }}
-        run: python scripts/tracely_gate.py
+          TRACELY_WEB_URL: ${{ secrets.TRACELY_WEB_URL }}
+        run: |
+          pip install ./sdk
+          tracely gate planner

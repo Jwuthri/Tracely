@@ -44,6 +44,16 @@ class Settings(BaseSettings):
     llm_judge_base_url: str = "https://api.openai.com/v1"
     llm_judge_model: str = "gpt-4o-mini"
 
+    # failure intelligence (embeddings + LangGraph agents) — needs an OpenAI key
+    openai_api_key: str = ""
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dim: int = 1024
+    agent_model: str = "gpt-4o-mini"
+    # cluster directly on cosine distance below this many failures; UMAP-denoise at/above it
+    # (UMAP needs a large, diverse set — on few/near-duplicate points it invents structure).
+    fi_umap_min_n: int = 50
+    fi_min_cluster_size: int = 2
+
 
 @lru_cache
 def get_settings() -> Settings:

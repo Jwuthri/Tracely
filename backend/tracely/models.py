@@ -20,8 +20,10 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from tracely.config import settings
 from tracely.db import Base
 
 
@@ -213,6 +215,10 @@ class FailureCluster(Base):
     label: Mapped[str] = mapped_column(String(256), default="")
     taxonomy: Mapped[str] = mapped_column(String(64), default="")
     signature: Mapped[str] = mapped_column(String(2000), default="")
+    description: Mapped[str] = mapped_column(String(4000), default="")   # LLM analysis
+    proposed_fix: Mapped[str] = mapped_column(String(4000), default="")  # LLM proposed fix
+    severity: Mapped[str] = mapped_column(String(16), default="")        # low|medium|high
+    method: Mapped[str] = mapped_column(String(16), default="signature")  # signature|embedding
     count: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(16), default="OPEN")  # OPEN|PROMOTED|IGNORED|MERGED
     candidate_case_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
@@ -226,4 +232,18 @@ class ClusterMember(Base):
     cluster_id: Mapped[str] = mapped_column(ForeignKey("failure_clusters.id"), primary_key=True)
     trace_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     is_medoid: Mapped[bool] = mapped_column(Boolean, default=False)
+    summary: Mapped[str] = mapped_column(String(1000), default="")  # LLM per-trace summary
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FailureEmbedding(Base):
+    """Cached embedding of a failing run's text (for batch UMAP+HDBSCAN clustering)."""
+
+    __tablename__ = "failure_embeddings"
+
+    trace_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    summary: Mapped[str] = mapped_column(String(4000), default="")
+    embedding: Mapped[list[float]] = mapped_column(Vector(settings.embedding_dim))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
