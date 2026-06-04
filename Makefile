@@ -1,4 +1,4 @@
-.PHONY: help infra-up infra-down infra-prune install migrate migrate-ch migrate-pg seed backend workers frontend test send-trace demo-failures sdk-example fmt
+.PHONY: help infra-up infra-down infra-prune install migrate migrate-ch migrate-pg seed backend workers frontend test send-trace demo-failures gate replay sdk-example fmt
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -52,6 +52,10 @@ demo-failures: ## seed a mix of failing runs (errors + silent + hallucinations) 
 
 gate:        ## run the CI/CD regression gate locally for an agent (TRACELY_AGENT=planner)
 	TRACELY_API=$(TRACELY_API) uv run tracely gate $${TRACELY_AGENT:-planner} --env $${GATE_ENV:-ci}
+
+replay:      ## re-run the example agent on the promoted suite, then gate (ENTRYPOINT=weather_agent:run)
+	TRACELY_API=$(TRACELY_API) PYTHONPATH=sdk/examples uv run tracely replay $${TRACELY_AGENT:-planner} \
+		--entrypoint $${ENTRYPOINT:-weather_agent:run} --env $${GATE_ENV:-replay}
 
 sdk-example: ## emit the demo trace via the Tracely SDK
 	uv run python sdk/example.py

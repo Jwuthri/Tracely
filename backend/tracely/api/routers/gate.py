@@ -60,6 +60,7 @@ async def run_gate(project_id: str = Depends(get_project_id), body: dict = Body(
     env = body.get("env") or "ci"
     git_ref = body.get("git_ref") or ""
     pr_number = body.get("pr_number")
+    candidates = body.get("candidates") or None  # {case_id: trace_id} from `tracely replay`
     if not agent_ref:
         raise HTTPException(status_code=400, detail="agent required")
 
@@ -68,7 +69,9 @@ async def run_gate(project_id: str = Depends(get_project_id), body: dict = Body(
             aid = gatesvc.resolve_agent_id(s, project_id, agent_ref)
             if not aid:
                 return ("err", f"agent '{agent_ref}' not found")
-            g = gatesvc.run_gate(s, project_id, aid, env=env, git_ref=git_ref, pr_number=pr_number)
+            g = gatesvc.run_gate(
+                s, project_id, aid, env=env, git_ref=git_ref, pr_number=pr_number, candidates=candidates
+            )
             agent = s.get(Agent, aid)
             return ("ok", _gate_dict(g, agent.slug if agent else None, _cases(s, g.id)))
 
@@ -76,6 +79,22 @@ async def run_gate(project_id: str = Depends(get_project_id), body: dict = Body(
     if status == "err":
         raise HTTPException(status_code=404, detail=payload)
     return payload
+
+
+@router.get("/gate/suite")
+async def gate_suite(agent: str, project_id: str = Depends(get_project_id)) -> dict:
+    """The promoted regression suite (+ recorded inputs) for an agent — what `tracely replay` runs."""
+    def work():
+        with SyncSessionLocal() as s:
+            aid = gatesvc.resolve_agent_id(s, project_id, agent)
+            if not aid:
+                return None
+            return {"agent": agent, "agent_id": aid, "cases": gatesvc.replay_suite(s, project_id, aid)}
+
+    res = await run_in_threadpool(work)
+    if res is None:
+        raise HTTPException(status_code=404, detail=f"agent '{agent}' not found")
+    return res
 
 
 @router.get("/gates")

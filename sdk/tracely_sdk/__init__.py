@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
-from typing import Any, Iterator
+from contextvars import ContextVar
+from typing import Any, Callable, Iterator
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -31,10 +32,13 @@ from opentelemetry.trace import Span, Status, StatusCode
 
 __all__ = [
     "init", "agent", "turn", "step", "llm", "tool", "set_io", "set_usage", "error", "flush",
+    "fixtures", "fixture", "call_llm", "call_tool",
 ]
 
 _tracer: trace.Tracer | None = None
 _env: str = "prod"
+# recorded tool/LLM outputs for hermetic replay; set by `with fixtures(bundle): ...`
+_fixtures: ContextVar[dict | None] = ContextVar("tracely_fixtures", default=None)
 
 
 def init(
@@ -147,3 +151,57 @@ def flush() -> None:
     provider = trace.get_tracer_provider()
     if hasattr(provider, "force_flush"):
         provider.force_flush()
+
+
+# ── hermetic replay ──────────────────────────────────────────────────────────
+# In CI replay we want the agent to see the exact tool/LLM outputs the production trace saw —
+# deterministic, offline, no live API keys or cost. `tracely replay` loads each case's recorded
+# fixture bundle and activates it here; the agent's call_tool / call_llm then serve from it.
+
+
+@contextmanager
+def fixtures(bundle: dict | None) -> Iterator[None]:
+    """Serve recorded outputs to call_tool/call_llm for the duration of this block.
+
+    bundle = {"tools": {name: output}, "llm": {model: output}} — as captured at promote time.
+    Passing None (or no bundle) leaves calls live.
+    """
+    token = _fixtures.set(bundle or None)
+    try:
+        yield
+    finally:
+        _fixtures.reset(token)
+
+
+def fixture(kind: str, name: str) -> Any:
+    """The recorded output for a tool/llm by name, or None if not replaying / not recorded."""
+    bundle = _fixtures.get()
+    if not bundle:
+        return None
+    return (bundle.get(kind) or {}).get(name)
+
+
+def call_tool(name: str, fn: Callable[[], Any], *, agent: str | None = None) -> Any:
+    """Execute a tool inside a TOOL span — but in hermetic replay serve the recorded output and
+    never call `fn` (so the live tool/network is not hit). Returns the output either way."""
+    with tool(name, agent=agent) as span:
+        recorded = fixture("tools", name)
+        out = recorded if recorded is not None else fn()
+        if recorded is not None:
+            span.set_attribute("tracely.replay.fixture", True)
+        set_io(span, output=out)
+        return out
+
+
+def call_llm(model: str, fn: Callable[[], Any], *, input: Any = None, agent: str | None = None) -> Any:
+    """Execute an LLM call inside a GENERATION span — but in hermetic replay serve the recorded
+    completion and never call `fn` (no live model call). Returns the completion either way."""
+    with llm(model, agent=agent) as span:
+        if input is not None:
+            set_io(span, input=input)
+        recorded = fixture("llm", model)
+        out = recorded if recorded is not None else fn()
+        if recorded is not None:
+            span.set_attribute("tracely.replay.fixture", True)
+        set_io(span, output=out)
+        return out

@@ -17,7 +17,14 @@ upserted PR comment.
 | `github-token` | | `${{ github.token }}` | token used to post the status + comment |
 | `sdk-spec` | | `tracely-sdk` | pip spec for the SDK/CLI (override with a git URL until published) |
 
-## Example workflow
+There are two ways to use it. **Replay is the turnkey path:** one CLI step re-runs your agent
+on every promoted case and gates the PR. The composite action is for when your CI already
+emits ci-tagged traces and you just want the gate.
+
+### Turnkey: `tracely replay` (recommended)
+
+`tracely replay` fetches the promoted suite, re-runs your agent on each recorded input
+(emitting ci traces), pairs each trace to its case, gates, and posts the check — in one step.
 
 ```yaml
 name: Tracely regression gate
@@ -35,19 +42,31 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-
-      # 1) Replay YOUR agent on the promoted cases, emitting traces tagged tracely.env=ci.
-      #    Instrument with the Tracely SDK and call tracely_sdk.init(env="ci"). This step is
-      #    yours — Tracely can't run your agent for you.
-      - name: Replay agent on regression suite
-        env:
+      - env:
           TRACELY_API: ${{ secrets.TRACELY_API }}
           TRACELY_KEY: ${{ secrets.TRACELY_KEY }}
+          TRACELY_WEB_URL: ${{ secrets.TRACELY_WEB_URL }}
         run: |
-          pip install tracely-sdk
-          python ci/replay_agent.py
+          pip install tracely-sdk        # + your agent's deps
+          # your agent as module:function, called with each case input:
+          tracely replay planner --entrypoint my_agent:run
+          # ...or a non-Python agent (gets the input in $TRACELY_INPUT):
+          # tracely replay planner --cmd "node run-agent.js"
+```
 
-      # 2) Gate the PR on the result.
+**Hermetic by default.** Replay is deterministic and offline: each promoted case ships the
+tool/LLM outputs recorded in production, and an agent written with `tracely.call_tool(name, fn)`
+/ `tracely.call_llm(model, fn)` serves those instead of making the real call — so CI needs no
+model key, costs nothing, and never flakes. Pass `--live` to make real calls instead.
+
+### DIY emit + gate action
+
+If your CI already emits ci-tagged traces (your harness calls `tracely_sdk.init(env="ci")`),
+use the composite action to gate them:
+
+```yaml
+      - name: Emit ci traces
+        run: python ci/run_agent.py      # your harness
       - uses: your-org/tracely/.github/actions/tracely-gate@main
         with:
           agent: planner
@@ -61,9 +80,10 @@ block merges on a red gate.
 
 ## Run it locally
 
-The same CLI runs outside CI — it just skips the GitHub posting (or use `--dry-run` to preview it):
+Both commands run outside CI — they just skip the GitHub posting (or use `--dry-run` to preview it):
 
 ```bash
-pip install ./sdk                       # or: pip install tracely-sdk
+pip install ./sdk                                          # provides the `tracely` CLI
+TRACELY_API=http://localhost:8000 tracely replay planner --entrypoint my_agent:run
 TRACELY_API=http://localhost:8000 tracely gate planner --env ci
 ```

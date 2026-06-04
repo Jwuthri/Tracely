@@ -30,14 +30,28 @@ EMOJI = {"PASS": "✅", "FAIL": "❌", "SKIP": "⏭️"}
 # ── Tracely API ──────────────────────────────────────────────────────────────
 
 
-def trigger_gate(api: str, key: str, agent: str, env: str, git_ref: str, pr: int | None) -> dict:
-    body = json.dumps({"agent": agent, "env": env, "git_ref": git_ref, "pr_number": pr}).encode()
+def _get_json(url: str, key: str):
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
+    return json.load(urllib.request.urlopen(req))
+
+
+def _post_json(url: str, key: str, body: dict):
     req = urllib.request.Request(
-        f"{api.rstrip('/')}/api/gate",
-        data=body,
+        url,
+        data=json.dumps(body).encode(),
         headers={"Authorization": f"Bearer {key}", "content-type": "application/json"},
     )
     return json.load(urllib.request.urlopen(req))
+
+
+def trigger_gate(
+    api: str, key: str, agent: str, env: str, git_ref: str, pr: int | None,
+    candidates: dict[str, str] | None = None,
+) -> dict:
+    body: dict = {"agent": agent, "env": env, "git_ref": git_ref, "pr_number": pr}
+    if candidates:
+        body["candidates"] = candidates  # explicit case_id -> trace_id pairing from replay
+    return _post_json(f"{api.rstrip('/')}/api/gate", key, body)
 
 
 def case_reason(detail: dict) -> str:
@@ -182,18 +196,45 @@ def write_step_summary(markdown: str) -> None:
 # ── command ──────────────────────────────────────────────────────────────────
 
 
-def cmd_gate(args: argparse.Namespace) -> int:
+def post_pr_check(args: argparse.Namespace, data: dict, web_url: str, repo: str, sha: str, pr: int | None) -> None:
+    """Post the gate result to GitHub (commit status + PR comment) when running in/for Actions."""
+    token = args.token or os.environ.get("GITHUB_TOKEN", "")
+    want_github = args.github or (os.environ.get("GITHUB_ACTIONS") == "true" and token)
+    if not want_github or args.no_github:
+        return
+    if not token:
+        print("note: --github requested but no GITHUB_TOKEN; skipping PR check")
+        return
+    if not repo:
+        print("note: not in a GitHub repo context (no GITHUB_REPOSITORY); skipping PR check")
+        return
+    gh = GitHub(token, dry_run=args.dry_run)
+    state = {"PASS": "success", "FAIL": "failure"}.get(data["status"], "error")
+    desc = f"{data['passed']} passed · {data['failed']} failed · {data['skipped']} skipped"
+    target = f"{web_url.rstrip('/')}/gates/{data['id']}" if web_url else ""
+    if sha:
+        gh.commit_status(repo, sha, state, desc, target)
+    if pr:
+        gh.upsert_comment(repo, pr, render_markdown(data, web_url, sha))
+    print(f"posted gate check to {repo}" + (f" PR #{pr}" if pr else "") + (" (dry-run)" if args.dry_run else ""))
+
+
+def _conn(args: argparse.Namespace) -> tuple[str, str, str, str]:
     api = args.api or os.environ.get("TRACELY_API", "http://localhost:8000")
     key = args.key or os.environ.get("TRACELY_KEY", "tracely_dev_key")
     web_url = args.web_url or os.environ.get("TRACELY_WEB_URL", "")
     agent = args.agent or os.environ.get("TRACELY_AGENT", "")
+    return api, key, web_url, agent
+
+
+def cmd_gate(args: argparse.Namespace) -> int:
+    api, key, web_url, agent = _conn(args)
     if not agent:
         print("error: --agent (or TRACELY_AGENT) is required")
         return 2
 
     repo, sha, pr = gh_context()
-    if args.sha:
-        sha = args.sha
+    sha = args.sha or sha
     if args.pr is not None:
         pr = args.pr
     git_ref = sha or os.environ.get("GIT_REF", "")
@@ -208,52 +249,145 @@ def cmd_gate(args: argparse.Namespace) -> int:
         return 2
 
     render_console(data, sha)
-    markdown = render_markdown(data, web_url, sha)
-    write_step_summary(markdown)
-
-    token = args.token or os.environ.get("GITHUB_TOKEN", "")
-    want_github = args.github or (os.environ.get("GITHUB_ACTIONS") == "true" and token)
-    if want_github and not args.no_github:
-        if not token:
-            print("note: --github requested but no GITHUB_TOKEN; skipping PR check")
-        elif not repo:
-            print("note: not in a GitHub repo context (no GITHUB_REPOSITORY); skipping PR check")
-        else:
-            gh = GitHub(token, dry_run=args.dry_run)
-            state = {"PASS": "success", "FAIL": "failure"}.get(data["status"], "error")
-            desc = f"{data['passed']} passed · {data['failed']} failed · {data['skipped']} skipped"
-            target = f"{web_url.rstrip('/')}/gates/{data['id']}" if web_url else ""
-            if sha:
-                gh.commit_status(repo, sha, state, desc, target)
-            if pr:
-                gh.upsert_comment(repo, pr, markdown)
-            print(f"posted gate check to {repo}" + (f" PR #{pr}" if pr else "") + (" (dry-run)" if args.dry_run else ""))
-
+    write_step_summary(render_markdown(data, web_url, sha))
+    post_pr_check(args, data, web_url, repo, sha, pr)
     return 0 if data["status"] == "PASS" else 1
+
+
+def _load_entrypoint(spec: str):
+    """Import a 'module:function' entrypoint from the current working directory."""
+    import importlib
+
+    if ":" not in spec:
+        raise SystemExit("--entrypoint must be 'module:function' (e.g. my_agent:run)")
+    mod_name, fn_name = spec.split(":", 1)
+    sys.path.insert(0, os.getcwd())
+    return getattr(importlib.import_module(mod_name), fn_name)
+
+
+def _wait_for_traces(api: str, key: str, trace_ids: list[str], timeout: int = 45) -> bool:
+    """Poll until the emitted traces have been ingested into ClickHouse (or time out)."""
+    import time
+
+    deadline = time.time() + timeout
+    pending = set(trace_ids)
+    while pending and time.time() < deadline:
+        for tid in list(pending):
+            try:
+                if _get_json(f"{api.rstrip('/')}/api/traces/{tid}", key).get("spans"):
+                    pending.discard(tid)
+            except Exception:
+                pass
+        if pending:
+            time.sleep(2)
+    if pending:
+        print(f"warning: {len(pending)} replayed trace(s) not ingested in {timeout}s; gating anyway")
+    return not pending
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    api, key, web_url, agent = _conn(args)
+    if not agent:
+        print("error: --agent (or TRACELY_AGENT) is required")
+        return 2
+    if not args.entrypoint and not args.cmd:
+        print("error: provide --entrypoint module:func  or  --cmd '...'")
+        return 2
+
+    try:
+        suite = _get_json(f"{api.rstrip('/')}/api/gate/suite?agent={agent}", key)
+    except urllib.error.HTTPError as e:
+        print(f"replay error: {e.code} {e.read().decode()[:200]}")
+        return 2
+    cases = suite.get("cases", [])
+    if not cases:
+        print(f"no promoted cases for '{agent}' — nothing to replay (promote a failure first)")
+        return 0
+    print(f"replaying {len(cases)} case(s) for {agent} (env={args.env})\n")
+
+    pairings: dict[str, str] = {}
+    if args.entrypoint:
+        func = _load_entrypoint(args.entrypoint)
+        import tracely_sdk as t  # lazy: only the replay path needs the tracing stack
+
+        t.init(endpoint=api, api_key=key, service_name=agent, env=args.env)
+        for c in cases:
+            bundle = None if args.live else c.get("fixtures")
+            with t.fixtures(bundle), t.agent(agent) as span:  # hermetic unless --live
+                t.set_io(span, input=c["input"])
+                try:
+                    out = func(c["input"])
+                except Exception as exc:  # a crashing agent is itself a failing replay
+                    t.error(span, f"agent raised: {exc}")
+                    out = f"<error: {exc}>"
+                t.set_io(span, output=out if isinstance(out, str) else json.dumps(out, default=str))
+                tid = format(span.get_span_context().trace_id, "032x")
+            n_fx = len((bundle or {}).get("tools") or {}) + len((bundle or {}).get("llm") or {})
+            pairings[c["id"]] = tid
+            tag = f"  [{n_fx} fixtures]" if n_fx else "  [live]"
+            print(f"  · {c['title']}  ->  {tid[:12]}…{tag}")
+        t.flush()
+        _wait_for_traces(api, key, list(pairings.values()))
+    else:
+        import subprocess
+        import time
+
+        for c in cases:
+            env = {**os.environ, "TRACELY_INPUT": c["input"], "TRACELY_API": api,
+                   "TRACELY_KEY": key, "TRACELY_ENV": args.env}
+            subprocess.run(args.cmd, shell=True, env=env, check=False)
+            print(f"  · ran cmd for {c['title']}")
+        time.sleep(8)  # external process emits its own trace; give ingestion a moment
+
+    repo, sha, pr = gh_context()
+    sha = args.sha or sha
+    if args.pr is not None:
+        pr = args.pr
+    # explicit pairing for the entrypoint path; digest matching for the --cmd path
+    data = trigger_gate(api, key, agent, args.env, sha or "", pr, candidates=pairings or None)
+
+    render_console(data, sha)
+    write_step_summary(render_markdown(data, web_url, sha))
+    post_pr_check(args, data, web_url, repo, sha, pr)
+    return 0 if data["status"] == "PASS" else 1
+
+
+def _add_common_gate_flags(sp: argparse.ArgumentParser) -> None:
+    sp.add_argument("--env", default=os.environ.get("TRACELY_GATE_ENV", "ci"))
+    sp.add_argument("--api", help="Tracely API base (TRACELY_API)")
+    sp.add_argument("--key", help="Tracely ingest key (TRACELY_KEY)")
+    sp.add_argument("--web-url", help="Tracely web base for links (TRACELY_WEB_URL)")
+    sp.add_argument("--pr", type=int, help="PR number (else inferred from the Actions event)")
+    sp.add_argument("--sha", help="commit SHA (else inferred)")
+    sp.add_argument("--github", action="store_true", help="post a commit status + PR comment")
+    sp.add_argument("--no-github", action="store_true", help="never touch GitHub even inside Actions")
+    sp.add_argument("--token", help="GitHub token (else GITHUB_TOKEN)")
+    sp.add_argument("--dry-run", action="store_true", help="print the GitHub calls instead of sending")
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="tracely", description="Tracely CI/CD gate")
-    sub = p.add_subparsers(dest="cmd", required=True)
-    g = sub.add_parser("gate", help="run an agent's regression suite as a PR gate")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    g = sub.add_parser("gate", help="gate a PR on pre-emitted ci traces (matched by input)")
     g.add_argument("agent", nargs="?", help="agent slug (or --agent / TRACELY_AGENT)")
     g.add_argument("--agent", dest="agent_opt", help="agent slug")
-    g.add_argument("--env", default=os.environ.get("TRACELY_GATE_ENV", "ci"))
-    g.add_argument("--api", help="Tracely API base (TRACELY_API)")
-    g.add_argument("--key", help="Tracely ingest key (TRACELY_KEY)")
-    g.add_argument("--web-url", help="Tracely web base for links (TRACELY_WEB_URL)")
-    g.add_argument("--pr", type=int, help="PR number (else inferred from the Actions event)")
-    g.add_argument("--sha", help="commit SHA (else inferred)")
-    g.add_argument("--github", action="store_true", help="post a commit status + PR comment")
-    g.add_argument("--no-github", action="store_true", help="never touch GitHub even inside Actions")
-    g.add_argument("--token", help="GitHub token (else GITHUB_TOKEN)")
-    g.add_argument("--dry-run", action="store_true", help="print the GitHub calls instead of sending")
-    args = p.parse_args(argv)
+    _add_common_gate_flags(g)
 
-    if args.cmd == "gate":
-        # allow both `tracely gate planner` and `tracely gate --agent planner`
-        args.agent = args.agent_opt or args.agent
+    r = sub.add_parser("replay", help="re-run the agent on each promoted case, then gate the PR")
+    r.add_argument("agent", nargs="?", help="agent slug (or --agent / TRACELY_AGENT)")
+    r.add_argument("--agent", dest="agent_opt", help="agent slug")
+    r.add_argument("--entrypoint", help="Python agent as 'module:function'; called with each case input")
+    r.add_argument("--cmd", help="shell command to run per case (gets TRACELY_INPUT); emits its own trace")
+    r.add_argument("--live", action="store_true", help="make real tool/LLM calls instead of serving recorded fixtures")
+    _add_common_gate_flags(r)
+
+    args = p.parse_args(argv)
+    args.agent = getattr(args, "agent_opt", None) or args.agent  # allow positional or --agent
+    if args.command == "gate":
         return cmd_gate(args)
+    if args.command == "replay":
+        return cmd_replay(args)
     return 2
 
 

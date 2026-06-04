@@ -895,8 +895,22 @@ PR opened ─▶ CI replays the agent on the promoted suite (emits traces, trace
 - **Case titles** now carry the failure-cluster label (`promote_trace(title=cluster.label)`), so the
   PR comment reads "get_weather requested but not executed", not the agent slug.
 
-**Still net-new (next):** the **replay harness** is the user's responsibility today (their CI runs
-the agent on each case input and emits ci traces) — a generic `tracely replay` that fetches case
-inputs + fixtures and drives a user-supplied entrypoint is the natural follow-up. Score-delta /
-cost / latency gates (`decide_gate` beyond fail-to-pass) and the canary-as-GateRun loop remain per
-the design above.
+- **Replay harness** — `tracely replay --agent <slug> --entrypoint module:func` (or `--cmd`).
+  It pulls the promoted suite + each case's recorded input from `GET /api/gate/suite`, re-runs the
+  agent on every input inside an `env=ci` agent span the CLI opens (the function just emits its
+  child llm/tool spans), captures each trace id, waits for ingestion, then gates. Because replay
+  knows which trace replayed which case, it gates with **explicit `{case_id: trace_id}` pairings**
+  (`run_gate(candidates=...)`) — no digest guessing. The `--cmd` path (non-Python agents) emits
+  its own trace per case and falls back to digest matching. One step does replay + gate + PR check.
+- **Hermetic replay** — replay is deterministic and offline by default. The suite ships each case's
+  fixture bundle (`{tools, llm}` recorded at promote time, `gate._load_fixtures`), the CLI activates
+  it with `tracely_sdk.fixtures(bundle)`, and the agent's `tracely.call_tool(name, fn)` /
+  `call_llm(model, fn)` serve the recorded output **instead of calling `fn`** — so CI makes no live
+  model/tool call, costs nothing, and never flakes. `--live` opts back into real calls. A call the
+  *fix* newly introduces has no fixture and runs live (or a stub); calls recorded in production are
+  served. (Faithful error-condition replay — the recorded span also erroring — is a refinement:
+  fixtures capture outputs, not yet status.)
+
+**Still net-new (next):** score-delta / cost / latency gates (`decide_gate` beyond fail-to-pass),
+fixtures keyed by `tool_call_id`/args (multiple calls to the same tool) with recorded error status,
+and the canary-as-GateRun rollout loop remain per the design above.

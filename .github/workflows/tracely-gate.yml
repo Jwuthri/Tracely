@@ -20,26 +20,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      # 1) Run YOUR agent's CI harness so it emits traces to Tracely for this PR,
-      #    tagged tracely.env=ci (ideally tracely.agent.version=${{ github.sha }}).
-      #    Replace this step with your real run/eval. For the demo we emit a sample:
-      - name: Emit CI traces (demo)
-        env:
-          TRACELY_API: ${{ secrets.TRACELY_API }}
-          TRACELY_KEY: ${{ secrets.TRACELY_KEY }}
-          ENV: ci
-          FIXED: "1" # the fixed run -> gate should PASS (drop FIXED to see it FAIL)
-        run: |
-          pip install opentelemetry-proto
-          python scripts/send_test_trace.py
-
-      # 2) Gate the PR. The `tracely` CLI (from the SDK) triggers the gate, exits non-zero on
-      #    FAIL, and — inside Actions — posts the commit status + PR comment automatically.
-      - name: Tracely gate
+      # `tracely replay` re-runs the agent on every promoted case's recorded input, emits the
+      # ci traces, and gates the PR in one step — exits non-zero on FAIL and, inside Actions,
+      # posts the commit status + PR comment. Swap weather_agent:run for your real agent
+      # entrypoint (or use --cmd "..." for a non-Python agent). run_broken demos a FAIL.
+      - name: Tracely replay + gate
         env:
           TRACELY_API: ${{ secrets.TRACELY_API }}
           TRACELY_KEY: ${{ secrets.TRACELY_KEY }}
           TRACELY_WEB_URL: ${{ secrets.TRACELY_WEB_URL }}
+          PYTHONPATH: sdk/examples
         run: |
           pip install ./sdk
-          tracely gate planner
+          tracely replay planner --entrypoint weather_agent:run
