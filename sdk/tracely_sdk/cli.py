@@ -60,7 +60,11 @@ def case_reason(detail: dict) -> str:
     bits: list[str] = []
     if d.get("missing_tools"):
         bits.append("missing tools: " + ", ".join(d["missing_tools"]))
-    if d.get("erroring_steps"):
+    if d.get("run_errors"):  # run-outcome assertion: the agent itself failed
+        bits.append("run failed: " + ", ".join(d["run_errors"]))
+    elif d.get("allow_tool_errors") and d.get("tool_errors"):  # tolerated (the agent handled it)
+        bits.append("tool errored (handled): " + ", ".join(d["tool_errors"]))
+    elif d.get("erroring_steps"):
         bits.append("errors: " + ", ".join(d["erroring_steps"]))
     if not d.get("tools_ok", True) and not d.get("missing_tools"):
         bits.append(f"tool sequence mismatch (mode={d.get('match_mode', '')})")
@@ -79,6 +83,8 @@ def render_console(data: dict, sha: str) -> None:
         reason = case_reason(c.get("detail") or {})
         extra = f"  ({reason})" if reason else ""
         print(f"  {ICON.get(c['verdict'], '?')} {c['verdict']:<4} {c['title']}{extra}")
+    for w in data.get("warnings") or []:
+        print(f"  ⚠️  {w}")
     print(f"\n  Result: {data['status']}\n")
 
 
@@ -100,6 +106,11 @@ def render_markdown(data: dict, web_url: str, sha: str) -> str:
         reason = case_reason(c.get("detail") or {}).replace("|", "\\|")
         lines.append(f"| {EMOJI.get(c['verdict'], '❔')} | {c['title']} | {c['verdict']} | {reason} |")
     lines.append("")
+    warnings = data.get("warnings") or []
+    if warnings:
+        lines.append("**⚠️ Soft warnings** (non-blocking):")
+        lines += [f"- {w}" for w in warnings]
+        lines.append("")
     if status == "FAIL":
         lines.append(
             "> These regression tests were promoted from **real production failures**. "

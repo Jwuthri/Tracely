@@ -38,6 +38,8 @@ export type SpanOut = {
   turn_id: string;
   step_name: string;
   model_id: string;
+  tokens: number;
+  cost: number;
   input: string | null;
   output: string | null;
 };
@@ -166,6 +168,9 @@ export type GateRun = {
   passed: number;
   failed: number;
   skipped: number;
+  latency_ms: number;
+  total_tokens: number;
+  warnings: string[];
   created_at: string | null;
   cases?: GateCaseResult[];
 };
@@ -179,5 +184,38 @@ export async function getGates(): Promise<GateRun[]> {
 export async function getGate(gateId: string): Promise<GateRun | null> {
   const res = await fetch(`${API}/api/gates/${gateId}`, { headers, cache: "no-store" });
   if (!res.ok) return null;
+  return res.json();
+}
+
+export type Trends = {
+  days: number;
+  daily: { date: string; traces: number; failures: number }[];
+  gates_daily: { date: string; passed: number; failed: number }[];
+  summary: {
+    total_traces: number;
+    total_failures: number;
+    failure_rate: number;
+    gate_runs: number;
+    gate_pass_rate: number;
+    cases: number;
+    open_clusters: number;
+    resolved_clusters: number;
+    mttr_hours: number | null;
+  };
+};
+
+const EMPTY_TRENDS: Trends = {
+  days: 14,
+  daily: [],
+  gates_daily: [],
+  summary: {
+    total_traces: 0, total_failures: 0, failure_rate: 0, gate_runs: 0, gate_pass_rate: 0,
+    cases: 0, open_clusters: 0, resolved_clusters: 0, mttr_hours: null,
+  },
+};
+
+export async function getTrends(days = 14): Promise<Trends> {
+  const res = await fetch(`${API}/api/trends?days=${days}`, { headers, cache: "no-store" });
+  if (!res.ok) return EMPTY_TRENDS;
   return res.json();
 }

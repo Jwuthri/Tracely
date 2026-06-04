@@ -55,9 +55,11 @@ jobs:
 ```
 
 **Hermetic by default.** Replay is deterministic and offline: each promoted case ships the
-tool/LLM outputs recorded in production, and an agent written with `tracely.call_tool(name, fn)`
-/ `tracely.call_llm(model, fn)` serves those instead of making the real call — so CI needs no
-model key, costs nothing, and never flakes. Pass `--live` to make real calls instead.
+tool/LLM calls recorded in production (in order, with their args and error status), and an agent
+written with `tracely.call_tool(name, fn, args=...)` / `tracely.call_llm(model, fn)` serves those
+instead of making the real call — so CI needs no model key, costs nothing, and never flakes.
+Repeated calls get their own recorded outputs, and a call that errored in production replays as an
+error (so the gate reproduces the failure). Pass `--live` to make real calls instead.
 
 ### DIY emit + gate action
 

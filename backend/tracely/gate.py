@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from tracely import blobstore, clickhouse
+from tracely.config import settings
 from tracely.models import Agent, EvaluationCase, GateCase, GateRun
 from tracely.regression import _input_digest, evaluate_case, read_trace_spans
 from tracely.trajectory import build_trajectory
@@ -83,6 +84,55 @@ def replay_suite(session: Session, project_id: str, agent_id: str) -> list[dict]
     ]
 
 
+def _candidate_metrics(client, project_id: str, trace_ids: list[str]) -> tuple[float, int, dict]:
+    """Per-candidate latency (ms) and token usage, plus run totals — the raw inputs to the soft
+    delta gates. Latency/cost are exact for live runs and ~0 for hermetic replay (expected)."""
+    uniq = sorted({t for t in trace_ids if t})
+    if not uniq:
+        return 0.0, 0, {}
+    rows = client.query(
+        "SELECT trace_id, "
+        "dateDiff('millisecond', min(start_time), max(coalesce(end_time, start_time))) AS lat, "
+        "toUInt64(sum(arraySum(mapValues(usage_details)))) AS toks "
+        "FROM events FINAL WHERE project_id = {p:String} AND trace_id IN {t:Array(String)} "
+        "GROUP BY trace_id",
+        parameters={"p": project_id, "t": uniq},
+    ).result_rows
+    per = {tid: (float(lat), int(toks)) for tid, lat, toks in rows}
+    return sum(v[0] for v in per.values()), sum(v[1] for v in per.values()), per
+
+
+def _baseline_gate(session: Session, project_id: str, agent_id: str, exclude_id: str) -> GateRun | None:
+    """The agent's most recent GREEN gate run — the baseline the deltas compare against."""
+    return session.execute(
+        select(GateRun)
+        .where(
+            GateRun.project_id == project_id,
+            GateRun.agent_id == agent_id,
+            GateRun.status == "PASS",
+            GateRun.id != exclude_id,
+        )
+        .order_by(GateRun.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _delta_warnings(latency_ms: float, total_tokens: int, baseline: GateRun | None) -> list[str]:
+    """Soft (non-blocking) warnings when this run is materially worse than the baseline green gate."""
+    if baseline is None:
+        return []
+    warns: list[str] = []
+    if (baseline.latency_ms or 0) >= 50:  # floor: don't flag noise on tiny hermetic latencies
+        d = (latency_ms - baseline.latency_ms) / baseline.latency_ms * 100
+        if d >= settings.gate_latency_warn_pct:
+            warns.append(f"latency +{d:.0f}% vs baseline ({baseline.latency_ms:.0f}→{latency_ms:.0f} ms)")
+    if (baseline.total_tokens or 0) > 0:
+        d = (total_tokens - baseline.total_tokens) / baseline.total_tokens * 100
+        if d >= settings.gate_tokens_warn_pct:
+            warns.append(f"tokens +{d:.0f}% vs baseline ({baseline.total_tokens}→{total_tokens})")
+    return warns
+
+
 def run_gate(
     session: Session,
     project_id: str,
@@ -139,6 +189,11 @@ def run_gate(
             if m:
                 case_to_trace[case.id] = m
 
+    # soft metrics over the matched candidate traces (latency/tokens), and per-trace lookup
+    total_lat, total_tok, per_trace = _candidate_metrics(
+        client, project_id, [tid for tid, _ in case_to_trace.values()]
+    )
+
     gate = GateRun(
         id=str(uuid.uuid4()), project_id=project_id, agent_id=agent_id, env=env,
         git_ref=git_ref, pr_number=pr_number, status="RUNNING", total=len(cases),
@@ -155,6 +210,8 @@ def run_gate(
         else:
             cand, spans = match
             verdict, detail = evaluate_case(case, build_trajectory(spans))
+            lat, tok = per_trace.get(cand, (0.0, 0))
+            detail = {**detail, "latency_ms": lat, "tokens": tok}
             if verdict == "PASS":
                 passed += 1
             else:
@@ -166,8 +223,18 @@ def run_gate(
             )
         )
 
+    # soft delta gates vs the last green gate: surface as WARNINGS (non-blocking by default)
+    baseline = _baseline_gate(session, project_id, agent_id, gate.id)
+    warnings = _delta_warnings(total_lat, total_tok, baseline)
+
     gate.passed, gate.failed, gate.skipped = passed, failed, skipped
-    gate.status = "FAIL" if failed > 0 else "PASS"  # fail-to-pass is the hard gate
+    gate.latency_ms, gate.total_tokens, gate.warnings = total_lat, total_tok, warnings
+    if failed > 0:
+        gate.status = "FAIL"  # fail-to-pass is the hard gate
+    elif warnings and settings.gate_block_on_warnings:
+        gate.status = "FAIL"  # opt-in: treat soft regressions as blocking
+    else:
+        gate.status = "PASS"
     gate.finished_at = datetime.now(timezone.utc)
     session.commit()
     return gate

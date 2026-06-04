@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { useState } from "react";
 import type { SpanOut } from "../lib/api";
 import { CopyId } from "./CopyId";
+import { IO } from "./IO";
 import { IconError } from "./icons";
 import { Badge, TypeChip } from "./ui";
 
@@ -36,17 +37,18 @@ function fmtMs(ms?: number | null): string {
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
-function pretty(v: string | null): string | null {
-  if (v == null || v === "") return null;
-  try {
-    return JSON.stringify(JSON.parse(v), null, 2);
-  } catch {
-    return v;
-  }
-}
-
-export function Waterfall({ spans }: { spans: SpanOut[] }) {
-  const [sel, setSel] = useState<string | null>(spans[0]?.span_id ?? null);
+export function Waterfall({
+  spans,
+  sel: controlledSel,
+  onSel,
+}: {
+  spans: SpanOut[];
+  sel?: string | null;
+  onSel?: (id: string) => void;
+}) {
+  const [internalSel, setInternalSel] = useState<string | null>(spans[0]?.span_id ?? null);
+  const sel = controlledSel !== undefined ? controlledSel : internalSel;
+  const setSel = onSel ?? setInternalSel;
   if (spans.length === 0) {
     return <div className="card p-8 text-center text-[13px] text-fg-faint">No spans in this trace.</div>;
   }
@@ -123,17 +125,6 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
   );
 }
 
-function Block({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="border-t border-line px-4 py-3">
-      <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-fg-faint">{title}</div>
-      <pre className="max-h-64 overflow-auto rounded-lg border border-line bg-ink-900 p-3 font-mono text-[11.5px] leading-relaxed text-fg-muted">
-        {body}
-      </pre>
-    </div>
-  );
-}
-
 function SpanPanel({ span }: { span: SpanOut | null }) {
   if (!span) {
     return (
@@ -142,8 +133,6 @@ function SpanPanel({ span }: { span: SpanOut | null }) {
       </div>
     );
   }
-  const input = pretty(span.input);
-  const output = pretty(span.output);
   return (
     <div className="card sticky top-20 h-fit overflow-hidden">
       <div className="border-b border-line px-4 py-3.5">
@@ -164,6 +153,8 @@ function SpanPanel({ span }: { span: SpanOut | null }) {
       <dl className="divide-y divide-line/50 text-[12px]">
         <Row k="Duration" v={fmtMs(span.latency_ms)} />
         {span.model_id && <Row k="Model" v={span.model_id} />}
+        {span.tokens > 0 && <Row k="Tokens" v={span.tokens.toLocaleString()} />}
+        {span.cost > 0 && <Row k="Cost" v={`$${span.cost.toFixed(4)}`} />}
         {span.turn_id && <Row k="Turn id" v={<CopyId value={span.turn_id} label="turn id" />} />}
         {span.agent_run_id && <Row k="Run id" v={<CopyId value={span.agent_run_id} label="run id" />} />}
         {span.status_message && (
@@ -171,8 +162,8 @@ function SpanPanel({ span }: { span: SpanOut | null }) {
         )}
         <Row k="Span id" v={<CopyId value={span.span_id} label="span id" />} />
       </dl>
-      {input && <Block title="Input" body={input} />}
-      {output && <Block title="Output" body={output} />}
+      <IO value={span.input} label="Input" />
+      <IO value={span.output} label="Output" />
     </div>
   );
 }

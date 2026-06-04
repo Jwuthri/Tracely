@@ -26,6 +26,13 @@ export const IconActivity = (p: P) => (
   </svg>
 );
 
+export const IconTrend = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M3 3v18h18" />
+    <path d="M7 15v3M12 10v8M17 6v12" />
+  </svg>
+);
+
 export const IconShield = (p: P) => (
   <svg {...base(p)}>
     <path d="M12 3 5 6v5c0 4.2 2.9 7.6 7 9 4.1-1.4 7-4.8 7-9V6l-7-3Z" />

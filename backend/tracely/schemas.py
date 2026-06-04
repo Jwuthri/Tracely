@@ -35,6 +35,8 @@ class SpanOut(BaseModel):
     turn_id: str = ""
     step_name: str = ""
     model_id: str = ""
+    tokens: int = 0
+    cost: float = 0.0
     input: str | None = None
     output: str | None = None
 

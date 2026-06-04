@@ -270,7 +270,8 @@ The SDK's `call_tool(name, fn)` / `call_llm(model, fn)` serve the recorded fixtu
 - **Traces + waterfall** 🌊 — the flagship screen: a flamegraph-style span waterfall (color-coded by span type, staggered grow animation) with a sticky inspector showing the selected span's input/output/metadata.
 - **Failure clusters** — Issues with counts, severity, the LLM analysis + proposed fix, member traces, and the **Analyze failures** button.
 - **Regression cases** — the fail→pass contract, assertions, reference trajectory, and a **Replay** panel.
-- **CI gates** — gate-run history with PASS/FAIL banners and per-case reasons.
+- **CI gates** — gate-run history with PASS/FAIL banners, per-case reasons, soft-warning callouts, and tokens/latency metrics.
+- **Trends** 📈 — failure-rate over time, gate pass-rate, open-vs-resolved issues, MTTR (failure → test), and regression-test count, with hand-rolled bar charts (regression-loop health, not generic metrics).
 - **`[ID]` copy chips** 📋 — the signature element. Long ids are never shown raw; a tiny `[ID]` chip copies the full value on click. (Whole rows are clickable via a `role=link` div so the chip's click can `stopPropagation` — invalid `<button>`-in-`<a>` avoided.)
 
 The aesthetic: near-black `ink` palette, a **cyan "signal"** brand accent, faint background grid, glow shadows, custom fonts (Bricolage Grotesque / Hanken Grotesk / JetBrains Mono), staggered reveal animations. Every page is a **server component** fetching the backend with `cache:'no-store'` (always live); mutations go through thin Next.js proxy routes that keep the key server-side.
@@ -334,7 +335,7 @@ How do you *show* CI isn't calling the real model? **We made the live model `rai
 Things that are true today and worth knowing:
 
 - 🔓 **Auth is wide open.** Single hardcoded dev key `tracely_dev_key`; no multi-tenancy/RBAC. Single project.
-- 🧪 **Fixtures are name-keyed, outputs-only.** Same tool called twice with different args gets the same recorded output; error *status* isn't captured, so faithful error-condition replay is a refinement.
+- 🧰 **Structural gating only.** Tool errors are now gated by run-outcome (a graceful fix can pass ✅), but a failure that's a *bad answer* with no error span still can't be caught structurally — that needs an LLM-judge assertion in the gate (the judge runs online today; it's designed but not yet wired into replay).
 - 🟰 **All-SKIP passes the gate.** If a replay harness emits no matching traces, every case SKIPs and the gate is a (false) green. Only `failed > 0` fails.
 - 🔁 **Digest matching is heuristic** in the non-replay `tracely gate` path: latest-300 ci traces, latest-wins per digest; identical inputs collide by design.
 - 🧱 **Worker is single-process** (`--pool=solo`) — fine for the demo, not for scale. The whole stack is single-node docker-compose.
@@ -350,11 +351,11 @@ Things that are true today and worth knowing:
 
 ### 🎯 Near-term (natural follow-ups to what's built)
 
-1. **Faithful fixtures** — key by `tool_call_id` + args, capture error *status*, so hermetic replay reproduces error conditions exactly.
-2. **Richer gates** — `decide_gate` beyond fail-to-pass: eval-score-delta, cost, and latency gates (start as warnings, opt into blocking).
-3. **Multi-tenancy + real auth** — accounts, per-project keys, RBAC. The thing that lets anyone but you use it.
-4. **Trends dashboard** — failure-rate over time, regression pass-rate, MTTR, "which agent version regressed."
-5. **Tune & harden** — clustering params on real data, GitHub comment pagination, an agent picker in the gate UI.
+1. ✅ **Faithful fixtures + run-outcome assertion** *(done)* — fixtures are ordered, args-keyed, and carry error status; `call_tool` raises `ToolError` on a recorded error so the agent's `try/except` runs; and `allow_tool_errors` lets a graceful error-*handling* fix pass while a crashing agent fails.
+2. ✅ **Richer gates** *(done — latency + cost)* — the gate now rolls up candidate **latency** and **token usage**, compares to the last green gate, and posts non-blocking **⚠️ warnings** (fail-to-pass stays the only hard gate; `gate_block_on_warnings` opts in). Eval-**score**-delta is the same pattern, deferred (only non-trivial with live/varying answers).
+3. ✅ **Trends dashboard** *(done)* — `GET /api/trends` + a `/trends` page: failure-rate over time, gate pass-rate, open-vs-resolved issues, regression-test count, and an MTTR (failure → test) proxy, with hand-rolled bar charts. Scoped to **regression-loop health** (on-thesis), not generic Datadog-style metrics.
+4. **Multi-tenancy + real auth** — accounts, per-project keys, RBAC. The thing that lets anyone but you use it.
+5. **Tune & harden** — clustering params on real data, GitHub comment pagination, an agent picker in the gate UI, eval-score-delta gate.
 
 ### 🌅 The bigger vision (designed in the dossier, not yet built 📐)
 

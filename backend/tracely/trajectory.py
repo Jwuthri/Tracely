@@ -89,6 +89,14 @@ def erroring_steps(traj: Trajectory) -> list[str]:
     return [st.name for st in traj.steps if st.level == "ERROR"]
 
 
+def split_errors(traj: Trajectory) -> tuple[list[str], list[str]]:
+    """(tool_errors, run_errors): erroring TOOL steps (the replayed environment) vs the agent's
+    own erroring steps. Lets a case tolerate tool failures while still gating on the run outcome."""
+    tool_errs = [st.name for st in traj.steps if st.level == "ERROR" and st.kind == "tool"]
+    run_errs = [st.name for st in traj.steps if st.level == "ERROR" and st.kind != "tool"]
+    return tool_errs, run_errs
+
+
 def tools_satisfied(mode: str, produced: list[str], reference: list[str]) -> tuple[bool, list[str], list[str]]:
     """agentevals match modes over the tool sequence. Returns (ok, missing, extra)."""
     missing = [t for t in reference if t not in produced]

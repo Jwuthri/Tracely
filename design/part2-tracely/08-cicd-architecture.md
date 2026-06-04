@@ -903,14 +903,41 @@ PR opened ─▶ CI replays the agent on the promoted suite (emits traces, trace
   (`run_gate(candidates=...)`) — no digest guessing. The `--cmd` path (non-Python agents) emits
   its own trace per case and falls back to digest matching. One step does replay + gate + PR check.
 - **Hermetic replay** — replay is deterministic and offline by default. The suite ships each case's
-  fixture bundle (`{tools, llm}` recorded at promote time, `gate._load_fixtures`), the CLI activates
-  it with `tracely_sdk.fixtures(bundle)`, and the agent's `tracely.call_tool(name, fn)` /
-  `call_llm(model, fn)` serve the recorded output **instead of calling `fn`** — so CI makes no live
-  model/tool call, costs nothing, and never flakes. `--live` opts back into real calls. A call the
-  *fix* newly introduces has no fixture and runs live (or a stub); calls recorded in production are
-  served. (Faithful error-condition replay — the recorded span also erroring — is a refinement:
-  fixtures capture outputs, not yet status.)
+  fixture bundle (recorded at promote time, `gate._load_fixtures`), the CLI activates it with
+  `tracely_sdk.fixtures(bundle)`, and the agent's `tracely.call_tool(name, fn)` / `call_llm(model, fn)`
+  serve the recorded output **instead of calling `fn`** — so CI makes no live model/tool call, costs
+  nothing, and never flakes. `--live` opts back into real calls. A call the *fix* newly introduces has
+  no fixture and runs live (or a stub); calls recorded in production are served.
+- **Faithful fixtures (v2)** — `regression._capture_fixtures` records an **ordered list** of calls per
+  kind, each with its `args`, `tool_call_id`, output, AND **error status**. The SDK normalizes v1
+  (name→output) or v2 bundles into FIFO queues; `call_tool(name, fn, args=...)` consumes the next
+  matching entry (by `args` when given, else in order) and, when the recorded call **errored**,
+  marks the replayed span ERROR with the same message. So multiple calls to the same tool get their
+  own outputs, and a tool that timed out in production replays as a timeout — the gate reproduces the
+  exact failure (with v1, both calls got one output and the error was silently dropped → a spurious
+  PASS). Verified e2e: a two-call trace whose 2nd `get_weather` errored, promoted and replayed, yields
+  a candidate with `get_weather[NYC] level=ERROR` and a correctly **FAILing** gate.
 
-**Still net-new (next):** score-delta / cost / latency gates (`decide_gate` beyond fail-to-pass),
-fixtures keyed by `tool_call_id`/args (multiple calls to the same tool) with recorded error status,
-and the canary-as-GateRun rollout loop remain per the design above.
+- **Run-outcome assertion** — `evaluate_case` honours an `allow_tool_errors` assertion: a tool
+  *may* error (it's the replayed environment) as long as the agent's own run is clean
+  (`trajectory.split_errors` separates tool-span errors from run-level errors). `promote_trace`
+  auto-sets it when the source failed because a tool errored AND the agent itself errored (the
+  "tool failed and the agent crashed" case) — so a graceful **error-handling fix can pass** while
+  the crashing version still fails. The SDK's `call_tool`/`call_llm` now **raise `ToolError`** on a
+  recorded error (after marking the span), so the agent's own `try/except` runs exactly as it would
+  live. Verified: `run_handles` (catches it) → PASS "tool errored (handled)"; `run_crashes` → FAIL
+  "run failed".
+
+- **Soft delta gates** — `run_gate` now also rolls up each candidate trace's **latency** and **token
+  usage** (`gate._candidate_metrics`, a ClickHouse aggregate), compares them to the agent's last
+  **green** gate (`_baseline_gate`), and emits non-blocking **warnings** when a metric is materially
+  worse (`_delta_warnings`, thresholds `gate_latency_warn_pct` / `gate_tokens_warn_pct`, default 25%;
+  a 50 ms latency floor suppresses hermetic noise). Metrics + warnings persist on `GateRun`
+  (`latency_ms`, `total_tokens`, `warnings`, migration 0006) and render in the CLI console, the PR
+  comment ("⚠️ Soft warnings"), and the gate-detail UI. **Fail-to-pass stays the only hard gate** by
+  default; `gate_block_on_warnings` makes soft regressions blocking. Verified: an efficient agent
+  (baseline) then a token-heavy variant → PASS + "tokens +900% vs baseline (120→1200)".
+
+**Still net-new (next):** eval-**score**-delta is the identical pattern on a third metric (aggregate
+the candidate traces' online-eval scores vs baseline) — deferred because it's only non-trivial with
+live/varying answers (hermetic replay is deterministic). The canary-as-GateRun rollout loop remains.

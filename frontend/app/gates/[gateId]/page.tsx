@@ -59,11 +59,26 @@ export default async function GatePage({ params }: { params: Promise<{ gateId: s
         </div>
       </div>
 
-      <div className="reveal card grid grid-cols-2 divide-x divide-line/60 sm:grid-cols-4" style={{ animationDelay: "60ms" }}>
+      {(g.warnings?.length ?? 0) > 0 && (
+        <div className="reveal card border-warn/30 bg-warn/[0.05] p-4" style={{ animationDelay: "40ms" }}>
+          <div className="mb-2 flex items-center gap-2 text-[12.5px] font-semibold text-warn">
+            ⚠️ Soft warnings <span className="font-mono text-[10px] text-fg-faint">(non-blocking · fail-to-pass still green)</span>
+          </div>
+          <ul className="space-y-1">
+            {g.warnings.map((w, i) => (
+              <li key={i} className="font-mono text-[12px] text-fg-muted">· {w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="reveal card grid grid-cols-2 divide-x divide-line/60 sm:grid-cols-6" style={{ animationDelay: "60ms" }}>
         <Meta k="Agent" v={g.agent ?? "—"} />
         <Meta k="Env" v={g.env} />
         <Meta k="Git ref" v={g.git_ref ? g.git_ref.slice(0, 12) : "—"} />
         <Meta k="PR" v={g.pr_number ? `#${g.pr_number}` : "—"} />
+        <Meta k="Tokens" v={g.total_tokens ? g.total_tokens.toLocaleString() : "—"} />
+        <Meta k="Latency" v={g.latency_ms ? `${Math.round(g.latency_ms)} ms` : "—"} />
       </div>
 
       <section className="reveal card overflow-hidden" style={{ animationDelay: "120ms" }}>

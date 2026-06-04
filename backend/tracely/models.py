@@ -14,6 +14,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -184,6 +185,10 @@ class GateRun(Base):
     passed: Mapped[int] = mapped_column(Integer, default=0)
     failed: Mapped[int] = mapped_column(Integer, default=0)
     skipped: Mapped[int] = mapped_column(Integer, default=0)
+    # aggregate metrics over this run's candidate traces (for delta-vs-baseline soft gates)
+    latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    warnings: Mapped[list] = mapped_column(JSON, default=list)  # non-blocking delta warnings
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

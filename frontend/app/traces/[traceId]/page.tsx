@@ -1,7 +1,6 @@
 import { getTrace } from "../../lib/api";
 import { PromoteButton } from "../../components/PromoteButton";
-import { Waterfall } from "../../components/Waterfall";
-import { Evaluations } from "../../components/Evaluations";
+import { TraceBody } from "../../components/TraceBody";
 import { CopyId } from "../../components/CopyId";
 import { Badge } from "../../components/ui";
 import { IconArrowLeft } from "../../components/icons";
@@ -19,6 +18,8 @@ export default async function TracePage({ params }: { params: Promise<{ traceId:
   const t0 = spans.length ? Math.min(...spans.map((s) => new Date(s.start_time).getTime())) : 0;
   const t1 = spans.length ? Math.max(...spans.map((s) => new Date(s.end_time ?? s.start_time).getTime())) : 0;
   const totalMs = Math.max(...durations, t1 - t0, 0);
+  const totalTokens = spans.reduce((a, s) => a + (s.tokens || 0), 0);
+  const totalCost = spans.reduce((a, s) => a + (s.cost || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -40,19 +41,15 @@ export default async function TracePage({ params }: { params: Promise<{ traceId:
               <CopyId value={traceId} label="trace id" chars={22} />
               <span>{spans.length} spans</span>
               <span>{totalMs < 1000 ? `${Math.round(totalMs)}ms` : `${(totalMs / 1000).toFixed(2)}s`}</span>
+              {totalTokens > 0 && <span>{totalTokens.toLocaleString()} tokens</span>}
+              {totalCost > 0 && <span>${totalCost.toFixed(4)}</span>}
             </div>
           </div>
           {failing && <PromoteButton traceId={traceId} />}
         </div>
       </header>
 
-      <div className="reveal" style={{ animationDelay: "80ms" }}>
-        <Evaluations scores={scores} verdict={eval_verdict} />
-      </div>
-
-      <div className="reveal" style={{ animationDelay: "140ms" }}>
-        <Waterfall spans={spans} />
-      </div>
+      <TraceBody spans={spans} scores={scores} verdict={eval_verdict} />
     </div>
   );
 }

@@ -25,6 +25,7 @@ from tracely.trajectory import (
     Trajectory,
     build_trajectory,
     erroring_steps,
+    split_errors,
     tool_sequence,
     tools_satisfied,
 )
@@ -60,6 +61,23 @@ def _input_digest(spans: list[dict]) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
 
+def _capture_fixtures(spans: list[dict]) -> dict:
+    """Recorded tool/LLM calls for hermetic replay — an ORDERED list per kind so repeated calls
+    and per-call errors replay faithfully. Each entry keeps the call args (to match a specific
+    call) and the error status (so an errored production call replays as an errored span)."""
+    tools, llm = [], []
+    for s in spans:
+        err = s.get("status_message") if s.get("level") == "ERROR" else None
+        if s.get("type") == "TOOL":
+            tools.append({
+                "name": s.get("name"), "args": s.get("input"), "tool_call_id": s.get("tool_call_id") or "",
+                "output": s.get("output"), "error": err,
+            })
+        elif s.get("type") == "GENERATION":
+            llm.append({"model": s.get("name"), "input": s.get("input"), "output": s.get("output"), "error": err})
+    return {"version": 2, "tools": tools, "llm": llm}
+
+
 def evaluate_case(case: EvaluationCase, traj: Trajectory) -> tuple[str, dict]:
     """Run the case's assertions against a produced trajectory -> (PASS|FAIL, detail)."""
     assertions = case.assertions or {}
@@ -68,19 +86,31 @@ def evaluate_case(case: EvaluationCase, traj: Trajectory) -> tuple[str, dict]:
     produced = tool_sequence(traj)
     tools_ok, missing, extra = tools_satisfied(mode, produced, ref_tools)
     no_error_required = assertions.get("no_error", True)
+    # allow_tool_errors: a tool may fail (it's the replayed environment) as long as the agent's
+    # own run handles it — so an error-HANDLING fix can pass even though the tool fixture errors.
+    allow_tool_errors = assertions.get("allow_tool_errors", False)
     errs = erroring_steps(traj)
-    error_ok = (len(errs) == 0) if no_error_required else True
+    tool_errs, run_errs = split_errors(traj)
+    if not no_error_required:
+        error_ok = True
+    elif allow_tool_errors:
+        error_ok = len(run_errs) == 0  # tools may error; the run outcome must be clean
+    else:
+        error_ok = len(errs) == 0
     passed = tools_ok and error_ok
     detail = {
         "passed": passed,
         "tools_ok": tools_ok,
         "error_ok": error_ok,
         "match_mode": mode,
+        "allow_tool_errors": allow_tool_errors,
         "required_tools": ref_tools,
         "produced_tools": produced,
         "missing_tools": missing,
         "extra_tools": extra,
         "erroring_steps": errs,
+        "tool_errors": tool_errs,
+        "run_errors": run_errs,
     }
     return ("PASS" if passed else "FAIL"), detail
 
@@ -127,13 +157,18 @@ def promote_trace(
         return existing  # idempotent
 
     ref_tools = tool_sequence(traj)
-    assertions = {"no_error": True, "required_tools": ref_tools, "match_mode": "superset"}
-
-    # capture fixtures (recorded tool/LLM outputs) for future hermetic replay
-    fixtures = {
-        "tools": {s["name"]: s.get("output") for s in spans if s.get("type") == "TOOL"},
-        "llm": {s["name"]: s.get("output") for s in spans if s.get("type") == "GENERATION"},
+    # If the source failed because a tool errored AND the agent itself errored (a tool failure the
+    # agent mishandled), the regression is "handle the tool error gracefully" — so tolerate tool
+    # errors and gate on the run outcome, which lets a graceful fix pass while the source still fails.
+    src_tool_errs, src_run_errs = split_errors(traj)
+    allow_tool_errors = bool(src_tool_errs and src_run_errs)
+    assertions = {
+        "no_error": True, "required_tools": ref_tools, "match_mode": "superset",
+        "allow_tool_errors": allow_tool_errors,
     }
+
+    # capture fixtures (recorded tool/LLM calls, ordered, with args + error) for hermetic replay
+    fixtures = _capture_fixtures(spans)
     fixture_key = f"{settings.s3_event_prefix}fixtures/{project_id}/{digest}.json"
     blobstore.put_blob(fixture_key, json.dumps(fixtures, default=str).encode(), "application/json")
 

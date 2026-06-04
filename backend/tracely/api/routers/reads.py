@@ -50,7 +50,9 @@ async def get_trace(trace_id: str, project_id: str = Depends(get_project_id)) ->
         """
         SELECT span_id, parent_span_id, name, type, level, status_message,
                start_time, end_time, agent_id, agent_run_id, turn_id, step_name,
-               model_id, input, output
+               model_id, input, output,
+               toUInt64(arraySum(mapValues(usage_details)))               AS tokens,
+               toFloat64(arraySum(mapValues(cost_details)))               AS cost
         FROM events FINAL
         WHERE project_id = {p:String} AND trace_id = {t:String}
         ORDER BY start_time
@@ -79,6 +81,8 @@ async def get_trace(trace_id: str, project_id: str = Depends(get_project_id)) ->
                 turn_id=d["turn_id"],
                 step_name=d["step_name"],
                 model_id=d["model_id"],
+                tokens=int(d.get("tokens") or 0),
+                cost=float(d.get("cost") or 0.0),
                 input=d["input"],
                 output=d["output"],
             )

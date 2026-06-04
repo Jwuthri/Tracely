@@ -29,6 +29,9 @@ def _gate_dict(g: GateRun, agent_slug: str | None = None, cases: list | None = N
         "passed": g.passed,
         "failed": g.failed,
         "skipped": g.skipped,
+        "latency_ms": g.latency_ms,
+        "total_tokens": g.total_tokens,
+        "warnings": g.warnings or [],
         "created_at": g.created_at.isoformat() if g.created_at else None,
     }
     if cases is not None:

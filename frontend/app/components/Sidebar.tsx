@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { usePathname } from "next/navigation";
-import { IconActivity, IconGate, IconGrid, IconLayers, IconShield } from "./icons";
+import { IconActivity, IconGate, IconGrid, IconLayers, IconShield, IconTrend } from "./icons";
 
 const NAV = [
   {
@@ -10,6 +10,7 @@ const NAV = [
     items: [
       { href: "/", label: "Dashboard", Icon: IconGrid, exact: true },
       { href: "/traces", label: "Traces", Icon: IconActivity },
+      { href: "/trends", label: "Trends", Icon: IconTrend },
     ],
   },
   {

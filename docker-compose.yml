@@ -107,6 +107,10 @@ services:
       postgres:
         condition: service_healthy
     command: ["sh", "-c", "python -m tracely.ch_migrate && (cd backend && alembic upgrade head) && python -m tracely.seed"]
+    volumes:                       # live source so new migrations apply without an image rebuild
+      - ./backend:/app/backend
+      - ./workers:/app/workers
+      - ./sdk:/app/sdk
     restart: "no"
 
   backend:
@@ -157,9 +161,12 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     command: ["pnpm", "exec", "next", "dev", "-H", "0.0.0.0"]
+    volumes:
+      - ./frontend/app:/app/app           # live source -> next dev hot-reload (node_modules/.next stay baked)
     environment:
       TRACELY_API: http://backend:8000     # server-side fetch uses the compose network
       TRACELY_KEY: tracely_dev_key
+      WATCHPACK_POLLING: "true"            # reliable HMR over the macOS bind mount
     depends_on:
       backend:
         condition: service_healthy

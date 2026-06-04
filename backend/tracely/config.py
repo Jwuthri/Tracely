@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     fi_umap_min_n: int = 50
     fi_min_cluster_size: int = 2
 
+    # CI/CD gate soft thresholds — latency/token deltas vs the baseline (last green gate) raise a
+    # WARNING by default (not a hard fail); fail-to-pass stays the only blocking gate unless the
+    # block flag is set. Percentages are "% worse than baseline".
+    gate_latency_warn_pct: float = 25.0
+    gate_tokens_warn_pct: float = 25.0
+    gate_block_on_warnings: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -32,8 +32,13 @@ from opentelemetry.trace import Span, Status, StatusCode
 
 __all__ = [
     "init", "agent", "turn", "step", "llm", "tool", "set_io", "set_usage", "error", "flush",
-    "fixtures", "fixture", "call_llm", "call_tool",
+    "fixtures", "fixture", "call_llm", "call_tool", "ToolError",
 ]
+
+
+class ToolError(RuntimeError):
+    """Raised by call_tool/call_llm in hermetic replay when the recorded call errored — so the
+    agent's own error handling (try/except) runs exactly as it would against the live tool."""
 
 _tracer: trace.Tracer | None = None
 _env: str = "prod"
@@ -159,49 +164,112 @@ def flush() -> None:
 # fixture bundle and activates it here; the agent's call_tool / call_llm then serve from it.
 
 
+def _normalize_bundle(bundle: dict | None) -> dict:
+    """Turn a fixture bundle into consumable FIFO queues keyed by tool/model name.
+
+    Accepts both formats: v2 (`{"version":2, "tools":[{name,args,output,error,...}], "llm":[...]}`,
+    ordered so repeated calls and per-call errors replay faithfully) and the legacy v1
+    (`{"tools":{name:output}, "llm":{model:output}}`). Returns {"tools": {name:[entry,...]},
+    "llm": {model:[entry,...]}} where each entry is {"args","output","error"}.
+    """
+    store: dict = {"tools": {}, "llm": {}}
+    if not bundle:
+        return store
+    for kind, key_field in (("tools", "name"), ("llm", "model")):
+        section = bundle.get(kind)
+        if isinstance(section, list):  # v2: ordered list of entries
+            for e in section:
+                store[kind].setdefault(e.get(key_field), []).append(
+                    {"args": e.get("args"), "output": e.get("output"), "error": e.get("error")}
+                )
+        elif isinstance(section, dict):  # v1: {name: output}
+            for k, v in section.items():
+                store[kind].setdefault(k, []).append({"args": None, "output": v, "error": None})
+    return store
+
+
 @contextmanager
 def fixtures(bundle: dict | None) -> Iterator[None]:
-    """Serve recorded outputs to call_tool/call_llm for the duration of this block.
-
-    bundle = {"tools": {name: output}, "llm": {model: output}} — as captured at promote time.
-    Passing None (or no bundle) leaves calls live.
-    """
-    token = _fixtures.set(bundle or None)
+    """Serve recorded outputs to call_tool/call_llm for the duration of this block. Entries are
+    consumed in order (so N calls to a tool replay the N recorded outputs); pass None to leave
+    calls live."""
+    token = _fixtures.set(_normalize_bundle(bundle) if bundle else None)
     try:
         yield
     finally:
         _fixtures.reset(token)
 
 
-def fixture(kind: str, name: str) -> Any:
-    """The recorded output for a tool/llm by name, or None if not replaying / not recorded."""
-    bundle = _fixtures.get()
-    if not bundle:
+def _pop_fixture(kind: str, key: str, args: Any = None) -> dict | None:
+    """Consume the next recorded entry for a tool/model: an args-match if `args` is given and one
+    exists, else the next in recorded order. Returns None if not replaying / nothing recorded."""
+    store = _fixtures.get()
+    if not store:
         return None
-    return (bundle.get(kind) or {}).get(name)
+    queue = store.get(kind, {}).get(key)
+    if not queue:
+        return None
+    if args is not None:
+        for i, e in enumerate(queue):
+            if e.get("args") == args:
+                return queue.pop(i)
+    return queue.pop(0)
 
 
-def call_tool(name: str, fn: Callable[[], Any], *, agent: str | None = None) -> Any:
-    """Execute a tool inside a TOOL span — but in hermetic replay serve the recorded output and
-    never call `fn` (so the live tool/network is not hit). Returns the output either way."""
+def fixture(kind: str, name: str) -> Any:
+    """Peek the next recorded output for a tool/llm by name (non-consuming), or None."""
+    store = _fixtures.get()
+    if not store:
+        return None
+    queue = store.get(kind, {}).get(name)
+    return queue[0].get("output") if queue else None
+
+
+def call_tool(name: str, fn: Callable[[], Any], *, args: Any = None, agent: str | None = None) -> Any:
+    """Execute a tool inside a TOOL span — but in hermetic replay serve the recorded call and
+    never call `fn`. Pass `args` to match a specific recorded call; without it, recorded calls are
+    served in order. If the recorded call ERRORED in production, the replayed span is marked ERROR
+    and a `ToolError` is raised — so the agent's own error handling runs and the gate sees the same
+    failure (faithful error-condition replay). Errors propagate the same way under `--live`."""
     with tool(name, agent=agent) as span:
-        recorded = fixture("tools", name)
-        out = recorded if recorded is not None else fn()
-        if recorded is not None:
-            span.set_attribute("tracely.replay.fixture", True)
-        set_io(span, output=out)
-        return out
+        if args is not None:
+            set_io(span, input=args)
+        entry = _pop_fixture("tools", name, args)
+        if entry is None:
+            out = fn()
+            set_io(span, output=out)
+            return out
+        span.set_attribute("tracely.replay.fixture", True)
+        if entry.get("output") is not None:
+            set_io(span, output=entry.get("output"))
+        if entry.get("error"):
+            error(span, str(entry["error"]))
+            raise ToolError(str(entry["error"]))
+        return entry.get("output")
 
 
-def call_llm(model: str, fn: Callable[[], Any], *, input: Any = None, agent: str | None = None) -> Any:
+def call_llm(
+    model: str, fn: Callable[[], Any], *, input: Any = None,
+    usage: tuple[int, int] | None = None, agent: str | None = None,
+) -> Any:
     """Execute an LLM call inside a GENERATION span — but in hermetic replay serve the recorded
-    completion and never call `fn` (no live model call). Returns the completion either way."""
+    completion (in recorded order) and never call `fn`. A recorded error is reproduced on the span
+    and raised as a `ToolError`. Pass `usage=(input_tokens, output_tokens)` to report token usage
+    (feeds the gate's cost/token soft gate)."""
     with llm(model, agent=agent) as span:
         if input is not None:
             set_io(span, input=input)
-        recorded = fixture("llm", model)
-        out = recorded if recorded is not None else fn()
-        if recorded is not None:
-            span.set_attribute("tracely.replay.fixture", True)
-        set_io(span, output=out)
-        return out
+        if usage is not None:
+            set_usage(span, input_tokens=usage[0], output_tokens=usage[1])
+        entry = _pop_fixture("llm", model)
+        if entry is None:
+            out = fn()
+            set_io(span, output=out)
+            return out
+        span.set_attribute("tracely.replay.fixture", True)
+        if entry.get("output") is not None:
+            set_io(span, output=entry.get("output"))
+        if entry.get("error"):
+            error(span, str(entry["error"]))
+            raise ToolError(str(entry["error"]))
+        return entry.get("output")
