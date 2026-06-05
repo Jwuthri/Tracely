@@ -31,7 +31,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Span, Status, StatusCode
 
 __all__ = [
-    "init", "agent", "turn", "step", "llm", "tool", "set_io", "set_usage", "error", "flush",
+    "init", "agent", "turn", "step", "llm", "tool", "thinking", "set_io", "set_usage", "error", "flush",
     "fixtures", "fixture", "call_llm", "call_tool", "ToolError",
 ]
 
@@ -76,7 +76,13 @@ def _t() -> trace.Tracer:
 
 @contextmanager
 def agent(
-    slug: str, *, version: str | None = None, run_id: str | None = None, role: str | None = None
+    slug: str,
+    *,
+    version: str | None = None,
+    run_id: str | None = None,
+    role: str | None = None,
+    conversation: str | None = None,
+    turn: int | None = None,
 ) -> Iterator[Span]:
     with _t().start_as_current_span(slug) as span:
         span.set_attribute("tracely.agent.id", slug)
@@ -88,6 +94,11 @@ def agent(
             span.set_attribute("tracely.agent.run_id", run_id)
         if role:
             span.set_attribute("tracely.agent.role", role)
+        if conversation:  # groups runs into a thread (session)
+            span.set_attribute("tracely.conversation.id", conversation)
+            span.set_attribute("session.id", conversation)
+        if turn is not None:
+            span.set_attribute("tracely.turn.index", int(turn))
         yield span
 
 
@@ -129,6 +140,18 @@ def tool(name: str, *, agent: str | None = None) -> Iterator[Span]:
         yield span
 
 
+@contextmanager
+def thinking(name: str = "thinking", *, agent: str | None = None) -> Iterator[Span]:
+    """A reasoning step. First-class observation type THINKING — the model's chain-of-thought,
+    emitted as its own span so it shows up distinctly from the GENERATION that follows. Put the
+    reasoning text in `set_io(span, output=...)` and reasoning tokens in `set_usage(..., thinking_tokens=)`."""
+    with _t().start_as_current_span(name) as span:
+        span.set_attribute("tracely.observation.type", "THINKING")
+        if agent:
+            span.set_attribute("tracely.agent.id", agent)
+        yield span
+
+
 def _as_str(v: Any) -> str:
     return v if isinstance(v, str) else json.dumps(v, default=str)
 
@@ -140,11 +163,19 @@ def set_io(span: Span, *, input: Any = None, output: Any = None) -> None:
         span.set_attribute("tracely.output", _as_str(output))
 
 
-def set_usage(span: Span, *, input_tokens: int | None = None, output_tokens: int | None = None) -> None:
+def set_usage(
+    span: Span,
+    *,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    thinking_tokens: int | None = None,
+) -> None:
     if input_tokens is not None:
         span.set_attribute("gen_ai.usage.input_tokens", int(input_tokens))
     if output_tokens is not None:
         span.set_attribute("gen_ai.usage.output_tokens", int(output_tokens))
+    if thinking_tokens is not None:
+        span.set_attribute("gen_ai.usage.reasoning_tokens", int(thinking_tokens))
 
 
 def error(span: Span, message: str = "") -> None:

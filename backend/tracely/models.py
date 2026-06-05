@@ -204,6 +204,31 @@ class GateCase(Base):
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+# ── Online evaluators (user-defined; not hardcoded) ───────────────────────────
+
+
+class Evaluator(Base):
+    """A user-configured online evaluator. The runner loads the project's enabled rows and runs
+    them on each trace (filtered by agent/env, sampled). The built-in checks are seeded as editable
+    records, not hardcoded defaults."""
+
+    __tablename__ = "evaluators"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(String(400), default="")
+    kind: Mapped[str] = mapped_column(String(16))  # structural | llm_judge
+    score_name: Mapped[str] = mapped_column(String(80))  # the score it emits (e.g. tracely.run.outcome)
+    level: Mapped[str] = mapped_column(String(16), default="AGENT_RUN")  # AGENT_RUN | TOOL | ...
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    target_agent: Mapped[str] = mapped_column(String(80), default="")  # "" = all agents (slug)
+    target_env: Mapped[str] = mapped_column(String(32), default="")  # "" = all envs
+    sampling: Mapped[float] = mapped_column(Float, default=1.0)  # 0..1
+    config: Mapped[dict] = mapped_column(JSON, default=dict)  # {check, params} or {prompt, threshold}
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 # ── Failure clustering (group similar auto-detected failures) ─────────────────────
 
 

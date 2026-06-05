@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import structlog
 
 from tracely import clickhouse
-from tracely.evaluators import EVALUATORS, EvalResult, RunContext
+from tracely.evaluators import TEMPLATES, EvalResult, RunContext, run_evaluator
 from tracely.regression import _root, read_trace_spans
 
 log = structlog.get_logger()
@@ -26,6 +26,34 @@ _SCORE_COLS = [
 ]
 
 
+def _evaluator_specs(project_id: str) -> list[dict]:
+    """The evaluators to run: the project's enabled Evaluator records, or the recommended
+    built-in catalog when none are configured (or the table isn't available yet)."""
+    try:
+        from sqlalchemy import select
+
+        from tracely.db import SyncSessionLocal
+        from tracely.models import Evaluator
+
+        with SyncSessionLocal() as s:
+            rows = s.execute(
+                select(Evaluator).where(Evaluator.project_id == project_id, Evaluator.enabled.is_(True))
+            ).scalars().all()
+        specs = [
+            {"kind": r.kind, "config": r.config or {}, "score_name": r.score_name, "level": r.level}
+            for r in rows
+        ]
+        if specs:
+            return specs
+    except Exception as exc:  # table missing / DB hiccup -> fall back to the built-ins
+        log.warning("evaluator_load_failed", error=str(exc))
+    return [
+        {"kind": t["kind"], "config": t.get("config") or {}, "score_name": t["score_name"], "level": t["level"]}
+        for t in TEMPLATES
+        if t.get("recommended")
+    ]
+
+
 def evaluate_run(project_id: str, trace_id: str) -> dict:
     client = clickhouse.get_client()
     spans = read_trace_spans(client, project_id, trace_id)
@@ -36,11 +64,11 @@ def evaluate_run(project_id: str, trace_id: str) -> dict:
     ctx = RunContext(project_id, trace_id, agent_run_id, spans, root)
 
     results: list[EvalResult] = []
-    for ev in EVALUATORS:
+    for spec in _evaluator_specs(project_id):
         try:
-            results.extend(ev.evaluate(ctx))
+            results.extend(run_evaluator(spec["kind"], spec["config"], spec["score_name"], spec["level"], ctx))
         except Exception as exc:  # one bad evaluator must not sink the rest
-            log.warning("evaluator_failed", evaluator=getattr(ev, "key", "?"), error=str(exc))
+            log.warning("evaluator_failed", evaluator=spec.get("score_name", "?"), error=str(exc))
     if not results:
         return {"scores": 0}
 

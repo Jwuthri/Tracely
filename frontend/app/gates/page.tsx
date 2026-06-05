@@ -2,6 +2,7 @@ import { getGates, type GateRun } from "../lib/api";
 import { Badge } from "../components/ui";
 import { RowLink } from "../components/RowLink";
 import { RunGateButton } from "../components/RunGateButton";
+import { TimeAgo } from "../components/TimeAgo";
 import { IconChevron } from "../components/icons";
 
 function gateVariant(s: string): "ok" | "fail" | "info" | "neutral" {
@@ -9,16 +10,6 @@ function gateVariant(s: string): "ok" | "fail" | "info" | "neutral" {
   if (s === "FAIL") return "fail";
   if (s === "RUNNING") return "info";
   return "neutral";
-}
-
-function ago(ts: string | null): string {
-  if (!ts) return "";
-  const d = new Date(ts).getTime();
-  const s = Math.max(0, (Date.now() - d) / 1000);
-  if (s < 60) return `${Math.floor(s)}s ago`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
 }
 
 function Counts({ g }: { g: GateRun }) {
@@ -75,7 +66,7 @@ export default async function GatesPage() {
                 {g.git_ref && <span className="truncate text-fg-faint">{g.git_ref.slice(0, 8)}</span>}
               </span>
               <Counts g={g} />
-              <span className="text-right font-mono text-[11.5px] text-fg-faint">{ago(g.created_at)}</span>
+              <TimeAgo ts={g.created_at} className="text-right font-mono text-[11.5px] text-fg-faint" />
               <IconChevron className="h-4 w-4 justify-self-end text-fg-faint transition-colors group-hover:text-signal" />
             </RowLink>
           ))

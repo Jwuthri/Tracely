@@ -65,6 +65,8 @@ const TYPE: Record<string, string> = {
   EMBEDDING: "text-t_llm",
   TOOL: "text-t_tool",
   RETRIEVER: "text-t_retriever",
+  THINKING: "text-violet-300",
+  REASONING: "text-violet-300",
 };
 const TYPE_DOT: Record<string, string> = {
   AGENT: "bg-t_agent",
@@ -73,6 +75,8 @@ const TYPE_DOT: Record<string, string> = {
   EMBEDDING: "bg-t_llm",
   TOOL: "bg-t_tool",
   RETRIEVER: "bg-t_retriever",
+  THINKING: "bg-violet-300",
+  REASONING: "bg-violet-300",
 };
 
 export function TypeChip({ type, className }: { type: string; className?: string }) {

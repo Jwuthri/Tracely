@@ -37,6 +37,7 @@ class SpanOut(BaseModel):
     model_id: str = ""
     tokens: int = 0
     cost: float = 0.0
+    metadata: dict[str, str] = {}
     input: str | None = None
     output: str | None = None
 

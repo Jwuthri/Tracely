@@ -1,5 +1,6 @@
 import { getCluster } from "../../lib/api";
 import { ClusterActions } from "../../components/ClusterActions";
+import { CodeBlock } from "../../components/CodeBlock";
 import { CopyId } from "../../components/CopyId";
 import { Badge } from "../../components/ui";
 import { IconArrowLeft } from "../../components/icons";
@@ -8,6 +9,11 @@ function clusterVariant(s: string): "warn" | "ok" | "neutral" {
   if (s === "OPEN") return "warn";
   if (s === "PROMOTED") return "ok";
   return "neutral";
+}
+
+function fmtMs(ms?: number): string {
+  if (!ms) return "";
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`;
 }
 
 export default async function ClusterPage({ params }: { params: Promise<{ clusterId: string }> }) {
@@ -22,6 +28,9 @@ export default async function ClusterPage({ params }: { params: Promise<{ cluste
     );
   }
   const members = c.members ?? [];
+  const hist = c.histogram ?? [];
+  const histMax = Math.max(1, ...hist.map((b) => b.count));
+  const ev = c.suggested_evaluator;
 
   return (
     <div className="space-y-6">
@@ -61,6 +70,25 @@ export default async function ClusterPage({ params }: { params: Promise<{ cluste
         </a>
       )}
 
+      {hist.length > 0 && (
+        <section className="reveal card p-5" style={{ animationDelay: "70ms" }}>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-[13px] font-semibold text-fg">Occurrences</h2>
+            <span className="font-mono text-[10px] uppercase tracking-wider text-fg-faint">over time</span>
+          </div>
+          <div className="flex h-20 items-end gap-1">
+            {hist.map((b, i) => (
+              <div
+                key={i}
+                className="flex-1 rounded-t bg-fail/60"
+                style={{ height: `${b.count ? Math.max(8, (b.count / histMax) * 100) : 2}%` }}
+                title={`${b.count} occurrence(s) · ${b.t.slice(0, 16).replace("T", " ")}`}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       {c.description && (
         <section className="reveal card overflow-hidden" style={{ animationDelay: "90ms" }}>
           <div className="border-b border-line px-4 py-3 text-[13px] font-semibold text-fg">Analysis</div>
@@ -73,34 +101,61 @@ export default async function ClusterPage({ params }: { params: Promise<{ cluste
           <p className="px-4 py-3.5 text-[13.5px] leading-relaxed text-fg-muted">{c.proposed_fix}</p>
         </section>
       )}
-      {c.signature && (
-        <section className="reveal card overflow-hidden" style={{ animationDelay: "130ms" }}>
-          <div className="border-b border-line px-4 py-3 text-[13px] font-semibold text-fg">Signature</div>
-          <pre className="overflow-auto px-4 py-3 font-mono text-[11.5px] leading-relaxed text-fg-muted">
-            {c.signature}
-          </pre>
+
+      {ev && (
+        <section className="reveal card overflow-hidden" style={{ animationDelay: "125ms" }}>
+          <div className="flex items-center justify-between border-b border-line px-4 py-3">
+            <div className="flex items-center gap-2.5">
+              <span className="text-[13px] font-semibold text-fg">Suggested evaluator</span>
+              <span className="font-mono text-[11px] text-fg-faint">{ev.name}</span>
+            </div>
+            <span className="rounded bg-ink-700 px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">
+              {ev.language}
+            </span>
+          </div>
+          <div className="px-4 py-3.5">
+            <p className="mb-3 text-[12.5px] leading-relaxed text-fg-muted">
+              A starting-point check that would catch this failure mode automatically — copy it to create an
+              evaluator.
+            </p>
+            <CodeBlock code={ev.code} action="Create evaluator" />
+          </div>
         </section>
       )}
 
       <section className="reveal card overflow-hidden" style={{ animationDelay: "140ms" }}>
         <div className="border-b border-line px-4 py-3 text-[13px] font-semibold text-fg">
-          Members <span className="font-mono text-[11px] text-fg-faint">({members.length})</span>
+          Linked traces <span className="font-mono text-[11px] text-fg-faint">({members.length})</span>
         </div>
         {members.map((m, i) => (
           <div key={i} className="border-b border-line/50 px-4 py-2.5 text-[12.5px] last:border-0">
             <div className="flex items-center justify-between gap-3">
               <span className="flex items-center gap-2.5">
                 <a href={`/traces/${m.trace_id}`} className="font-mono text-[12px] text-signal hover:underline">
-                  {m.trace_id.slice(0, 18)}…
+                  {m.trace_id.slice(0, 16)}…
                 </a>
                 {m.is_medoid && <Badge variant="signal">representative</Badge>}
+                {m.latency_ms ? <span className="font-mono text-[10.5px] text-fg-faint">{fmtMs(m.latency_ms)}</span> : null}
               </span>
               <CopyId value={m.trace_id} label="trace id" />
             </div>
-            {m.summary && <p className="mt-1.5 text-[12px] leading-relaxed text-fg-muted">{m.summary}</p>}
+            {m.input && (
+              <p className="mt-1.5 flex items-start gap-1.5 text-[12px] text-fg-muted">
+                <span className="shrink-0 select-none text-fg-faint">👤</span>
+                <span className="truncate">{m.input}</span>
+              </p>
+            )}
+            {m.summary && <p className="mt-1 text-[11.5px] leading-relaxed text-fg-faint">{m.summary}</p>}
           </div>
         ))}
       </section>
+
+      {c.signature && (
+        <section className="reveal card overflow-hidden" style={{ animationDelay: "160ms" }}>
+          <div className="border-b border-line px-4 py-3 text-[13px] font-semibold text-fg">Signature</div>
+          <pre className="overflow-auto px-4 py-3 font-mono text-[11.5px] leading-relaxed text-fg-muted">{c.signature}</pre>
+        </section>
+      )}
     </div>
   );
 }

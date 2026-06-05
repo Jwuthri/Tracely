@@ -1,4 +1,5 @@
 import "./globals.css";
+import { CommandPalette } from "./components/CommandPalette";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <main className="mx-auto w-full max-w-[1240px] flex-1 px-8 py-8">{children}</main>
           </div>
         </div>
+        <CommandPalette />
       </body>
     </html>
   );

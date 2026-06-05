@@ -42,19 +42,23 @@ function asText(c: unknown): string {
   return JSON.stringify(c, null, 2);
 }
 
-export function IO({ value, label }: { value: string | null; label: string }) {
+export function IO({ value, label }: { value: string | null; label?: string }) {
   const parsed = parse(value);
-  if (parsed == null) return null;
+  if (parsed == null) {
+    return label ? null : <div className="px-4 py-6 text-center text-[12px] text-fg-faint">(empty)</div>;
+  }
+  const content = isChat(parsed) ? (
+    <Conversation msgs={parsed} />
+  ) : typeof parsed === "object" ? (
+    <Json data={parsed} />
+  ) : (
+    <Text text={String(parsed)} />
+  );
+  if (!label) return <div className="px-4 py-3">{content}</div>;
   return (
     <div className="border-t border-line px-4 py-3">
       <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-fg-faint">{label}</div>
-      {isChat(parsed) ? (
-        <Conversation msgs={parsed} />
-      ) : typeof parsed === "object" ? (
-        <Json data={parsed} />
-      ) : (
-        <Text text={String(parsed)} />
-      )}
+      {content}
     </div>
   );
 }

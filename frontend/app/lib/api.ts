@@ -40,6 +40,7 @@ export type SpanOut = {
   model_id: string;
   tokens: number;
   cost: number;
+  metadata: Record<string, string>;
   input: string | null;
   output: string | null;
 };
@@ -49,6 +50,55 @@ export async function getTraces(): Promise<TraceRow[]> {
   if (!res.ok) return [];
   return res.json();
 }
+
+export type Thread = {
+  thread: string;
+  turns: number;
+  first_input: string | null;
+  last_output: string | null;
+  tokens: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  model?: string;
+  cost: number;
+  last_ts: string;
+  last_trace_id: string;
+  failing: number;
+};
+
+export async function getSessions(): Promise<Thread[]> {
+  const res = await fetch(`${API}/api/sessions?limit=50`, { headers, cache: "no-store" });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export type ThreadTurn = {
+  trace_id: string;
+  input: string | null;
+  output: string | null;
+  tokens: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  model?: string;
+  cost: number;
+  latency_ms: number;
+  ts: string;
+  failing: number;
+  scores: EvalScore[];
+  verdict: string | null;
+};
+
+export async function getSession(id: string): Promise<{ thread_id: string; turns: ThreadTurn[] }> {
+  const res = await fetch(`${API}/api/sessions/${id}`, { headers, cache: "no-store" });
+  if (!res.ok) return { thread_id: id, turns: [] };
+  return res.json();
+}
+
+// ── Hierarchical trace table (conversation → message → step) ──────────────────
+// A turn with its spans eagerly attached (detail mode pre-seeds the whole tree).
+export type FullTurn = ThreadTurn & { spans: SpanOut[] };
+// A conversation node. `turnsData` is present in detail mode and lazily filled in list mode.
+export type ConvNode = Thread & { turnsData?: FullTurn[] };
 
 export type TraceDetailData = {
   trace_id: string;
@@ -117,7 +167,15 @@ export async function getStats(): Promise<Stats> {
   return res.json();
 }
 
-export type ClusterMember = { trace_id: string; is_medoid: boolean; summary?: string };
+export type ClusterMember = {
+  trace_id: string;
+  is_medoid: boolean;
+  summary?: string;
+  input?: string;
+  latency_ms?: number;
+};
+
+export type SuggestedEvaluator = { name: string; language: string; code: string };
 
 export type FailureCluster = {
   id: string;
@@ -135,6 +193,8 @@ export type FailureCluster = {
   first_seen_at: string | null;
   last_seen_at: string | null;
   members?: ClusterMember[];
+  histogram?: { t: string; count: number }[];
+  suggested_evaluator?: SuggestedEvaluator;
 };
 
 export async function getClusters(): Promise<FailureCluster[]> {

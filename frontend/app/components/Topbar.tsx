@@ -51,13 +51,16 @@ export function Topbar() {
         ))}
       </nav>
       <div className="flex items-center gap-3">
-        <div className="hidden items-center gap-2 rounded-lg border border-line bg-ink-800 px-3 py-1.5 text-[12px] text-fg-faint sm:flex">
+        <button
+          onClick={() => window.dispatchEvent(new Event("tracely:cmdk"))}
+          className="hidden items-center gap-2 rounded-lg border border-line bg-ink-800 px-3 py-1.5 text-[12px] text-fg-faint transition-colors hover:border-signal/40 hover:text-fg-muted sm:flex"
+        >
           <IconSearch className="h-3.5 w-3.5" />
           <span>Search…</span>
           <kbd className="ml-1 rounded border border-line bg-ink-700 px-1.5 py-0.5 font-mono text-[10px] text-fg-muted">
             ⌘K
           </kbd>
-        </div>
+        </button>
       </div>
     </header>
   );

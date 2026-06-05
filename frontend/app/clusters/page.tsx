@@ -2,21 +2,13 @@ import { getClusters } from "../lib/api";
 import { Badge } from "../components/ui";
 import { RowLink } from "../components/RowLink";
 import { RebuildButton } from "../components/RebuildButton";
+import { TimeAgo } from "../components/TimeAgo";
 import { IconChevron } from "../components/icons";
 
 function clusterVariant(s: string): "warn" | "ok" | "neutral" {
   if (s === "OPEN") return "warn";
   if (s === "PROMOTED") return "ok";
   return "neutral";
-}
-
-function ago(ts: string | null): string {
-  if (!ts) return "";
-  const s = Math.max(0, (Date.now() - new Date(ts).getTime()) / 1000);
-  if (s < 60) return `${Math.floor(s)}s ago`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
 }
 
 export default async function ClustersPage() {
@@ -69,7 +61,7 @@ export default async function ClustersPage() {
                   {c.status}
                 </Badge>
               </span>
-              <span className="text-right font-mono text-[11.5px] text-fg-faint">{ago(c.last_seen_at)}</span>
+              <TimeAgo ts={c.last_seen_at} className="text-right font-mono text-[11.5px] text-fg-faint" />
               <IconChevron className="h-4 w-4 justify-self-end text-fg-faint transition-colors group-hover:text-signal" />
             </RowLink>
           ))

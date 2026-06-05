@@ -125,7 +125,11 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
   );
 }
 
+const TABS = ["input", "output", "attributes"] as const;
+type Tab = (typeof TABS)[number];
+
 function SpanPanel({ span }: { span: SpanOut | null }) {
+  const [tab, setTab] = useState<Tab>("input");
   if (!span) {
     return (
       <div className="card grid h-fit place-items-center p-8 text-[13px] text-fg-faint">
@@ -133,6 +137,7 @@ function SpanPanel({ span }: { span: SpanOut | null }) {
       </div>
     );
   }
+  const attrs = Object.entries(span.metadata || {}).sort(([a], [b]) => a.localeCompare(b));
   return (
     <div className="card sticky top-20 h-fit overflow-hidden">
       <div className="border-b border-line px-4 py-3.5">
@@ -155,15 +160,50 @@ function SpanPanel({ span }: { span: SpanOut | null }) {
         {span.model_id && <Row k="Model" v={span.model_id} />}
         {span.tokens > 0 && <Row k="Tokens" v={span.tokens.toLocaleString()} />}
         {span.cost > 0 && <Row k="Cost" v={`$${span.cost.toFixed(4)}`} />}
-        {span.turn_id && <Row k="Turn id" v={<CopyId value={span.turn_id} label="turn id" />} />}
-        {span.agent_run_id && <Row k="Run id" v={<CopyId value={span.agent_run_id} label="run id" />} />}
         {span.status_message && (
           <Row k="Status" v={<span className="text-fail">{span.status_message}</span>} />
         )}
         <Row k="Span id" v={<CopyId value={span.span_id} label="span id" />} />
       </dl>
-      <IO value={span.input} label="Input" />
-      <IO value={span.output} label="Output" />
+      <div className="flex border-t border-line">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={clsx(
+              "flex-1 px-3 py-2 font-mono text-[10.5px] uppercase tracking-wider transition-colors",
+              tab === t ? "border-b-2 border-signal text-signal" : "text-fg-faint hover:text-fg-muted",
+            )}
+          >
+            {t}
+            {t === "attributes" && attrs.length > 0 ? ` (${attrs.length})` : ""}
+          </button>
+        ))}
+      </div>
+      {tab === "input" && <IO value={span.input} />}
+      {tab === "output" && <IO value={span.output} />}
+      {tab === "attributes" && <Attributes entries={attrs} />}
+    </div>
+  );
+}
+
+function Attributes({ entries }: { entries: [string, string][] }) {
+  if (entries.length === 0) {
+    return <div className="px-4 py-6 text-center text-[12px] text-fg-faint">No attributes.</div>;
+  }
+  return (
+    <div className="max-h-80 overflow-auto">
+      {entries.map(([k, v]) => (
+        <div
+          key={k}
+          className="grid grid-cols-[150px_1fr] gap-3 border-b border-line/40 px-4 py-1.5 text-[11.5px] last:border-0"
+        >
+          <span className="truncate font-mono text-fg-faint" title={k}>
+            {k}
+          </span>
+          <span className="min-w-0 break-words font-mono text-fg-muted">{v}</span>
+        </div>
+      ))}
     </div>
   );
 }

@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import re
+from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, select
 from starlette.concurrency import run_in_threadpool
 
-from tracely import regression
+from tracely import clickhouse, regression
 from tracely.api.auth import get_project_id
 from tracely.config import settings
 from tracely.db import SyncSessionLocal
@@ -16,6 +18,72 @@ from tracely.models import Agent, ClusterMember, FailureCluster
 from tracely.tasks import rebuild_clusters_task
 
 router = APIRouter(prefix="/api")
+
+
+def _member_meta(project_id: str, trace_ids: list[str]) -> dict:
+    """Per-member trace facts for the cluster detail: timestamp, latency, and an input snippet."""
+    if not trace_ids:
+        return {}
+    rows = clickhouse.get_client().query(
+        "SELECT trace_id, min(start_time) AS ts, "
+        "dateDiff('millisecond', min(start_time), max(coalesce(end_time, start_time))) AS lat, "
+        "argMinIf(input, start_time, input != '') AS inp "
+        "FROM events FINAL WHERE project_id = {p:String} AND trace_id IN {t:Array(String)} "
+        "GROUP BY trace_id",
+        parameters={"p": project_id, "t": trace_ids},
+    ).result_rows
+    return {r[0]: {"ts": r[1], "latency_ms": float(r[2]), "input": r[3]} for r in rows}
+
+
+def _histogram(timestamps: list, buckets: int = 12) -> list[dict]:
+    """Occurrences over time (for the issue histogram), bucketed across [first, last seen]."""
+    ts = sorted(t for t in timestamps if t)
+    if not ts:
+        return []
+    lo, hi = ts[0], ts[-1]
+    span = (hi - lo).total_seconds()
+    if span <= 0:
+        return [{"t": lo.isoformat(), "count": len(ts)}]
+    width = span / buckets
+    counts = [0] * buckets
+    for t in ts:
+        counts[min(buckets - 1, int((t - lo).total_seconds() / width))] += 1
+    return [{"t": (lo + timedelta(seconds=width * i)).isoformat(), "count": counts[i]} for i in range(buckets)]
+
+
+def _suggest_evaluator(cl: FailureCluster) -> dict:
+    """A starting-point evaluator that would catch this failure mode — derived from its mechanism.
+    Matches the real evaluator interface so it's a usable draft, not just illustrative."""
+    name = (re.sub(r"[^a-z0-9]+", "_", (cl.label or "detected_failure").lower()).strip("_") or "detected_failure")[:48]
+    tax = (cl.taxonomy or "").lower()
+    if "not executed" in tax or "consistency" in tax:
+        code = (
+            "def evaluate(ctx):\n"
+            '    """Catch runs where a tool was requested by the model but never executed."""\n'
+            "    requested = {t for s in ctx.spans for t in (s.get('tool_call_names') or [])}\n"
+            "    executed = {s.get('name') for s in ctx.spans if s.get('type') == 'TOOL'}\n"
+            "    missing = sorted(requested - executed)\n"
+            f"    return {{'name': '{name}', 'verdict': 'FAIL' if missing else 'PASS',\n"
+            "            'comment': f'requested but not executed: {missing}' if missing else ''}"
+        )
+        return {"name": name, "language": "python", "code": code}
+    if "error" in tax:
+        code = (
+            "def evaluate(ctx):\n"
+            '    """Catch runs where a tool call errored."""\n'
+            "    errs = [s.get('name') for s in ctx.spans if s.get('type') == 'TOOL' and s.get('level') == 'ERROR']\n"
+            f"    return {{'name': '{name}', 'verdict': 'FAIL' if errs else 'PASS',\n"
+            "            'comment': f'tool error: {errs}' if errs else ''}"
+        )
+        return {"name": name, "language": "python", "code": code}
+    # wrong output / hallucination -> an LLM-judge rubric
+    prompt = (
+        "You are checking whether the agent's final answer is faithful to its tool results and not "
+        "fabricated.\nReturn strict JSON {\"score\": 0..1, \"reason\": \"...\"}.\n\n"
+        "User request:\n{{input}}\n\nTool results:\n{{tool_outputs}}\n\nAgent answer:\n{{output}}\n\n"
+        "Score LOW if the answer contradicts, ignores, or invents detail beyond the tool results."
+    )
+    return {"name": name, "language": "prompt", "code": prompt}
 
 
 @router.post("/clusters/rebuild")
@@ -92,11 +160,22 @@ async def get_cluster(cluster_id: str, project_id: str = Depends(get_project_id)
                 .scalars()
                 .all()
             )
+            meta = _member_meta(project_id, [m.trace_id for m in mem])
             members = [
-                {"trace_id": m.trace_id, "is_medoid": m.is_medoid, "summary": m.summary} for m in mem
+                {
+                    "trace_id": m.trace_id,
+                    "is_medoid": m.is_medoid,
+                    "summary": m.summary,
+                    "input": meta.get(m.trace_id, {}).get("input", ""),
+                    "latency_ms": meta.get(m.trace_id, {}).get("latency_ms", 0.0),
+                }
+                for m in mem
             ]
             agent = s.get(Agent, cl.agent_id)
-            return _cluster_dict(cl, agent.slug if agent else None, members)
+            d = _cluster_dict(cl, agent.slug if agent else None, members)
+            d["histogram"] = _histogram([meta[m.trace_id]["ts"] for m in mem if m.trace_id in meta])
+            d["suggested_evaluator"] = _suggest_evaluator(cl)
+            return d
 
     res = await run_in_threadpool(work)
     if res is None:

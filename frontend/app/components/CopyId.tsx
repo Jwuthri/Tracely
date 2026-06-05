@@ -52,7 +52,7 @@ export function CopyId({
         className,
       )}
     >
-      <span>{copied ? "copied" : `[${text}]`}</span>
+      <span>{copied ? "copied" : text === "ID" ? `…${value.slice(-7)}` : `[${text}]`}</span>
       {copied ? (
         <IconCheck className="h-3 w-3" />
       ) : (

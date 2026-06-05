@@ -3,7 +3,8 @@ import clsx from "clsx";
 export type Bar = { label: string; value: number; sub: number; title?: string };
 
 /** A compact, dependency-free bar chart: each bar's full height is `value`, with the bottom
- *  `sub` portion highlighted (e.g. failures within total traces, or fails within gate runs). */
+ *  `sub` portion highlighted (e.g. failures within total traces, or fails within gate runs).
+ *  Bars are direct children of a fixed-height track so their % heights resolve correctly. */
 export function Bars({
   data,
   color,
@@ -18,29 +19,30 @@ export function Bars({
   }
   const max = Math.max(1, ...data.map((d) => d.value));
   return (
-    <div className="flex h-36 items-end gap-2 px-1">
-      {data.map((d, i) => {
-        const h = Math.max(3, (d.value / max) * 100);
-        const subH = d.value ? (d.sub / d.value) * 100 : 0;
-        return (
-          <div
-            key={i}
-            className="group flex flex-1 flex-col items-center justify-end"
-            title={d.title ?? `${d.label}: ${d.value} (${d.sub})`}
-          >
-            <span className="mb-1 font-mono text-[10px] tabular-nums text-fg-faint opacity-0 transition-opacity group-hover:opacity-100">
-              {d.value}
-            </span>
+    <div>
+      <div className="flex h-32 items-end gap-2">
+        {data.map((d, i) => {
+          const h = d.value ? Math.max(4, (d.value / max) * 100) : 1;
+          const subH = d.value ? (d.sub / d.value) * 100 : 0;
+          return (
             <div
-              className={clsx("relative w-full max-w-[44px] overflow-hidden rounded-t-md transition-all", color)}
-              style={{ height: `${h}%` }}
+              key={i}
+              className={clsx("relative flex-1 overflow-hidden rounded-t-md", color)}
+              style={{ height: `${h}%`, maxWidth: 56 }}
+              title={d.title ?? `${d.label}: ${d.value} (${d.sub})`}
             >
               <div className={clsx("absolute bottom-0 w-full", subColor)} style={{ height: `${subH}%` }} />
             </div>
-            <div className="mt-2 font-mono text-[9.5px] text-fg-faint">{d.label}</div>
+          );
+        })}
+      </div>
+      <div className="mt-2 flex gap-2">
+        {data.map((d, i) => (
+          <div key={i} className="flex-1 text-center font-mono text-[9.5px] text-fg-faint" style={{ maxWidth: 56 }}>
+            {d.label}
           </div>
-        );
-      })}
+        ))}
+      </div>
     </div>
   );
 }
