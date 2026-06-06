@@ -34,14 +34,21 @@ const ROLE: Record<string, string> = {
   tool: "border-t_tool/30 bg-t_tool/[0.06] text-t_tool",
 };
 
-function asText(c: unknown): string {
-  if (typeof c === "string") return c;
-  if (Array.isArray(c)) {
-    return c
-      .map((p) => (typeof p === "string" ? p : (p?.text ?? JSON.stringify(p))))
-      .join("\n");
+// A message's content: plain strings render as text; anything structured (multimodal blocks,
+// tool calls, objects) renders as a clean, indented, syntax-highlighted JSON object — never a
+// half-text/half-raw-JSON smush.
+function MsgContent({ content }: { content: unknown }) {
+  if (content == null || content === "") {
+    return <span className="text-[12.5px] text-fg-faint">—</span>;
   }
-  return JSON.stringify(c, null, 2);
+  if (typeof content === "string") {
+    return <div className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-fg-muted">{content}</div>;
+  }
+  return (
+    <pre className="mt-0.5 overflow-auto rounded-md border border-line/70 bg-ink-900 p-2.5 font-mono text-[11px] leading-relaxed text-slate-300">
+      <HighlightedJson text={JSON.stringify(content, null, 2)} />
+    </pre>
+  );
 }
 
 export function IO({ value, label }: { value: string | null; label?: string }) {
@@ -71,7 +78,7 @@ function Conversation({ msgs }: { msgs: Msg[] }) {
       {msgs.map((m, i) => (
         <div key={i} className={clsx("rounded-lg border px-3 py-2", ROLE[String(m.role)] ?? "border-line bg-ink-900")}>
           <div className="mb-1 font-mono text-[9.5px] uppercase tracking-wider opacity-80">{m.role ?? "message"}</div>
-          <div className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-fg-muted">{asText(m.content)}</div>
+          <MsgContent content={m.content} />
         </div>
       ))}
     </div>

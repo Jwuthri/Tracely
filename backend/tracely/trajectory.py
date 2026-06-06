@@ -85,6 +85,27 @@ def tool_sequence(traj: Trajectory) -> list[str]:
     return [st.name for st in traj.steps if st.kind == "tool"]
 
 
+def requested_tools(traj: Trajectory) -> list[str]:
+    """Tools the model asked for (tool_call_names on any step), de-duplicated in first-seen order.
+    A 'silent failure' is a requested tool that was never executed — so this can exceed
+    tool_sequence()."""
+    seen: list[str] = []
+    for st in traj.steps:
+        for t in st.tool_calls:
+            if t and t not in seen:
+                seen.append(t)
+    return seen
+
+
+def required_tools(traj: Trajectory) -> list[str]:
+    """Tools a faithful run of this case must execute: every tool this run actually executed, plus
+    any tool the model requested but never ran (the silent-failure gap). Keyed off the latter so a
+    promoted silent failure asserts the fix really calls the tool — and the source, which didn't,
+    FAILs (fail-to-pass)."""
+    executed = tool_sequence(traj)
+    return executed + [t for t in requested_tools(traj) if t not in executed]
+
+
 def erroring_steps(traj: Trajectory) -> list[str]:
     return [st.name for st in traj.steps if st.level == "ERROR"]
 

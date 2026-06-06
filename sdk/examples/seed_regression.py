@@ -1,18 +1,20 @@
 """Seed the regression → CI-gate demo (the Test → Ship half of Tracely).
 
-Tells a real red→green CI story end-to-end:
-  1. a failing production trace (agent → llm → get_weather ERROR) is captured
-  2. it's PROMOTED into a regression case (fail-to-pass validated: the source must FAIL it)
-  3. a CI gate runs while the bug is still present  -> FAIL (the gate catches the regression)
-  4. a CI gate runs after the fix (get_weather succeeds) -> PASS (the fix clears the gate)
-  5. the case is replayed against the fixed trace -> PASS (recorded in the case's history)
+Built around a SILENT failure — the model asked for `get_weather` but the agent never executed it,
+so it answered without the tool. That's an agent-LOGIC bug, which both gating paths can validate:
 
-Populates the otherwise-empty Regression cases + CI gates views.
+  1. the silent production trace is PROMOTED into a regression case (fail-to-pass validated: the
+     source FAILs because it never called the required tool)
+  2. a CI gate while the bug is still present (still no tool call) -> FAIL
+  3. a CI gate after the fix (the agent now calls get_weather) -> PASS
+  4. the case is replayed against the fixed trace -> PASS
 
-    # inside the stack:
+Because the required tool is the *requested-but-not-executed* one, the hermetic replay path works
+too — `tracely replay planner --entrypoint weather_agent:run` PASSes (run calls the tool) while
+`...:run_broken` FAILs (it doesn't). The GitHub Action runs exactly that.
+
     docker compose exec backend python sdk/examples/seed_regression.py
-    # or against a running API:
-    TRACELY_API=http://localhost:8000 uv run python sdk/examples/seed_regression.py
+    # or: TRACELY_API=http://localhost:8000 uv run python sdk/examples/seed_regression.py
 """
 
 from __future__ import annotations
@@ -63,23 +65,25 @@ def wait_for(trace_id: str, timeout_s: int = 40) -> None:
 
 
 def main() -> None:
-    print("1) production incident — failing weather run (get_weather errors)")
-    fail_prod = send_trace()  # default variant = failing, env=prod
+    print("1) production incident — SILENT failure (model requests get_weather but never calls it)")
+    fail_prod = send_trace(SILENT="1")  # silent variant, env=prod
     wait_for(fail_prod)
     print(f"   trace {fail_prod[:16]}…")
 
-    print("2) promote → regression case")
+    print("2) promote → regression case (asserts the fix must actually call get_weather)")
     case = _req("POST", f"/api/traces/{fail_prod}/promote")
-    print(f"   case {case['id'][:8]}  status={case['status']}  fail_to_pass_validated={case['fail_to_pass_validated']}")
+    req = (case.get("assertions") or {}).get("required_tools")
+    print(f"   case {case['id'][:8]}  status={case['status']}  required_tools={req}  fail_to_pass={case['fail_to_pass_validated']}")
 
-    print("3) CI gate on the PR that still has the bug → expect FAIL")
-    fail_ci = send_trace(ENV="ci")  # the same failing run, tagged env=ci (a CI candidate)
+    print("3) CI gate on the PR that still has the bug (no tool call) → expect FAIL")
+    fail_ci = send_trace(ENV="ci", SILENT="1")
     wait_for(fail_ci)
     g1 = _req("POST", "/api/gate", {"agent": AGENT, "env": "ci", "git_ref": "feat/weather-fix", "pr_number": 41})
     print(f"   gate {g1['id'][:8]}  {g1['status']}  (passed={g1['passed']} failed={g1['failed']} skipped={g1['skipped']})")
 
-    print("4) CI gate after the fix (get_weather succeeds) → expect PASS")
-    fixed_ci = send_trace(ENV="ci", FIXED="1"); wait_for(fixed_ci)
+    print("4) CI gate after the fix (agent now calls get_weather) → expect PASS")
+    fixed_ci = send_trace(ENV="ci", FIXED="1")
+    wait_for(fixed_ci)
     g2 = _req("POST", "/api/gate", {"agent": AGENT, "env": "ci", "git_ref": "feat/weather-fix", "pr_number": 41})
     print(f"   gate {g2['id'][:8]}  {g2['status']}  (passed={g2['passed']} failed={g2['failed']} skipped={g2['skipped']})")
 
@@ -87,7 +91,10 @@ def main() -> None:
     r = _req("POST", f"/api/cases/{case['id']}/replay", {"candidate_trace_id": fixed_ci})
     print(f"   replay verdict={r['verdict']}")
 
-    print("\ndone — open Regression cases + CI gates in the UI (red gate, then green).")
+    print("\ndone — Regression cases + CI gates now show a red→green story.")
+    print("hermetic replay also works now:")
+    print(f"   docker compose exec backend sh -c 'cd /app && PYTHONPATH=sdk/examples tracely replay {AGENT} --entrypoint weather_agent:run'        # PASS")
+    print(f"   docker compose exec backend sh -c 'cd /app && PYTHONPATH=sdk/examples tracely replay {AGENT} --entrypoint weather_agent:run_broken' # FAIL")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { ConvNode, FullTurn, SpanOut, ThreadTurn } from "../lib/api";
 import { convUsage, fmtUsd, spanUsage, turnUsage, usageSummary } from "../lib/usage";
+import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
 import { HighlightedJson } from "./JsonView";
 import { TypeChip } from "./ui";
 
@@ -45,12 +46,6 @@ const Eye = (p: SVGProps<SVGSVGElement>) => (
     <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
     <circle cx="12" cy="12" r="3" />
   </svg>
-);
-const Maximize = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...svg(p)}><path d="M15 3h6v6" /><path d="M9 21H3v-6" /><path d="M21 3l-7 7" /><path d="M3 21l7-7" /></svg>
-);
-const Minimize = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...svg(p)}><path d="M4 14h6v6" /><path d="M20 10h-6V4" /><path d="M14 10l7-7" /><path d="M3 21l7-7" /></svg>
 );
 const CopyIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...svg(p)}><rect width="14" height="14" x="8" y="8" rx="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg>
@@ -105,10 +100,8 @@ const CTRL = { width: 40, minWidth: 20 };
 const HEAD_TH =
   "text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-2 sm:px-3 py-3 first:pl-2 sm:first:pl-4 whitespace-nowrap";
 
-// Full-width breakout, derived from the app shell (244px sidebar, main max-w 1240 + px-8, 24px gutter).
-const WIDE_STYLE: React.CSSProperties = { marginLeft: "calc(734px - 50vw)", width: "calc(100vw - 292px)", maxWidth: "none" };
-
-// Persisted view preferences (hidden columns + full-width toggle).
+// Persisted view preferences (hidden columns). The full-width toggle lives in ../lib/useWide so the
+// Timeline + Evaluations tabs share one Enlarge/Concise control with the table.
 const PREFS_KEY = "tracely.traceTable.prefs";
 
 // ── format helpers ──────────────────────────────────────────────────────────────
@@ -1067,10 +1060,14 @@ type Cache<T> = Record<string, T | "loading" | undefined>;
 
 export function TraceTable({
   conversations,
+  embedded = false,
 }: {
   conversations: ConvNode[];
   mode?: "list" | "detail";
   autoSelectFirst?: boolean;
+  // When embedded in a tabbed trace view, the parent owns the Enlarge/Concise control + the
+  // full-width breakout (so it applies across Table/Timeline/Evaluations), so we suppress ours.
+  embedded?: boolean;
 }) {
   const seed = useMemo(() => {
     const turns: Cache<FullTurn[]> = {};
@@ -1096,7 +1093,7 @@ export function TraceTable({
   const [openTurn, setOpenTurn] = useState<Set<string>>(seed.openT);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [colMenu, setColMenu] = useState(false);
-  const [wide, setWide] = useState(false);
+  const [wide, setWide] = useWide();
 
   const cols = useMemo(() => COLUMNS.filter((c) => !hidden.has(c.key)), [hidden]);
 
@@ -1107,9 +1104,8 @@ export function TraceTable({
     try {
       const raw = localStorage.getItem(PREFS_KEY);
       if (raw) {
-        const p = JSON.parse(raw) as { hidden?: unknown; wide?: unknown };
+        const p = JSON.parse(raw) as { hidden?: unknown };
         if (Array.isArray(p.hidden)) setHidden(new Set(p.hidden as string[]));
-        if (typeof p.wide === "boolean") setWide(p.wide);
       }
     } catch {
       /* ignore */
@@ -1119,11 +1115,11 @@ export function TraceTable({
   useEffect(() => {
     if (!prefsLoaded) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ hidden: [...hidden], wide }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ hidden: [...hidden] }));
     } catch {
       /* ignore */
     }
-  }, [prefsLoaded, hidden, wide]);
+  }, [prefsLoaded, hidden]);
 
   async function loadTurns(thread: string): Promise<FullTurn[]> {
     setTurns((p) => ({ ...p, [thread]: "loading" }));
@@ -1213,17 +1209,17 @@ export function TraceTable({
   }
 
   return (
-    <div style={wide ? WIDE_STYLE : undefined} className="overflow-hidden rounded-lg border border-slate-700 transition-[width,margin] duration-200">
+    <div
+      style={!embedded && wide ? WIDE_STYLE : undefined}
+      className="overflow-hidden rounded-lg border border-slate-700 transition-[width,margin] duration-200"
+    >
       <div className="flex items-center justify-between border-b border-slate-700 bg-slate-800/50 px-4 py-2">
         <button onClick={toggleAll} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-white">
           <ChevronsUpDown className="h-3.5 w-3.5" />
           <span>{allOpen ? "Collapse All" : "Expand All"}</span>
         </button>
         <div className="flex items-center gap-1">
-          <button onClick={() => setWide((w) => !w)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-white" title={wide ? "Fit to content" : "Expand to full width"}>
-            {wide ? <Minimize className="h-3.5 w-3.5" /> : <Maximize className="h-3.5 w-3.5" />}
-            <span>{wide ? "Concise" : "Enlarge"}</span>
-          </button>
+          {!embedded && <WideToggle wide={wide} onToggle={() => setWide(!wide)} />}
           <div className="relative">
             <button onClick={() => setColMenu((o) => !o)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-white" title="Manage Column Visibility">
               <Eye className="h-3.5 w-3.5" />

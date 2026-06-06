@@ -11,7 +11,9 @@ app = FastAPI(title="Tracely API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    # the web app fetches the API only via same-origin Next proxy routes, but allow direct
+    # browser calls from a local dev frontend on any port (TRACELY_WEB_PORT can remap 3000).
+    allow_origin_regex=r"http://localhost:\d+",
     allow_methods=["*"],
     allow_headers=["*"],
 )

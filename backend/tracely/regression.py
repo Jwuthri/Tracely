@@ -25,6 +25,7 @@ from tracely.trajectory import (
     Trajectory,
     build_trajectory,
     erroring_steps,
+    required_tools,
     split_errors,
     tool_sequence,
     tools_satisfied,
@@ -156,7 +157,11 @@ def promote_trace(
     if existing:
         return existing  # idempotent
 
-    ref_tools = tool_sequence(traj)
+    # Required tools = everything the agent executed, PLUS any tool the model requested but never
+    # executed (the "silent failure": e.g. the model asked for get_weather but it never ran). The
+    # case then asserts the fixed agent actually calls it, so the source — which didn't — FAILs
+    # (fail-to-pass) and a fix that calls it PASSes.
+    ref_tools = required_tools(traj)
     # If the source failed because a tool errored AND the agent itself errored (a tool failure the
     # agent mishandled), the regression is "handle the tool error gracefully" — so tolerate tool
     # errors and gate on the run outcome, which lets a graceful fix pass while the source still fails.

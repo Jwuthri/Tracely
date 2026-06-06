@@ -49,7 +49,7 @@ export default async function TrendsPage() {
               title: `${d.date}: ${d.failures} failing of ${d.traces} traces`,
             }))}
           />
-          <Legend items={[["bg-signal/30", "traces"], ["bg-fail/70", "failing"]]} />
+          <Legend items={[["bg-signal/20", "traces"], ["bg-fail/70", "failing"]]} />
         </section>
 
         <section className="reveal card p-5" style={{ animationDelay: "170ms" }}>
@@ -67,7 +67,7 @@ export default async function TrendsPage() {
               title: `${g.date}: ${g.passed} passed, ${g.failed} failed`,
             }))}
           />
-          <Legend items={[["bg-ok/40", "passed"], ["bg-fail/70", "failed"]]} />
+          <Legend items={[["bg-ok/30", "passed"], ["bg-fail/70", "failed"]]} />
         </section>
       </div>
     </div>

@@ -118,7 +118,7 @@ export default async function ClusterPage({ params }: { params: Promise<{ cluste
               A starting-point check that would catch this failure mode automatically — copy it to create an
               evaluator.
             </p>
-            <CodeBlock code={ev.code} action="Create evaluator" />
+            <CodeBlock code={ev.code} action="Copy" />
           </div>
         </section>
       )}

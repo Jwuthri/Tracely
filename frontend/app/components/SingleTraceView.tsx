@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { useState } from "react";
 import type { ConvNode, EvalScore, SpanOut } from "../lib/api";
+import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
 import { Evaluations } from "./Evaluations";
 import { TraceTable } from "./TraceTable";
 import { Waterfall } from "./Waterfall";
@@ -22,23 +23,29 @@ export function SingleTraceView({
   verdict: string | null;
 }) {
   const [tab, setTab] = useState<"table" | "timeline" | "evaluations">("table");
+  const [wide, setWide] = useWide();
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-1 border-b border-line">
-        <TabButton active={tab === "table"} onClick={() => setTab("table")}>
-          Table
-        </TabButton>
-        <TabButton active={tab === "timeline"} onClick={() => setTab("timeline")}>
-          Timeline <span className="font-mono text-[11px] text-fg-faint">{spans.length}</span>
-        </TabButton>
-        <TabButton active={tab === "evaluations"} onClick={() => setTab("evaluations")}>
-          Evaluations
-          {verdict ? <Badge variant={verdictVariant(verdict)}>{verdict}</Badge> : <span className="font-mono text-[11px] text-fg-faint">{scores.length}</span>}
-        </TabButton>
+      <div className="flex items-center justify-between gap-1 border-b border-line">
+        <div className="flex items-center gap-1">
+          <TabButton active={tab === "table"} onClick={() => setTab("table")}>
+            Table
+          </TabButton>
+          <TabButton active={tab === "timeline"} onClick={() => setTab("timeline")}>
+            Timeline <span className="font-mono text-[11px] text-fg-faint">{spans.length}</span>
+          </TabButton>
+          <TabButton active={tab === "evaluations"} onClick={() => setTab("evaluations")}>
+            Evaluations
+            {verdict ? <Badge variant={verdictVariant(verdict)}>{verdict}</Badge> : <span className="font-mono text-[11px] text-fg-faint">{scores.length}</span>}
+          </TabButton>
+        </div>
+        <WideToggle wide={wide} onToggle={() => setWide(!wide)} />
       </div>
-      {tab === "table" && <TraceTable conversations={[conv]} mode="detail" autoSelectFirst />}
-      {tab === "timeline" && <Waterfall spans={spans} />}
-      {tab === "evaluations" && <Evaluations scores={scores} verdict={verdict} />}
+      <div style={wide ? WIDE_STYLE : undefined} className="transition-[width,margin] duration-200">
+        {tab === "table" && <TraceTable conversations={[conv]} mode="detail" autoSelectFirst embedded />}
+        {tab === "timeline" && <Waterfall spans={spans} />}
+        {tab === "evaluations" && <Evaluations scores={scores} verdict={verdict} />}
+      </div>
     </div>
   );
 }
