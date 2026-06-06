@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     s3_event_prefix: str = "events/"
 
     ingestion_delay_seconds: int = 0
+    # Spans/traces with no agent are attributed to this fallback agent slug, so agent-scoped
+    # features (failure clusters, CI gates) still apply to plain LLM calls. Set to "" to disable
+    # and leave agent-less traces unattributed.
+    default_agent_slug: str = "default"
 
     # online evaluation
     eval_latency_budget_ms: int = 60000

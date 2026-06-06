@@ -111,6 +111,7 @@ services:
       - ./backend:/app/backend
       - ./workers:/app/workers
       - ./sdk:/app/sdk
+      - ./scripts:/app/scripts
     restart: "no"
 
   backend:
@@ -128,6 +129,7 @@ services:
       - ./backend:/app/backend
       - ./workers:/app/workers
       - ./sdk:/app/sdk
+      - ./scripts:/app/scripts
     ports:
       - "${TRACELY_BACKEND_PORT:-8000}:8000"
     healthcheck:
@@ -154,6 +156,7 @@ services:
       - ./backend:/app/backend
       - ./workers:/app/workers
       - ./sdk:/app/sdk
+      - ./scripts:/app/scripts
 
   frontend:
     image: tracely-frontend

@@ -4,15 +4,42 @@ ids, insert into ClickHouse. This is the async half of the write path (worker si
 
 from __future__ import annotations
 
+from collections import defaultdict
+
 import structlog
 
 from tracely import blobstore, clickhouse, registry
 from tracely.celery_app import celery_app
+from tracely.config import settings
 from tracely.db import SyncSessionLocal
 from tracely.events import EVENT_COLUMNS, to_rows
 from tracely.otel import parse_otlp_traces, parse_otlp_traces_json
 
 log = structlog.get_logger()
+
+
+def _apply_default_agent(events: list[dict]) -> None:
+    """Attribute agent-less spans to a fallback agent so agent-scoped features (failure clusters,
+    CI gates) still apply to plain LLM calls. Within a trace, an empty-agent span inherits the
+    trace's agent (its app-root's, else any sibling's); only a trace with no agent anywhere gets
+    the configured default. `tracely.agent.id` is mirrored into metadata so the UI shows the slug."""
+    default_slug = settings.default_agent_slug
+    if not default_slug:
+        return
+    by_trace: dict[str, list[dict]] = defaultdict(list)
+    for ev in events:
+        by_trace[ev.get("trace_id")].append(ev)
+    for evs in by_trace.values():
+        root = next((e for e in evs if e.get("is_app_root")), None)
+        trace_agent = (
+            (root.get("agent_slug") if root else "")
+            or next((e.get("agent_slug") for e in evs if e.get("agent_slug")), "")
+            or default_slug
+        )
+        for e in evs:
+            if not e.get("agent_slug"):
+                e["agent_slug"] = trace_agent
+                e.setdefault("metadata", {})["tracely.agent.id"] = trace_agent
 
 
 @celery_app.task(name="tracely.ingest_otlp_blob", bind=True, max_retries=6, default_retry_delay=5)
@@ -23,6 +50,8 @@ def ingest_otlp_blob(self, project_id: str, key: str, content_type: str) -> dict
         events = (parse_otlp_traces_json if is_json else parse_otlp_traces)(raw, project_id)
         if not events:
             return {"events": 0}
+
+        _apply_default_agent(events)  # agent-less traces -> fallback agent (inherits within a trace)
 
         # Resolve agent slug -> registry UUID (and version ref -> UUID), then strip helper keys.
         with SyncSessionLocal() as session:

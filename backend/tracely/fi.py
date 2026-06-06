@@ -149,6 +149,33 @@ def cluster_embeddings(matrix) -> list[int]:
     return [int(x) for x in labels]
 
 
+def _delete_clusters(session: Session, cluster_ids: list[str]) -> int:
+    """Delete the given FailureClusters and their ClusterMembers (no commit — the caller owns the
+    transaction). Returns the number of clusters removed."""
+    if not cluster_ids:
+        return 0
+    session.execute(delete(ClusterMember).where(ClusterMember.cluster_id.in_(cluster_ids)))
+    session.execute(delete(FailureCluster).where(FailureCluster.id.in_(cluster_ids)))
+    return len(cluster_ids)
+
+
+def _prune_orphan_clusters(session: Session, project_id: str, keep_agent_ids: set[str]) -> int:
+    """Drop every cluster in this project whose agent is NOT being rebuilt this run, so the rebuild
+    is project-wide-consistent. _rebuild_agent deletes+rewrites only the agents it visits; an agent
+    that has no current failing traces (its runs were fixed, or a reseed gave them new trace_ids) is
+    never visited, so without this its clusters persist forever — pointing at wiped traces — and pile
+    up across rebuilds. An empty keep set means nothing is failing, so all of the project's clusters
+    are pruned. Returns the number of clusters removed."""
+    q = select(FailureCluster.id).where(FailureCluster.project_id == project_id)
+    if keep_agent_ids:
+        q = q.where(FailureCluster.agent_id.not_in(keep_agent_ids))
+    orphan_ids = list(session.execute(q).scalars().all())
+    n = _delete_clusters(session, orphan_ids)
+    if n:
+        session.commit()
+    return n
+
+
 def rebuild_clusters(project_id: str) -> dict:
     if not settings.openai_api_key:
         return {"error": "OPENAI_API_KEY not configured"}
@@ -180,10 +207,15 @@ def rebuild_clusters(project_id: str) -> dict:
 
     issues = 0
     with SyncSessionLocal() as s:
+        # drop clusters for agents with no current failing traces, then rebuild the rest — keeps the
+        # project consistent instead of accumulating stale clusters from agents that dropped out.
+        pruned = _prune_orphan_clusters(s, project_id, set(by_agent))
         for agent_id, items in by_agent.items():
             issues += _rebuild_agent(s, project_id, agent_id, items)
-    log.info("fi_rebuild", project_id=project_id, agents=len(by_agent), issues=issues)
-    return {"agents": len(by_agent), "issues": issues}
+    log.info(
+        "fi_rebuild", project_id=project_id, agents=len(by_agent), issues=issues, pruned=pruned
+    )
+    return {"agents": len(by_agent), "issues": issues, "pruned": pruned}
 
 
 def _rebuild_agent(session: Session, project_id: str, agent_id: str, items: list[tuple[str, str, str]]) -> int:
@@ -218,6 +250,17 @@ def _rebuild_agent(session: Session, project_id: str, agent_id: str, items: list
         if lab != -1:  # drop HDBSCAN noise
             raw[lab].append(tid)
     if not raw:
+        # every failing trace was HDBSCAN noise -> no clusters this run. Clear any this agent kept
+        # from a prior rebuild so they don't linger pointing at traces we no longer cover (the same
+        # project-wide-consistency invariant _prune_orphan_clusters enforces for dropped agents).
+        stale = list(session.execute(
+            select(FailureCluster.id).where(
+                FailureCluster.project_id == project_id,
+                FailureCluster.agent_id == agent_id,
+            )
+        ).scalars().all())
+        if _delete_clusters(session, stale):
+            session.commit()
         return 0
 
     # 3. per-cluster analysis agent
