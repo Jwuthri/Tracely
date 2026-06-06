@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { useMemo, useState } from "react";
 import type { ConvNode } from "../lib/api";
+import { mergeMeta, metaText } from "../lib/meta";
 import { TraceTable } from "./TraceTable";
 
 type Filter = "all" | "failing" | "multi";
@@ -28,7 +29,12 @@ export function TracesExplorer({ conversations }: { conversations: ConvNode[] })
       if (filter === "failing" && t.failing !== 1) return false;
       if (filter === "multi" && t.turns <= 1) return false;
       if (needle) {
-        const hay = `${t.first_input ?? ""} ${t.last_output ?? ""}`.toLowerCase();
+        // user-set metadata comes aggregated from the backend (list); fall back to loaded spans.
+        const meta =
+          t.metadata && Object.keys(t.metadata).length
+            ? t.metadata
+            : mergeMeta((t.turnsData ?? []).flatMap((tt) => tt.spans));
+        const hay = [t.first_input ?? "", t.last_output ?? "", t.model ?? "", metaText(meta)].join(" ").toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
@@ -58,7 +64,7 @@ export function TracesExplorer({ conversations }: { conversations: ConvNode[] })
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Filter these threads…"
+          placeholder="Filter by text, model, metadata…"
           className="w-56 rounded-lg border border-line bg-ink-800 px-3 py-1.5 text-[12.5px] text-fg placeholder:text-fg-faint focus:border-signal/40 focus:outline-none"
         />
       </div>

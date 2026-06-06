@@ -121,7 +121,10 @@ def _usage(attrs: dict[str, Any]) -> dict[str, int]:
 
 def _model_parameters(attrs: dict[str, Any]) -> str:
     params = {}
-    for k in ("gen_ai.request.temperature", "gen_ai.request.max_tokens", "gen_ai.request.top_p"):
+    for k in (
+        "gen_ai.request.temperature", "gen_ai.request.max_tokens", "gen_ai.request.top_p",
+        "gen_ai.request.frequency_penalty", "gen_ai.request.presence_penalty", "gen_ai.request.seed",
+    ):
         if k in attrs:
             params[k.rsplit(".", 1)[-1]] = attrs[k]
     return json.dumps(params) if params else ""

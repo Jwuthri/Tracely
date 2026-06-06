@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { ConvNode, FullTurn, SpanOut, ThreadTurn } from "../lib/api";
 import { convUsage, fmtUsd, spanUsage, turnUsage, usageSummary } from "../lib/usage";
+import { mergeMeta } from "../lib/meta";
 import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
 import { HighlightedJson } from "./JsonView";
 import { TypeChip } from "./ui";
@@ -66,6 +67,7 @@ const COLUMNS: Col[] = [
   { key: "ctime",        label: "Time",         group: "C", width: 88 },
   { key: "cdur",         label: "Duration",     group: "C", width: 96 },
   { key: "summary", label: "Summary", group: "C", width: 320 },
+  { key: "cmeta", label: "Metadata", group: "C", width: 200 },
   { key: "cusage", label: "Usage", group: "C", width: 180 },
   { key: "role", label: "Role", group: "M", width: 110 },
   { key: "mindex", label: "#", group: "M", width: 56 },
@@ -775,6 +777,15 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
     }
     case "summary":
       return ctx.level === "C" ? <ConvSummaryCell conv={ctx.conv} /> : null;
+    case "cmeta": {
+      if (ctx.level !== "C") return null;
+      // backend-aggregated thread metadata (available in the list); else union from loaded spans.
+      const m =
+        ctx.conv.metadata && Object.keys(ctx.conv.metadata).length
+          ? ctx.conv.metadata
+          : mergeMeta((ctx.conv.turnsData ?? []).flatMap((t) => t.spans));
+      return Object.keys(m).length ? <JsonPill raw={JSON.stringify(m)} /> : <span className="text-slate-500">—</span>;
+    }
     case "cusage":
       return ctx.level === "C" ? <UsageCell usage={convUsage(ctx.conv)} /> : null;
     // M group

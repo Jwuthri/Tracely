@@ -38,6 +38,8 @@ def kv(k: str, v) -> KeyValue:
         return KeyValue(key=k, value=AnyValue(bool_value=v))
     if isinstance(v, int):
         return KeyValue(key=k, value=AnyValue(int_value=v))
+    if isinstance(v, float):
+        return KeyValue(key=k, value=AnyValue(double_value=v))
     return KeyValue(key=k, value=AnyValue(string_value=str(v)))
 
 
@@ -150,9 +152,13 @@ def main() -> None:
     llm.attributes.extend([
         kv("gen_ai.operation.name", "chat"),
         kv("gen_ai.request.model", "gpt-4o"),
+        kv("gen_ai.request.temperature", 0.7),
+        kv("gen_ai.request.top_p", 1.0),
+        kv("gen_ai.request.max_tokens", 1024),
         kv("gen_ai.usage.input_tokens", 812),
         kv("gen_ai.usage.output_tokens", 96),
         kv("tracely.agent.id", "planner"),
+        kv("tracely.metadata.prompt_version", "v2"),
         kv("tracely.input",  llm_input),   # structured messages array
         kv("tracely.output", llm_output),  # structured assistant message
         kv_arr("tracely.tool_calls", ["get_weather"]),

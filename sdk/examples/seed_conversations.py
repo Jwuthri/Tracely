@@ -36,8 +36,14 @@ def think(agent: str, text: str, tokens: int = 90, *, model: str = "gpt-4o"):
         time.sleep(0.08)
 
 
-def gen(agent: str, messages, output, in_tok: int, out_tok: int, *, model: str = "gpt-4o", think_tok: int | None = None, tool_calls=None):
-    with tracely.llm(model, agent=agent) as g:
+def gen(agent: str, messages, output, in_tok: int, out_tok: int, *, model: str = "gpt-4o",
+        think_tok: int | None = None, tool_calls=None, temperature: float = 0.7, top_p: float = 1.0,
+        max_tokens: int = 1024, metadata: dict | None = None):
+    # LLM sampling params (temperature/top_p/max_tokens) are recorded as gen_ai.request.* and shown
+    # in the generation's Metadata; `metadata` adds arbitrary tags (e.g. prompt version).
+    meta = {"prompt_version": "v3", "decoding": "sampling", **(metadata or {})}
+    with tracely.llm(model, agent=agent, temperature=temperature, top_p=top_p, max_tokens=max_tokens,
+                     seed=7, metadata=meta) as g:
         # An LLM generation's input is a bare message array (Array<{role, content}>) so the
         # frontend ChatPill triggers. Output is the structured completion object (role / content /
         # finish_reason), like the chat-completions API returns — not a bare string. A dict output

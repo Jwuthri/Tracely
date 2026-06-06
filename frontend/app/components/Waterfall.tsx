@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { useMemo, useState } from "react";
 import type { SpanOut } from "../lib/api";
+import { spanMeta } from "../lib/meta";
 import { CopyId } from "./CopyId";
 import { IO } from "./IO";
 import { HighlightedJson, prettyJson } from "./JsonView";
@@ -310,6 +311,10 @@ function SpanPanel({ span }: { span: SpanOut | null }) {
         {span.model_id && <Row k="Model" v={span.model_id} />}
         {span.tokens > 0 && <Row k="Tokens" v={span.tokens.toLocaleString()} />}
         {span.cost > 0 && <Row k="Cost" v={`$${span.cost.toFixed(4)}`} />}
+        {/* LLM sampling params + any user metadata (temperature, top_p, …) */}
+        {Object.entries(spanMeta(span)).map(([k, v]) => (
+          <Row key={k} k={k} v={typeof v === "object" ? JSON.stringify(v) : String(v)} />
+        ))}
         {span.status_message && (
           <Row k="Status" v={<span className="text-fail">{span.status_message}</span>} />
         )}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends
@@ -13,6 +14,7 @@ from tracely.clickhouse import get_async_client
 from tracely.db import SyncSessionLocal
 from tracely.models import EvaluationCase, FailureCluster, GateRun
 from tracely.schemas import SpanOut, TraceDetail
+from tracely.textfmt import message_text
 
 router = APIRouter(prefix="/api")
 
@@ -57,6 +59,23 @@ _FAILING = (
     "AND name != 'tracely.run.quality'"
 )
 
+_META_PREFIX = "tracely.metadata."
+
+
+def _with_meta(row: dict) -> dict:
+    """Parse the thread's aggregated `metadata` JSON (a Map dumped by ClickHouse) into a clean dict
+    of user-set metadata, with the `tracely.metadata.` prefix stripped."""
+    raw = row.get("metadata")
+    meta: dict[str, str] = {}
+    if raw:
+        try:
+            for k, v in json.loads(raw).items():
+                meta[k[len(_META_PREFIX):] if k.startswith(_META_PREFIX) else k] = v
+        except (ValueError, TypeError):
+            pass
+    row["metadata"] = meta
+    return row
+
 
 @router.get("/sessions")
 async def list_sessions(limit: int = 50, project_id: str = Depends(get_project_id)) -> list[dict]:
@@ -78,7 +97,10 @@ async def list_sessions(limit: int = 50, project_id: str = Depends(get_project_i
           min(ts_min)                           AS first_ts,
           max(ts_max)                           AS last_ts,
           argMax(trace_id, ts_max)              AS last_trace_id,
-          max(t_failing)                        AS failing
+          max(t_failing)                        AS failing,
+          toJSONString(CAST(
+            (groupArrayArray(mapKeys(t_meta)), groupArrayArray(mapValues(t_meta))),
+            'Map(String, String)'))             AS metadata
         FROM (
           SELECT trace_id,
             max(conversation_id)                                          AS conv,
@@ -94,7 +116,11 @@ async def list_sessions(limit: int = 50, project_id: str = Depends(get_project_i
             toFloat64(sum(arraySum(mapValues(cost_details))))             AS t_cost,
             min(start_time)                                               AS ts_min,
             max(coalesce(end_time, start_time))                           AS ts_max,
-            maxIf(1, trace_id IN ({_FAILING}))                            AS t_failing
+            maxIf(1, trace_id IN ({_FAILING}))                            AS t_failing,
+            CAST(
+              (groupArrayArray(mapKeys(mapFilter((k, v) -> startsWith(k, 'tracely.metadata.'), CAST(metadata, 'Map(String, String)')))),
+               groupArrayArray(mapValues(mapFilter((k, v) -> startsWith(k, 'tracely.metadata.'), CAST(metadata, 'Map(String, String)'))))),
+              'Map(String, String)')                                      AS t_meta
           FROM events FINAL WHERE project_id = {{p:String}}
           GROUP BY trace_id
         )
@@ -104,7 +130,7 @@ async def list_sessions(limit: int = 50, project_id: str = Depends(get_project_i
         """,
         parameters={"p": project_id, "n": limit},
     )
-    return [dict(zip(res.column_names, row)) for row in res.result_rows]
+    return [_with_meta(dict(zip(res.column_names, row))) for row in res.result_rows]
 
 
 @router.get("/search")
@@ -115,24 +141,29 @@ async def search(q: str = "", project_id: str = Depends(get_project_id)) -> list
         return []
     out: list[dict] = []
     client = await get_async_client()
+    # Match any turn whose user message contains the query, then report the whole THREAD: its first
+    # message as the label, its TOTAL turn count, and its latest trace — so a multi-turn conversation
+    # links to /sessions (not a single matched turn) with the right turn count.
     res = await client.query(
         """
-        SELECT if(conv != '', conv, trace_id) AS thread, argMin(ti, tmin) AS first_input,
+        SELECT thread, argMin(ti, tmin) AS first_input,
                argMax(trace_id, tmax) AS last_trace, count() AS turns, max(tmax) AS last_ts
         FROM (
-          SELECT trace_id, max(conversation_id) AS conv,
+          SELECT trace_id,
+                 if(max(conversation_id) != '', max(conversation_id), trace_id) AS thread,
                  argMinIf(input, start_time, input != '') AS ti,
+                 positionCaseInsensitive(argMinIf(input, start_time, input != ''), {q:String}) > 0 AS matched,
                  min(start_time) AS tmin, max(coalesce(end_time, start_time)) AS tmax
           FROM events FINAL WHERE project_id = {p:String} GROUP BY trace_id
         )
-        WHERE positionCaseInsensitive(ti, {q:String}) > 0
-        GROUP BY thread ORDER BY last_ts DESC LIMIT 8
+        GROUP BY thread HAVING max(matched) > 0
+        ORDER BY last_ts DESC LIMIT 8
         """,
         parameters={"p": project_id, "q": q},
     )
     for thread, first_input, last_trace, turns, _ in res.result_rows:
         href = f"/sessions/{thread}" if turns > 1 else f"/traces/{last_trace}"
-        out.append({"type": "trace", "label": first_input or thread, "sub": f"{turns} turn(s)", "href": href})
+        out.append({"type": "trace", "label": message_text(first_input) or thread, "sub": f"{turns} turn(s)", "href": href})
 
     def registry():
         like = f"%{q}%"

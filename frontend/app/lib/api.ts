@@ -65,6 +65,7 @@ export type Thread = {
   last_ts: string;
   last_trace_id: string;
   failing: number;
+  metadata?: Record<string, string>;
 };
 
 export async function getSessions(): Promise<Thread[]> {

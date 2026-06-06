@@ -31,8 +31,8 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Span, Status, StatusCode
 
 __all__ = [
-    "init", "agent", "turn", "step", "llm", "tool", "thinking", "set_io", "set_usage", "error", "flush",
-    "fixtures", "fixture", "call_llm", "call_tool", "ToolError",
+    "init", "agent", "turn", "step", "llm", "tool", "thinking", "set_io", "set_usage", "set_metadata",
+    "error", "flush", "fixtures", "fixture", "call_llm", "call_tool", "ToolError",
 ]
 
 
@@ -121,12 +121,38 @@ def step(name: str, *, step_id: str | None = None) -> Iterator[Span]:
 
 
 @contextmanager
-def llm(model: str, *, agent: str | None = None) -> Iterator[Span]:
+def llm(
+    model: str,
+    *,
+    agent: str | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    max_tokens: int | None = None,
+    frequency_penalty: float | None = None,
+    presence_penalty: float | None = None,
+    seed: int | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> Iterator[Span]:
+    """An LLM generation. Pass the sampling parameters (temperature/top_p/max_tokens/…) — they're
+    recorded as standard `gen_ai.request.*` attributes and surfaced in the generation's Metadata.
+    `metadata` attaches arbitrary key/values (e.g. prompt version, tenant)."""
     with _t().start_as_current_span(model) as span:
         span.set_attribute("gen_ai.operation.name", "chat")
         span.set_attribute("gen_ai.request.model", model)
         if agent:
             span.set_attribute("tracely.agent.id", agent)
+        for key, val in (
+            ("gen_ai.request.temperature", temperature),
+            ("gen_ai.request.top_p", top_p),
+            ("gen_ai.request.max_tokens", max_tokens),
+            ("gen_ai.request.frequency_penalty", frequency_penalty),
+            ("gen_ai.request.presence_penalty", presence_penalty),
+            ("gen_ai.request.seed", seed),
+        ):
+            if val is not None:
+                span.set_attribute(key, val)
+        if metadata:
+            set_metadata(span, **metadata)
         yield span
 
 
@@ -164,6 +190,18 @@ def set_io(span: Span, *, input: Any = None, output: Any = None) -> None:
         span.set_attribute("tracely.input", _as_str(input))
     if output is not None:
         span.set_attribute("tracely.output", _as_str(output))
+
+
+def set_metadata(span: Span, **kv: Any) -> None:
+    """Attach arbitrary metadata to a span as `tracely.metadata.<key>` attributes — surfaced in the
+    UI's Metadata column / span panel (and searchable). Non-scalar values are JSON-encoded."""
+    for k, v in kv.items():
+        if v is None:
+            continue
+        span.set_attribute(
+            f"tracely.metadata.{k}",
+            v if isinstance(v, (str, int, float, bool)) else json.dumps(v, default=str),
+        )
 
 
 def set_usage(
