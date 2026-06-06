@@ -45,7 +45,12 @@ def _post_json(url: str, key: str, body: dict):
 
 
 def trigger_gate(
-    api: str, key: str, agent: str, env: str, git_ref: str, pr: int | None,
+    api: str,
+    key: str,
+    agent: str,
+    env: str,
+    git_ref: str,
+    pr: int | None,
     candidates: dict[str, str] | None = None,
 ) -> dict:
     body: dict = {"agent": agent, "env": env, "git_ref": git_ref, "pr_number": pr}
@@ -104,7 +109,9 @@ def render_markdown(data: dict, web_url: str, sha: str) -> str:
     ]
     for c in data.get("cases", []):
         reason = case_reason(c.get("detail") or {}).replace("|", "\\|")
-        lines.append(f"| {EMOJI.get(c['verdict'], '❔')} | {c['title']} | {c['verdict']} | {reason} |")
+        lines.append(
+            f"| {EMOJI.get(c['verdict'], '❔')} | {c['title']} | {c['verdict']} | {reason} |"
+        )
     lines.append("")
     warnings = data.get("warnings") or []
     if warnings:
@@ -164,12 +171,17 @@ class GitHub:
             if body is not None:
                 print(json.dumps(body, indent=2))
             return {"id": 0, "html_url": url}
-        req = urllib.request.Request(url, data=data, method=method, headers={
-            "Authorization": f"Bearer {self.token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "content-type": "application/json",
-        })
+        req = urllib.request.Request(
+            url,
+            data=data,
+            method=method,
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "content-type": "application/json",
+            },
+        )
         try:
             with urllib.request.urlopen(req) as r:
                 return json.load(r) if r.length != 0 else {}
@@ -178,16 +190,24 @@ class GitHub:
             return None
 
     def commit_status(self, repo: str, sha: str, state: str, description: str, target_url: str):
-        self._call("POST", f"/repos/{repo}/statuses/{sha}", {
-            "state": state,  # success | failure | error | pending
-            "context": STATUS_CONTEXT,
-            "description": description[:140],
-            **({"target_url": target_url} if target_url else {}),
-        })
+        self._call(
+            "POST",
+            f"/repos/{repo}/statuses/{sha}",
+            {
+                "state": state,  # success | failure | error | pending
+                "context": STATUS_CONTEXT,
+                "description": description[:140],
+                **({"target_url": target_url} if target_url else {}),
+            },
+        )
 
     def upsert_comment(self, repo: str, pr: int, body: str):
         # update our previous comment in place (keyed by the hidden marker) instead of spamming
-        existing = [] if self.dry_run else (self._call("GET", f"/repos/{repo}/issues/{pr}/comments?per_page=100") or [])
+        existing = (
+            []
+            if self.dry_run
+            else (self._call("GET", f"/repos/{repo}/issues/{pr}/comments?per_page=100") or [])
+        )
         prior = next(
             (c for c in existing if isinstance(c, dict) and MARKER in (c.get("body") or "")), None
         )
@@ -207,7 +227,9 @@ def write_step_summary(markdown: str) -> None:
 # ── command ──────────────────────────────────────────────────────────────────
 
 
-def post_pr_check(args: argparse.Namespace, data: dict, web_url: str, repo: str, sha: str, pr: int | None) -> None:
+def post_pr_check(
+    args: argparse.Namespace, data: dict, web_url: str, repo: str, sha: str, pr: int | None
+) -> None:
     """Post the gate result to GitHub (commit status + PR comment) when running in/for Actions."""
     token = args.token or os.environ.get("GITHUB_TOKEN", "")
     want_github = args.github or (os.environ.get("GITHUB_ACTIONS") == "true" and token)
@@ -227,7 +249,11 @@ def post_pr_check(args: argparse.Namespace, data: dict, web_url: str, repo: str,
         gh.commit_status(repo, sha, state, desc, target)
     if pr:
         gh.upsert_comment(repo, pr, render_markdown(data, web_url, sha))
-    print(f"posted gate check to {repo}" + (f" PR #{pr}" if pr else "") + (" (dry-run)" if args.dry_run else ""))
+    print(
+        f"posted gate check to {repo}"
+        + (f" PR #{pr}" if pr else "")
+        + (" (dry-run)" if args.dry_run else "")
+    )
 
 
 def _conn(args: argparse.Namespace) -> tuple[str, str, str, str]:
@@ -292,7 +318,9 @@ def _wait_for_traces(api: str, key: str, trace_ids: list[str], timeout: int = 45
         if pending:
             time.sleep(2)
     if pending:
-        print(f"warning: {len(pending)} replayed trace(s) not ingested in {timeout}s; gating anyway")
+        print(
+            f"warning: {len(pending)} replayed trace(s) not ingested in {timeout}s; gating anyway"
+        )
     return not pending
 
 
@@ -344,8 +372,13 @@ def cmd_replay(args: argparse.Namespace) -> int:
         import time
 
         for c in cases:
-            env = {**os.environ, "TRACELY_INPUT": c["input"], "TRACELY_API": api,
-                   "TRACELY_KEY": key, "TRACELY_ENV": args.env}
+            env = {
+                **os.environ,
+                "TRACELY_INPUT": c["input"],
+                "TRACELY_API": api,
+                "TRACELY_KEY": key,
+                "TRACELY_ENV": args.env,
+            }
             subprocess.run(args.cmd, shell=True, env=env, check=False)
             print(f"  · ran cmd for {c['title']}")
         time.sleep(8)  # external process emits its own trace; give ingestion a moment
@@ -371,9 +404,13 @@ def _add_common_gate_flags(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--pr", type=int, help="PR number (else inferred from the Actions event)")
     sp.add_argument("--sha", help="commit SHA (else inferred)")
     sp.add_argument("--github", action="store_true", help="post a commit status + PR comment")
-    sp.add_argument("--no-github", action="store_true", help="never touch GitHub even inside Actions")
+    sp.add_argument(
+        "--no-github", action="store_true", help="never touch GitHub even inside Actions"
+    )
     sp.add_argument("--token", help="GitHub token (else GITHUB_TOKEN)")
-    sp.add_argument("--dry-run", action="store_true", help="print the GitHub calls instead of sending")
+    sp.add_argument(
+        "--dry-run", action="store_true", help="print the GitHub calls instead of sending"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -388,9 +425,17 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("replay", help="re-run the agent on each promoted case, then gate the PR")
     r.add_argument("agent", nargs="?", help="agent slug (or --agent / TRACELY_AGENT)")
     r.add_argument("--agent", dest="agent_opt", help="agent slug")
-    r.add_argument("--entrypoint", help="Python agent as 'module:function'; called with each case input")
-    r.add_argument("--cmd", help="shell command to run per case (gets TRACELY_INPUT); emits its own trace")
-    r.add_argument("--live", action="store_true", help="make real tool/LLM calls instead of serving recorded fixtures")
+    r.add_argument(
+        "--entrypoint", help="Python agent as 'module:function'; called with each case input"
+    )
+    r.add_argument(
+        "--cmd", help="shell command to run per case (gets TRACELY_INPUT); emits its own trace"
+    )
+    r.add_argument(
+        "--live",
+        action="store_true",
+        help="make real tool/LLM calls instead of serving recorded fixtures",
+    )
     _add_common_gate_flags(r)
 
     args = p.parse_args(argv)

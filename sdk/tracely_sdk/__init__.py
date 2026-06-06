@@ -1,50 +1,136 @@
-"""Tracely SDK — instrument an agent and export traces to Tracely over OTLP.
+"""Tracely SDK — automatic + manual tracing, exported to Tracely over OTLP.
+
+Automatic (the default path — zero span code):
 
     import tracely_sdk as tracely
-    tracely.init(endpoint="http://localhost:8000", api_key="tracely_dev_key", service_name="my-agent")
+    tracely.init(env="prod")                       # activates OpenAI/Anthropic/… instrumentors
+
+    with tracely.trace(agent="planner", conversation="conv-1", user="u_7"):
+        OpenAI().chat.completions.create(model="gpt-4o", messages=[...])   # traced, no span code
+
+    @tracely.observe(as_type="agent")              # function-level spans, auto-nested
+    def plan(goal): ...
+
+Manual (the escape hatch — full control):
 
     with tracely.agent("planner", version="v1") as a:
         with tracely.llm("gpt-4o") as g:
             tracely.set_io(g, input=prompt, output=completion)
             tracely.set_usage(g, input_tokens=812, output_tokens=96)
-        with tracely.tool("get_weather") as t:
-            ...                      # on failure: tracely.error(t, "upstream timeout")
     tracely.flush()
 
 Emits standard gen_ai.* / OpenInference-compatible attributes plus Tracely's first-class
 `tracely.*` hints (agent id, version, run, conversation, turn, step, env) so the backend
-populates the first-class span columns. Thin wrapper over the OpenTelemetry SDK.
+populates the first-class span columns. Thin wrapper over the OpenTelemetry SDK: a custom
+`SpanProcessor` stamps the active `tracely.trace()` context onto every span — including the
+zero-touch provider spans created by the auto-instrumentors, which know nothing about Tracely.
 """
 
 from __future__ import annotations
 
+import functools
+import inspect
 import json
+import logging
+import threading
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, copy_context
 from typing import Any, Callable, Iterator
 
-from opentelemetry import trace
+from opentelemetry import trace as otel_trace  # `trace` is our public run-context API (below)
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Span, Status, StatusCode
 
 __all__ = [
-    "init", "agent", "turn", "step", "llm", "tool", "thinking", "retriever", "embedding",
-    "guardrail", "chain", "set_io", "set_usage", "set_metadata", "error", "flush",
-    "fixtures", "fixture", "call_llm", "call_tool", "ToolError",
+    "init",
+    "trace",
+    "observe",
+    "agent",
+    "turn",
+    "step",
+    "llm",
+    "tool",
+    "thinking",
+    "retriever",
+    "embedding",
+    "guardrail",
+    "chain",
+    "set_io",
+    "set_usage",
+    "set_metadata",
+    "error",
+    "flush",
+    "run_in_thread",
+    "fixtures",
+    "fixture",
+    "call_llm",
+    "call_tool",
+    "ToolError",
 ]
+
+log = logging.getLogger("tracely")
 
 
 class ToolError(RuntimeError):
     """Raised by call_tool/call_llm in hermetic replay when the recorded call errored — so the
     agent's own error handling (try/except) runs exactly as it would against the live tool."""
 
-_tracer: trace.Tracer | None = None
+
+_tracer: otel_trace.Tracer | None = None
+_provider: TracerProvider | None = None
 _env: str = "prod"
+_initialized: bool = False
+# the active tracely.trace() run context (agent/conversation/turn/user/trace_name/env/metadata),
+# stamped onto every span by TracelyContextSpanProcessor — including auto-instrumentor spans.
+_run_ctx: ContextVar[dict | None] = ContextVar("tracely_run_ctx", default=None)
 # recorded tool/LLM outputs for hermetic replay; set by `with fixtures(bundle): ...`
 _fixtures: ContextVar[dict | None] = ContextVar("tracely_fixtures", default=None)
+
+
+class TracelyContextSpanProcessor(SpanProcessor):
+    """The linchpin (PRD §6, R4). Auto-instrumentor spans are created by *their* code and know
+    nothing about Tracely — so on every span's `on_start` we read the active `tracely.trace()`
+    context (a contextvar) and stamp `tracely.*` hints onto the span. That's how zero-touch
+    provider spans inherit the run's agent/conversation/turn/user/env without the instrumentor
+    knowing Tracely exists. Manual spans set the same attributes after start, so they win on
+    conflict; `tracely.env` is owned here (run-ctx value, else the init() default)."""
+
+    def on_start(self, span: Span, parent_context: Any = None) -> None:  # noqa: ARG002
+        ctx = _run_ctx.get()
+        env = (ctx or {}).get("env") or _env
+        if env:
+            span.set_attribute("tracely.env", str(env))
+        if not ctx:
+            return
+        if ctx.get("agent"):
+            span.set_attribute("tracely.agent.id", str(ctx["agent"]))
+        if ctx.get("conversation"):
+            span.set_attribute("tracely.conversation.id", str(ctx["conversation"]))
+            span.set_attribute("session.id", str(ctx["conversation"]))
+        if ctx.get("turn") is not None:
+            span.set_attribute("tracely.turn.index", int(ctx["turn"]))
+        if ctx.get("user"):
+            span.set_attribute("tracely.user.id", str(ctx["user"]))
+        if ctx.get("trace_name"):
+            span.set_attribute("tracely.trace.name", str(ctx["trace_name"]))
+        for k, v in (ctx.get("metadata") or {}).items():
+            if v is not None:
+                span.set_attribute(
+                    f"tracely.metadata.{k}",
+                    v if isinstance(v, (str, int, float, bool)) else json.dumps(v, default=str),
+                )
+
+    def on_end(self, span: Any) -> None:
+        pass
+
+    def shutdown(self) -> None:
+        pass
+
+    def force_flush(self, timeout_millis: int = 30_000) -> bool:  # noqa: ARG002
+        return True
 
 
 def init(
@@ -52,27 +138,381 @@ def init(
     api_key: str = "tracely_dev_key",
     service_name: str = "agent",
     env: str = "prod",
-) -> trace.Tracer:
-    """Configure the OTLP exporter pointing at Tracely. Call once at startup."""
-    global _tracer, _env
+    instrument: str | list[str] | bool = "auto",
+) -> otel_trace.Tracer:
+    """One-call setup (R1). Configures the OTel provider + OTLP exporter pointing at Tracely,
+    registers the context-stamping processor, and activates the matching auto-instrumentors so your
+    existing OpenAI/Anthropic/… code is traced with zero span code.
+
+    `instrument`:
+      - "auto" (default) — activate instrumentors for whatever provider SDKs are importable.
+      - ["openai", "anthropic", "litellm", …] — activate exactly these.
+      - False — set up export only; no auto-instrumentation (use the manual API / @observe).
+
+    Call once at startup; idempotent (provider built once; instrumentor activation de-duped, R7).
+    Streaming token usage requires `stream_options={"include_usage": True}` on OpenAI calls (R3)."""
+    global _tracer, _provider, _env, _initialized
     _env = env
-    resource = Resource.create({"service.name": service_name, "telemetry.sdk.language": "python"})
-    provider = TracerProvider(resource=resource)
-    exporter = OTLPSpanExporter(
-        endpoint=f"{endpoint.rstrip('/')}/v1/traces",
-        headers={"Authorization": f"Bearer {api_key}"},
-    )
-    provider.add_span_processor(BatchSpanProcessor(exporter))
-    trace.set_tracer_provider(provider)
-    _tracer = trace.get_tracer("tracely-sdk")
-    return _tracer
+    if not (_initialized and _provider is not None):
+        resource = Resource.create(
+            {"service.name": service_name, "telemetry.sdk.language": "python"}
+        )
+        provider = TracerProvider(resource=resource)
+        provider.add_span_processor(TracelyContextSpanProcessor())  # stamps tracely.* on every span
+        exporter = OTLPSpanExporter(
+            endpoint=f"{endpoint.rstrip('/')}/v1/traces",
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        provider.add_span_processor(BatchSpanProcessor(exporter))
+        otel_trace.set_tracer_provider(provider)
+        _provider = provider
+        _tracer = otel_trace.get_tracer("tracely-sdk")
+        _initialized = True
+    _activate_instrumentors(instrument)  # idempotent; re-runnable to add providers later
+    return _tracer  # type: ignore[return-value]
 
 
-def _t() -> trace.Tracer:
+def _t() -> otel_trace.Tracer:
     if _tracer is None:
         init()
     assert _tracer is not None
     return _tracer
+
+
+# ── auto-instrumentation (L1) ────────────────────────────────────────────────
+# Adopt the OTel ecosystem (D1): per provider, try OpenInference (Arize) then OpenLLMetry
+# (Traceloop) — the first importable wins, so a provider is instrumented by exactly ONE path (no
+# double spans, R7). Backend ingests both gen_ai.* and llm.* independently (D3), so either works.
+
+# canonical provider/harness -> ordered (module, class) instrumentor candidates; first importable
+# activates. OpenInference (Arize) is primary; OpenLLMetry (Traceloop) secondary where it ships one.
+_INSTRUMENTORS: dict[str, list[tuple[str, str]]] = {
+    # frontier providers
+    "openai": [
+        ("openinference.instrumentation.openai", "OpenAIInstrumentor"),
+        ("opentelemetry.instrumentation.openai_v2", "OpenAIInstrumentor"),
+        ("opentelemetry.instrumentation.openai", "OpenAIInstrumentor"),
+    ],
+    "anthropic": [
+        ("openinference.instrumentation.anthropic", "AnthropicInstrumentor"),
+        ("opentelemetry.instrumentation.anthropic", "AnthropicInstrumentor"),
+    ],
+    "google": [
+        ("openinference.instrumentation.google_genai", "GoogleGenAIInstrumentor"),
+        ("opentelemetry.instrumentation.google_generativeai", "GoogleGenerativeAiInstrumentor"),
+    ],
+    "mistral": [("openinference.instrumentation.mistralai", "MistralAIInstrumentor")],
+    "bedrock": [("openinference.instrumentation.bedrock", "BedrockInstrumentor")],
+    "groq": [("openinference.instrumentation.groq", "GroqInstrumentor")],
+    # harnesses (orchestration frameworks)
+    "langchain": [  # also covers LangGraph (built on LangChain's callback system)
+        ("openinference.instrumentation.langchain", "LangChainInstrumentor"),
+        ("opentelemetry.instrumentation.langchain", "LangchainInstrumentor"),
+    ],
+    "llama-index": [("openinference.instrumentation.llama_index", "LlamaIndexInstrumentor")],
+    "crewai": [("openinference.instrumentation.crewai", "CrewAIInstrumentor")],
+}
+# provider/harness keys that wrap an LLM provider directly (vs. harnesses that route through them) —
+# used by the LangChain de-dup guard to know what to suppress under "auto".
+_PROVIDER_KEYS = frozenset({"openai", "anthropic", "google", "mistral", "bedrock", "groq"})
+# aliases normalized to a canonical key
+_ALIASES = {
+    "gemini": "google",
+    "google-genai": "google",
+    "googleai": "google",
+    "genai": "google",
+    "mistralai": "mistral",
+    "llama_index": "llama-index",
+    "llamaindex": "llama-index",
+    "aws": "bedrock",
+    "bedrock-runtime": "bedrock",
+}
+# SDK import name used to detect a provider for instrument="auto". Only providers whose SDK presence
+# strongly implies intent to trace them (litellm/bedrock are opt-in: a router / boto3 is too common).
+_PROVIDER_SDK: dict[str, str] = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "google": "google.genai",
+    "mistral": "mistralai",
+    "langchain": "langchain_core",
+}
+_AUTO_PROVIDERS = ("openai", "anthropic", "google", "mistral", "langchain")
+_instrumented: set[str] = set()
+
+
+def _module_available(name: str) -> bool:
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError, ModuleNotFoundError):
+        return False
+
+
+def _import_attr(module: str, attr: str) -> Any:
+    import importlib
+
+    try:
+        return getattr(importlib.import_module(module), attr)
+    except (ImportError, AttributeError):
+        return None
+
+
+def _activate_litellm() -> bool:
+    """Route LiteLLM's 100+ providers through OTel via its `otel` callback (R12). LiteLLM is
+    opt-in (not part of "auto") because instrumenting both LiteLLM and a provider SDK double-traces
+    calls LiteLLM makes to that provider — disable the overlap with OTEL_PYTHON_DISABLED_INSTRUMENTATIONS (R7)."""
+    import importlib
+
+    try:
+        litellm = importlib.import_module("litellm")
+    except ImportError:
+        log.warning('tracely: instrument=["litellm"] requested but litellm is not installed')
+        return False
+    cbs = list(getattr(litellm, "callbacks", None) or [])
+    if "otel" not in cbs:
+        cbs.append("otel")
+    litellm.callbacks = cbs
+    _instrumented.add("litellm")
+    log.info("tracely: enabled litellm otel callback")
+    return True
+
+
+def _has_instrumentor(name: str) -> bool:
+    """Is an instrumentor package for `name` importable (not just the provider SDK)?"""
+    return any(_module_available(mod) for mod, _ in _INSTRUMENTORS.get(name, []))
+
+
+def _activate_one(name: str) -> bool:
+    name = _ALIASES.get(name, name)  # gemini -> google, etc.
+    if name in _instrumented:
+        return True  # idempotent — one path per provider (R7)
+    if name == "litellm":
+        return _activate_litellm()
+    for module, cls in _INSTRUMENTORS.get(name, []):
+        instr_cls = _import_attr(module, cls)
+        if instr_cls is None:
+            continue
+        try:
+            instr_cls().instrument(tracer_provider=_provider)
+            _instrumented.add(name)
+            log.info("tracely: instrumented %s via %s", name, module)
+            return True
+        except Exception as e:  # a broken/older instrumentor shouldn't crash startup
+            log.warning("tracely: failed to instrument %s via %s: %s", name, module, e)
+    if _module_available(_PROVIDER_SDK.get(name, name)):  # SDK present but instrumentor missing
+        log.warning(
+            'tracely: %s is installed but no instrumentor found — pip install "tracely-sdk[%s]"',
+            name,
+            name,
+        )
+    return False
+
+
+def _resolve_targets(instrument: str | list[str] | bool) -> list[str]:
+    """Which providers to activate. "auto"/True → installed SDKs (with the LangChain de-dup guard);
+    a list → exactly those (honored as-is — the override); False/None → none."""
+    if instrument in (False, None):
+        return []
+    if instrument in ("auto", True):
+        targets = [p for p in _AUTO_PROVIDERS if _module_available(_PROVIDER_SDK[p])]
+        # De-dup guard (R7): LangChain routes through the provider SDKs, so running the LangChain
+        # instrumentor AND a provider instrumentor double-traces LangChain→provider calls (sibling
+        # spans). In "auto", when the LangChain instrumentor is installed, it owns LLM spans — skip
+        # the provider instrumentors. Override by passing an explicit list (honored as-is).
+        if "langchain" in targets and _has_instrumentor("langchain"):
+            dropped = [p for p in targets if p in _PROVIDER_KEYS]
+            if dropped:
+                log.warning(
+                    "tracely: LangChain instrumentation active — skipping %s auto-instrumentation to "
+                    "avoid duplicate spans. Pass instrument=%r to force both.",
+                    dropped,
+                    ["langchain", *dropped],
+                )
+                targets = [p for p in targets if p not in dropped]
+        return targets
+    if isinstance(instrument, str):
+        return [instrument]
+    return [str(x) for x in instrument]
+
+
+def _activate_instrumentors(instrument: str | list[str] | bool) -> None:
+    for name in _resolve_targets(instrument):
+        _activate_one(name.lower())
+
+
+# ── run context (L3) ─────────────────────────────────────────────────────────
+# `tracely.trace(...)` sets the run-level tracely.* hints once; the span processor flows them onto
+# every child span (auto or manual), replacing today's per-span agent=/conversation= plumbing (R9).
+
+
+class _Trace:
+    """The object returned by `tracely.trace(...)`. Usable three ways — as a context manager
+    (`with tracely.trace(...):`), a sync decorator, or an async decorator. Each entry merges its
+    fields over the enclosing run context (so nested traces inherit + override), and resets on
+    exit. It sets context only — it does not open a span (an `@observe`/`agent()` span, or the
+    auto-instrumentor's own span, becomes the root)."""
+
+    __slots__ = ("_fields", "_token")
+
+    def __init__(self, fields: dict[str, Any]):
+        self._fields = {k: v for k, v in fields.items() if v not in (None, {})}
+        self._token: Any = None
+
+    def __enter__(self) -> dict[str, Any]:
+        parent = _run_ctx.get() or {}
+        merged = {**parent, **self._fields}
+        merged["metadata"] = {**parent.get("metadata", {}), **self._fields.get("metadata", {})}
+        self._token = _run_ctx.set(merged)
+        return merged
+
+    def __exit__(self, *exc: Any) -> bool:
+        if self._token is not None:
+            _run_ctx.reset(self._token)
+            self._token = None
+        return False
+
+    def __call__(self, fn: Callable) -> Callable:
+        if inspect.iscoroutinefunction(fn):
+
+            @functools.wraps(fn)
+            async def awrapper(*a: Any, **k: Any) -> Any:
+                with _Trace(self._fields):
+                    return await fn(*a, **k)
+
+            return awrapper
+
+        @functools.wraps(fn)
+        def wrapper(*a: Any, **k: Any) -> Any:
+            with _Trace(self._fields):
+                return fn(*a, **k)
+
+        return wrapper
+
+
+def trace(
+    agent: str | None = None,
+    *,
+    conversation: str | None = None,
+    turn: int | None = None,
+    user: str | None = None,
+    trace_name: str | None = None,
+    env: str | None = None,
+    **metadata: Any,
+) -> _Trace:
+    """Open a run context: set `agent`/`conversation`/`turn`/`user`/`trace_name`/`env` (+ arbitrary
+    `metadata`) once, and every span started inside — including zero-touch provider spans from the
+    auto-instrumentors — inherits them via the context processor (R9/R4). Use as a context manager
+    or a (sync/async) decorator. Nested `trace()`s merge over the enclosing one."""
+    return _Trace(
+        {
+            "agent": agent,
+            "conversation": conversation,
+            "turn": turn,
+            "user": user,
+            "trace_name": trace_name,
+            "env": env,
+            "metadata": {k: v for k, v in metadata.items()},
+        }
+    )
+
+
+# ── @observe (L2) ────────────────────────────────────────────────────────────
+
+
+def _capture_args(span: Span, func: Callable, a: tuple, k: dict) -> None:
+    """Bind call args to parameter names → `tracely.input` (best effort; drops self/cls)."""
+    try:
+        bound = inspect.signature(func).bind(*a, **k)
+        bound.apply_defaults()
+        args = dict(bound.arguments)
+        args.pop("self", None)
+        args.pop("cls", None)
+    except (TypeError, ValueError):
+        args = {"args": list(a), **({"kwargs": k} if k else {})}
+    if args:
+        set_io(span, input=args)
+
+
+def observe(
+    fn: Callable | None = None,
+    *,
+    name: str | None = None,
+    as_type: str = "span",
+    capture_input: bool = True,
+    capture_output: bool = True,
+) -> Callable:
+    """Wrap any sync/async function as a span (R8): args→input, return→output, latency, and
+    exceptions (→ level=ERROR) captured automatically; auto-nests via OTel context — no manual
+    parent wiring. `as_type` (span | generation | agent | tool | chain | retriever | embedding |
+    guardrail | …) becomes `tracely.observation.type`. Usable as `@observe` or `@observe(...)`."""
+
+    def decorate(func: Callable) -> Callable:
+        span_name = name or getattr(func, "__name__", "observed")
+        otype = str(as_type).upper()
+
+        @functools.wraps(func)
+        def sync_wrapper(*a: Any, **k: Any) -> Any:
+            with _t().start_as_current_span(span_name) as span:
+                span.set_attribute("tracely.observation.type", otype)
+                if capture_input:
+                    _capture_args(span, func, a, k)
+                try:
+                    out = func(*a, **k)
+                except Exception as e:
+                    error(span, str(e))
+                    raise
+                if capture_output and out is not None:
+                    set_io(span, output=out)
+                return out
+
+        @functools.wraps(func)
+        async def async_wrapper(*a: Any, **k: Any) -> Any:
+            with _t().start_as_current_span(span_name) as span:
+                span.set_attribute("tracely.observation.type", otype)
+                if capture_input:
+                    _capture_args(span, func, a, k)
+                try:
+                    out = await func(*a, **k)
+                except Exception as e:
+                    error(span, str(e))
+                    raise
+                if capture_output and out is not None:
+                    set_io(span, output=out)
+                return out
+
+        return async_wrapper if inspect.iscoroutinefunction(func) else sync_wrapper
+
+    return decorate(fn) if callable(fn) else decorate
+
+
+# ── threads (R10) ────────────────────────────────────────────────────────────
+# Auto-nesting is contextvar-based and in-process: a raw threading.Thread starts with a fresh,
+# detached context, so spans it creates would NOT nest under the current span or see trace().
+
+
+class _ContextThread(threading.Thread):
+    def __init__(self, ctx: Any, fn: Callable, args: tuple, kwargs: dict):
+        super().__init__()
+        self._ctx, self._fn, self._args, self._kwargs = ctx, fn, args, kwargs
+        self.result: Any = None
+        self.exc: BaseException | None = None
+
+    def run(self) -> None:
+        try:
+            self.result = self._ctx.run(self._fn, *self._args, **self._kwargs)
+        except BaseException as e:  # surfaced to the caller via `.exc` after join()
+            self.exc = e
+
+
+def run_in_thread(fn: Callable, *args: Any, **kwargs: Any) -> _ContextThread:
+    """Run `fn` in a new thread that inherits the current trace context, so spans it creates nest
+    under the active span / `tracely.trace(...)` (R10). Returns the started Thread — `join()` it,
+    then read `.result` (or `.exc`). For thread pools, wrap the callable with
+    `contextvars.copy_context().run` per task the same way."""
+    th = _ContextThread(copy_context(), fn, args, kwargs)
+    th.start()
+    return th
 
 
 @contextmanager
@@ -96,7 +536,7 @@ def agent(
     with _t().start_as_current_span(slug) as span:
         span.set_attribute("tracely.agent.id", slug)
         span.set_attribute("tracely.observation.type", "AGENT")
-        span.set_attribute("tracely.env", _env)
+        # tracely.env is stamped by TracelyContextSpanProcessor (run-ctx value, else init() default)
         if version:
             span.set_attribute("tracely.agent.version", version)
         if run_id:
@@ -188,7 +628,9 @@ def tool(name: str, *, agent: str | None = None) -> Iterator[Span]:
 
 
 @contextmanager
-def thinking(name: str = "thinking", *, agent: str | None = None, model: str | None = None) -> Iterator[Span]:
+def thinking(
+    name: str = "thinking", *, agent: str | None = None, model: str | None = None
+) -> Iterator[Span]:
     """A reasoning step. First-class observation type THINKING — the model's chain-of-thought,
     emitted as its own span so it shows up distinctly from the GENERATION that follows. Put the
     reasoning text in `set_io(span, output=...)` and reasoning tokens in `set_usage(..., thinking_tokens=)`.
@@ -290,7 +732,7 @@ def error(span: Span, message: str = "") -> None:
 
 
 def flush() -> None:
-    provider = trace.get_tracer_provider()
+    provider = otel_trace.get_tracer_provider()
     if hasattr(provider, "force_flush"):
         provider.force_flush()
 
@@ -362,7 +804,9 @@ def fixture(kind: str, name: str) -> Any:
     return queue[0].get("output") if queue else None
 
 
-def call_tool(name: str, fn: Callable[[], Any], *, args: Any = None, agent: str | None = None) -> Any:
+def call_tool(
+    name: str, fn: Callable[[], Any], *, args: Any = None, agent: str | None = None
+) -> Any:
     """Execute a tool inside a TOOL span — but in hermetic replay serve the recorded call and
     never call `fn`. Pass `args` to match a specific recorded call; without it, recorded calls are
     served in order. If the recorded call ERRORED in production, the replayed span is marked ERROR
@@ -386,8 +830,12 @@ def call_tool(name: str, fn: Callable[[], Any], *, args: Any = None, agent: str 
 
 
 def call_llm(
-    model: str, fn: Callable[[], Any], *, input: Any = None,
-    usage: tuple[int, int] | None = None, agent: str | None = None,
+    model: str,
+    fn: Callable[[], Any],
+    *,
+    input: Any = None,
+    usage: tuple[int, int] | None = None,
+    agent: str | None = None,
 ) -> Any:
     """Execute an LLM call inside a GENERATION span — but in hermetic replay serve the recorded
     completion (in recorded order) and never call `fn`. A recorded error is reproduced on the span

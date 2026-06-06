@@ -1,0 +1,54 @@
+"""LlamaIndex — automatic tracing of a ReAct tool-calling agent (PRD 12).
+
+A `ReActAgent` over the fake-DB tools (`FunctionTool`s). `tracely.init()` activates the LlamaIndex
+instrumentor, so the agent's reasoning steps, tool calls, and LLM calls trace end-to-end, nested.
+
+    pip install "tracely-sdk[llama-index]" llama-index llama-index-llms-openai
+    export OPENAI_API_KEY=sk-...
+    TRACELY_API=http://localhost:8000 uv run python sdk/examples/auto_llama_index.py
+"""
+
+from __future__ import annotations
+
+import os
+
+import _fake_db
+import tracely_sdk as tracely
+from _fake_db import QUESTION
+
+API = os.environ.get("TRACELY_API", "http://localhost:8000")
+KEY = os.environ.get("TRACELY_KEY", "tracely_dev_key")
+
+tracely.init(
+    endpoint=API, api_key=KEY, service_name="support-agent", env="prod", instrument=["llama-index"]
+)
+
+
+def main() -> None:
+    if "llama-index" not in tracely._instrumented:
+        print('LlamaIndex instrumentation not active — pip install "tracely-sdk[llama-index]"')
+        return
+    if not os.environ.get("OPENAI_API_KEY"):
+        print("Set OPENAI_API_KEY to make a real call.")
+        return
+
+    from llama_index.core.agent import ReActAgent
+    from llama_index.core.tools import FunctionTool
+    from llama_index.llms.openai import OpenAI as LlamaOpenAI
+
+    tools = [
+        FunctionTool.from_defaults(fn=_fake_db.get_order_status),
+        FunctionTool.from_defaults(fn=_fake_db.check_inventory),
+    ]
+    agent = ReActAgent.from_tools(tools, llm=LlamaOpenAI(model="gpt-4o-mini"), verbose=False)
+
+    with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
+        resp = agent.chat(QUESTION)
+        print("agent:", resp)
+
+    tracely.flush()
+    print("sent — open Tracely → Traces to see the ReAct agent → tool + LLM spans tree.")
+
+
+if __name__ == "__main__":
+    main()

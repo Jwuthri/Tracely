@@ -1,12 +1,37 @@
 [project]
 name = "tracely-sdk"
 version = "0.1.0"
-description = "Tracely Python SDK: instrument agents and export traces to Tracely over OTLP."
+description = "Tracely Python SDK: automatic + manual agent tracing, exported to Tracely over OTLP."
 requires-python = ">=3.10"
 dependencies = [
   "opentelemetry-sdk>=1.25",
   "opentelemetry-exporter-otlp-proto-http>=1.25",
 ]
+
+# Auto-instrumentation extras (PRD 12 §9). `tracely.init("auto")` activates whichever instrumentor
+# is importable; each provider extra pulls the OpenInference (Arize) package by default. The
+# OpenLLMetry (Traceloop) instrumentors are an equivalent alternative — `init("auto")` detects them
+# too — install them via the `openllmetry` extra or directly. Pin/version-tracking policy is owned
+# per PRD §13 (conventions drift); floors below are conservative, not exhaustively pinned.
+[project.optional-dependencies]
+# frontier providers
+openai = ["openinference-instrumentation-openai>=0.1.0"]
+anthropic = ["openinference-instrumentation-anthropic>=0.1.0"]
+google = ["openinference-instrumentation-google-genai>=0.1.0"]
+mistral = ["openinference-instrumentation-mistralai>=0.1.0"]
+bedrock = ["openinference-instrumentation-bedrock>=0.1.0"]
+groq = ["openinference-instrumentation-groq>=0.1.0"]
+# harnesses (orchestration frameworks)
+langchain = ["openinference-instrumentation-langchain>=0.1.0"]  # also covers LangGraph
+llama-index = ["openinference-instrumentation-llama-index>=0.1.0"]
+crewai = ["openinference-instrumentation-crewai>=0.1.0"]
+litellm = ["litellm>=1.40"]
+# OpenLLMetry (Traceloop) alternative — init("auto") detects these too
+openllmetry = [
+  "opentelemetry-instrumentation-openai-v2>=2.0b0",
+  "opentelemetry-instrumentation-anthropic>=0.30b0",
+]
+all = ["tracely-sdk[openai,anthropic,google,mistral,bedrock,groq,langchain,llama-index,crewai,litellm]"]
 
 [project.scripts]
 tracely = "tracely_sdk.cli:main"

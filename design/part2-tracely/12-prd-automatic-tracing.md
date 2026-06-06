@@ -8,6 +8,14 @@
 > [03-agent-and-trace-data-model.md](03-agent-and-trace-data-model.md). SDK: [../../sdk/README.md](../../sdk/README.md).
 >
 > _Status: draft · 2026-06-06_
+>
+> **Implementation status (2026-06-06):** P0–P3 built. SDK `init(instrument=…)` + the
+> `TracelyContextSpanProcessor`, `tracely.trace()`, `@observe`, `run_in_thread`, instrumentor extras,
+> and the `tracely_sdk.openai` drop-in (`wrap_openai`) are implemented in [../../sdk](../../sdk);
+> backend ingestion of real OpenInference/OpenLLMetry/structured-`gen_ai.*` output + convention-version
+> provenance is in [`backend/tracely/otel/mapping.py`](../../backend/tracely/otel/mapping.py).
+> Validated end-to-end against OpenAI, LangChain/LangGraph, and LiteLLM. **R16 (TS/JS) is a plan only**
+> — [13-ts-js-parity-plan.md](13-ts-js-parity-plan.md).
 
 ---
 
@@ -165,7 +173,7 @@ spans; no duplicate spans when both an instrumentor and LiteLLM are present.
   `gen_ai.operation.name` → `openinference.span.kind`, but **do not hard-code** an exact OpenInference
   span-kind enum (the "ten fixed values" claim failed verification — treat unknowns as `SPAN`).
 - **R16 — TS/JS parity plan** (not built): `wrapOpenAI`, Vercel AI SDK integration, OpenTelemetry-JS —
-  every vendor ships it; document the intended JS surface.
+  every vendor ships it; document the intended JS surface. → [13-ts-js-parity-plan.md](13-ts-js-parity-plan.md).
 
 ## 8. Backend mapping spec (`backend/tracely/otel/mapping.py`)
 

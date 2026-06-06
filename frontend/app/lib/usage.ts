@@ -3,7 +3,10 @@
 // per-model rate table when token counts are present.
 import type { ConvNode, FullTurn, SpanOut } from "./api";
 
-// Approx public list price, USD per 1M tokens: [input, output].
+// Approx public list price, USD per 1M tokens: [input, output]. Matched as a SUBSTRING (not
+// anchored), so OpenRouter's namespaced ids resolve too — e.g. "openai/gpt-4o" hits /gpt-4o/,
+// "anthropic/claude-3.5-sonnet" hits /sonnet/. Open-model rates are rough and route-dependent on
+// OpenRouter; specific patterns must come before general ones (first match wins).
 const PRICES: [RegExp, number, number][] = [
   [/gpt-4o-mini/, 0.15, 0.6],
   [/gpt-4o/, 2.5, 10],
@@ -14,6 +17,16 @@ const PRICES: [RegExp, number, number][] = [
   [/opus/, 15, 75],
   [/sonnet/, 3, 15],
   [/haiku/, 0.25, 1.25],
+  [/gemini.*pro/, 1.25, 5],
+  [/gemini/, 0.1, 0.4],
+  [/mistral-large/, 2, 6],
+  [/mistral|mixtral|ministral/, 0.2, 0.6],
+  [/llama.*(405|70)b?/, 0.9, 0.9],
+  [/llama/, 0.2, 0.3],
+  [/deepseek.*(r1|reasoner)/, 0.55, 2.19],
+  [/deepseek/, 0.14, 0.28],
+  [/qwen/, 0.2, 0.6],
+  [/grok/, 2, 10],
 ];
 export function rateFor(model: string): [number, number] {
   const s = model.toLowerCase();

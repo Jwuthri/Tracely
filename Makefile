@@ -1,4 +1,4 @@
-.PHONY: help infra-up infra-down infra-prune install migrate migrate-ch migrate-pg seed backend workers frontend docs test send-trace demo-failures gate replay sdk-example seed-demo seed-regression fmt
+.PHONY: help infra-up infra-down infra-prune install migrate migrate-ch migrate-pg seed backend workers frontend docs test send-trace demo-failures gate replay sdk-example auto-openai auto-agent seed-demo seed-regression fmt
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -62,6 +62,12 @@ replay:      ## re-run the example agent on the promoted suite, then gate (ENTRY
 
 sdk-example: ## emit the demo trace via the Tracely SDK
 	uv run python sdk/example.py
+
+auto-openai: ## automatic tracing of plain OpenAI calls (needs tracely-sdk[openai] + OPENAI_API_KEY)
+	TRACELY_API=$(TRACELY_API) uv run python sdk/examples/auto_openai.py
+
+auto-agent:  ## automatic tracing via @observe + trace() (agent -> gen/tool/gen tree)
+	TRACELY_API=$(TRACELY_API) uv run python sdk/examples/auto_agent.py
 
 seed-demo:   ## seed rich demo conversations (every trace shape: RAG, multi-agent, multimodal, …)
 	TRACELY_API=$(TRACELY_API) uv run python sdk/examples/seed_conversations.py

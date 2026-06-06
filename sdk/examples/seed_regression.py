@@ -37,7 +37,9 @@ SENDER = os.path.normpath(os.path.join(HERE, "..", "..", "scripts", "send_test_t
 def _req(method: str, path: str, body: dict | None = None) -> dict:
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
-        f"{API}{path}", data=data, method=method,
+        f"{API}{path}",
+        data=data,
+        method=method,
         headers={"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req) as r:
@@ -46,9 +48,15 @@ def _req(method: str, path: str, body: dict | None = None) -> dict:
 
 def send_trace(**env_overrides: str) -> str:
     """Run the OTLP sender (deterministic trace ids) and return the trace id it printed."""
-    env = {**os.environ, "TRACELY_API": API, "TRACELY_KEY": KEY,
-           **{k: str(v) for k, v in env_overrides.items()}}
-    out = subprocess.run([sys.executable, SENDER], env=env, capture_output=True, text=True, check=True).stdout
+    env = {
+        **os.environ,
+        "TRACELY_API": API,
+        "TRACELY_KEY": KEY,
+        **{k: str(v) for k, v in env_overrides.items()},
+    }
+    out = subprocess.run(
+        [sys.executable, SENDER], env=env, capture_output=True, text=True, check=True
+    ).stdout
     m = re.search(r"trace_id \(hex\): ([0-9a-f]+)", out)
     if not m:
         raise RuntimeError(f"could not parse trace id from sender output:\n{out}")
@@ -73,19 +81,33 @@ def main() -> None:
     print("2) promote → regression case (asserts the fix must actually call get_weather)")
     case = _req("POST", f"/api/traces/{fail_prod}/promote")
     req = (case.get("assertions") or {}).get("required_tools")
-    print(f"   case {case['id'][:8]}  status={case['status']}  required_tools={req}  fail_to_pass={case['fail_to_pass_validated']}")
+    print(
+        f"   case {case['id'][:8]}  status={case['status']}  required_tools={req}  fail_to_pass={case['fail_to_pass_validated']}"
+    )
 
     print("3) CI gate on the PR that still has the bug (no tool call) → expect FAIL")
     fail_ci = send_trace(ENV="ci", SILENT="1")
     wait_for(fail_ci)
-    g1 = _req("POST", "/api/gate", {"agent": AGENT, "env": "ci", "git_ref": "feat/weather-fix", "pr_number": 41})
-    print(f"   gate {g1['id'][:8]}  {g1['status']}  (passed={g1['passed']} failed={g1['failed']} skipped={g1['skipped']})")
+    g1 = _req(
+        "POST",
+        "/api/gate",
+        {"agent": AGENT, "env": "ci", "git_ref": "feat/weather-fix", "pr_number": 41},
+    )
+    print(
+        f"   gate {g1['id'][:8]}  {g1['status']}  (passed={g1['passed']} failed={g1['failed']} skipped={g1['skipped']})"
+    )
 
     print("4) CI gate after the fix (agent now calls get_weather) → expect PASS")
     fixed_ci = send_trace(ENV="ci", FIXED="1")
     wait_for(fixed_ci)
-    g2 = _req("POST", "/api/gate", {"agent": AGENT, "env": "ci", "git_ref": "feat/weather-fix", "pr_number": 41})
-    print(f"   gate {g2['id'][:8]}  {g2['status']}  (passed={g2['passed']} failed={g2['failed']} skipped={g2['skipped']})")
+    g2 = _req(
+        "POST",
+        "/api/gate",
+        {"agent": AGENT, "env": "ci", "git_ref": "feat/weather-fix", "pr_number": 41},
+    )
+    print(
+        f"   gate {g2['id'][:8]}  {g2['status']}  (passed={g2['passed']} failed={g2['failed']} skipped={g2['skipped']})"
+    )
 
     print("5) replay the case against the fixed trace → expect PASS")
     r = _req("POST", f"/api/cases/{case['id']}/replay", {"candidate_trace_id": fixed_ci})
@@ -93,8 +115,12 @@ def main() -> None:
 
     print("\ndone — Regression cases + CI gates now show a red→green story.")
     print("hermetic replay also works now:")
-    print(f"   docker compose exec backend sh -c 'cd /app && PYTHONPATH=sdk/examples tracely replay {AGENT} --entrypoint weather_agent:run'        # PASS")
-    print(f"   docker compose exec backend sh -c 'cd /app && PYTHONPATH=sdk/examples tracely replay {AGENT} --entrypoint weather_agent:run_broken' # FAIL")
+    print(
+        f"   docker compose exec backend sh -c 'cd /app && PYTHONPATH=sdk/examples tracely replay {AGENT} --entrypoint weather_agent:run'        # PASS"
+    )
+    print(
+        f"   docker compose exec backend sh -c 'cd /app && PYTHONPATH=sdk/examples tracely replay {AGENT} --entrypoint weather_agent:run_broken' # FAIL"
+    )
 
 
 if __name__ == "__main__":

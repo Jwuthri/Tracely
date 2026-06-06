@@ -1,6 +1,13 @@
 import { Callout } from "nextra/components";
 
-# Instrumenting an agent
+# Custom spans (manual instrumentation)
+
+<Callout type="info">
+  The default path is [Automatic instrumentation](/automatic) — `tracely.init()` traces your
+  OpenAI/Anthropic/… calls with no span code. This page is the **escape hatch**: explicit context
+  managers for anything the auto path doesn't cover (custom retrievers, guardrails, reasoning steps,
+  multimodal I/O). It composes with the auto path — manual spans nest into the same trace.
+</Callout>
 
 A cookbook of every helper, with realistic snippets. All of these are exercised end-to-end in
 [`sdk/examples/seed_conversations.py`](https://github.com/julien-heysam/Tracely/blob/master/sdk/examples/seed_conversations.py).

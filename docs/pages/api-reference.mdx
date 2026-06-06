@@ -1,18 +1,52 @@
 # API reference
 
-Everything in `import tracely_sdk as tracely`. Span helpers are context managers (`with … as span:`);
+Everything in `import tracely_sdk as tracely`. The default path is automatic — `init()` plus
+`trace()`/`@observe`. Span helpers (the manual escape hatch) are context managers (`with … as span:`);
 annotators take a `span`.
 
 ## `init(...)`
 
 ```python
 tracely.init(endpoint="http://localhost:8000", api_key="tracely_dev_key",
-             service_name="agent", env="prod") -> Tracer
+             service_name="agent", env="prod", instrument="auto") -> Tracer
 ```
 
-Configure the OTLP/HTTP exporter pointing at Tracely. Call once at startup. `env` (`prod | staging |
-ci | dev`) is stamped on every span — the gating axis. If you skip `init`, the first span call
-initializes with defaults.
+Configure the OTLP/HTTP exporter pointing at Tracely, register the context-stamping span processor,
+and activate auto-instrumentors. Call once at startup; idempotent. `env` (`prod | staging | ci |
+dev`) is stamped on every span — the gating axis. `instrument` ∈ `"auto"` (activate every importable
+provider instrumentor) · a list like `["openai", "anthropic", "litellm"]` · `False` (export only).
+If you skip `init`, the first span call initializes with defaults.
+
+## Automatic instrumentation
+
+### `trace(agent=None, *, conversation=None, turn=None, user=None, trace_name=None, env=None, **metadata)`
+
+A run context — a context manager **or** (sync/async) decorator. Sets `tracely.*` run hints once; a
+span processor stamps them onto **every** span started inside (auto-instrumentor spans included), so
+`agent`/`conversation`/`turn`/`user`/`trace_name`/`env` + `metadata` flow down with no per-span code.
+Sets context only (opens no span); nested `trace()`s merge over the enclosing one.
+
+### `observe(fn=None, *, name=None, as_type="span", capture_input=True, capture_output=True)`
+
+Decorator (`@observe` or `@observe(...)`) that turns any sync/async function into a span:
+args → `tracely.input`, return → `tracely.output`, latency, and exceptions → `level=ERROR`, captured
+automatically and auto-nested via OTel context. `as_type` (`span | generation | agent | tool | chain
+| retriever | embedding | guardrail | …`) → `tracely.observation.type`.
+
+### `run_in_thread(fn, *args, **kwargs)` → `Thread`
+
+Run `fn` on a new thread that inherits the current span + `trace()` context (auto-nesting is
+in-process), so spans it creates nest correctly. Returns the started thread; `join()` it and read
+`.result` (or `.exc`).
+
+### `tracely_sdk.openai` / `tracely_sdk.anthropic` — non-patching drop-ins (R13)
+
+`from tracely_sdk.openai import OpenAI, AsyncOpenAI, wrap_openai, openai` (and the identical
+`tracely_sdk.anthropic` surface: `Anthropic, AsyncAnthropic, wrap_anthropic, anthropic`).
+`wrap_openai(client)` / `wrap_anthropic(client)` trace a client **instance** (no global patching);
+`OpenAI(...)`/`Anthropic(...)` are pre-wrapped constructors; the `openai`/`anthropic` proxies mirror
+the module with traced constructors. Captures model · messages · output · usage · tool calls for
+non-streaming sync/async calls.
 
 ## Span context managers
 

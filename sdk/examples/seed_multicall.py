@@ -24,22 +24,33 @@ with tracely.agent("multiweather") as a:
     tracely.set_io(
         a,
         input={"role": "user", "content": [{"type": "text", "text": "weather in SF and NYC?"}]},
-        output={"role": "assistant", "content": [{"type": "text", "text": "Sorry, the NYC lookup failed."}]},
+        output={
+            "role": "assistant",
+            "content": [{"type": "text", "text": "Sorry, the NYC lookup failed."}],
+        },
     )
     with tracely.llm("gpt-4o") as g:
         tracely.set_io(
             g,
             input=[
                 {"role": "system", "content": "You are a helpful weather assistant."},
-                {"role": "user",   "content": "weather in SF and NYC?"},
+                {"role": "user", "content": "weather in SF and NYC?"},
             ],
             output={
                 "role": "assistant",
                 "content": None,
                 "finish_reason": "tool_calls",
                 "tool_calls": [
-                    {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": '{"city":"SF"}'}},
-                    {"id": "call_2", "type": "function", "function": {"name": "get_weather", "arguments": '{"city":"NYC"}'}},
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": '{"city":"SF"}'},
+                    },
+                    {
+                        "id": "call_2",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": '{"city":"NYC"}'},
+                    },
                 ],
             },
         )
