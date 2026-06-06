@@ -1,121 +1,82 @@
 # Tracely
 
-**Trace-native CI/CD for AI agents.** Production traces become regression tests.
+**Trace-native CI/CD for AI agents.** Your agents' production traces become regression tests that block bad pull requests — automatically detected, grouped into issues, frozen with one click, and replayed for free on every PR.
 
-This repo is the **MVP foundation slice**: OTLP/OpenInference traces → ClickHouse `events` + Postgres registry, with a minimal trace waterfall UI. The full design dossier (reverse-engineered Langfuse + the Tracely architecture, eval, regression, CI/CD, failure-intelligence) lives in [`design/`](design/README.md).
+> 💡 **The recorded run _is_ the test.** You never hand-author a dataset of questions and ideal answers — production already handed you the perfect failing example. Tracely freezes it and guards against it forever. Everything else (quality scores, failure clusters, suggested fixes, CI verdicts, trends) is **derived from the trace**. The trace is the source of truth.
+
+📖 New here? Read the guided tour in **[OVERVIEW.md](OVERVIEW.md)**. Want the rationale? The full **[design dossier](design/README.md)** reverse-engineers Langfuse and designs Tracely on top.
+
+---
+
+## The spine
+
+```
+Production trace  →  Failure detection  →  Regression test  →  CI/CD gate
+   (OTLP/OTel)        (auto evaluators)     (one-click promote)   (PR pass/fail)
+```
+
+The product maps onto it: **Observe** (trace explorer + trends) · **Detect** (online evaluators grade every run) · **Triage** (failures cluster into issues) · **Test** (promote a failing trace into a hermetic regression case) · **Ship** (replay the suite in CI and gate the PR).
 
 ## Stack
 
-| Layer | Tech |
-|---|---|
-| Backend | **FastAPI** (`backend/`, package `tracely`) — OTLP `/v1/traces` + reads **and** the shared domain (OTLP mapping, ClickHouse, registry, Celery tasks) |
-| Workers | **Celery + Redis** (`workers/`) — blob → map → ClickHouse insert; runs the backend's tasks |
-| OLAP | **ClickHouse** — `events` (one row per span) + `scores` |
-| OLTP | **Postgres** + SQLAlchemy 2.0 + **Alembic** — agent registry (no Prisma) |
-| Queue | **Redis** (Celery broker) |
-| Blobs | **MinIO/S3** — raw OTLP body = source of truth (blob-first ingestion) |
-| Frontend | **Next.js** (`frontend/`) — trace list + waterfall |
-| SDK | **`tracely-sdk`** (`sdk/`) — instrument agents, export traces over OTLP |
-| Schemas | **Pydantic v2** |
-| Tooling | **uv** workspace (Python) + **pnpm** (frontend) |
+| Layer | Tech | Where |
+|---|---|---|
+| Backend (API + domain) | **FastAPI** + Pydantic v2 | [`backend/`](backend/README.md) |
+| Workers | **Celery + Redis** | [`workers/`](workers/README.md) |
+| Traces + scores (OLAP) | **ClickHouse** (`ReplacingMergeTree`) | `backend/tracely/ch_migrations` |
+| Registry (OLTP) | **Postgres + pgvector** + SQLAlchemy 2.0 + Alembic | `backend/migrations` |
+| Queue / Blobs | **Redis** / **MinIO·S3** (blob-first, source of truth) | — |
+| Frontend | **Next.js 15** (App Router) + Tailwind | [`frontend/`](frontend/README.md) |
+| SDK + CI gate CLI | **`tracely-sdk`** (OTel wrapper + `tracely` CLI) | [`sdk/`](sdk/README.md) |
+| Tooling | **uv** workspace (Python) · **pnpm** (web) | — |
 
-Architecture deliberately mirrors Langfuse's proven write path — SDK/OTLP → S3 (durable) → Redis queue → worker → ClickHouse (`ReplacingMergeTree`) — reimplemented in Python. One adaptation: instead of Langfuse's in-process `ClickhouseWriter` buffer (no shared memory across Celery processes), we lean on ClickHouse **server-side `async_insert`** for batching.
-
-## Prerequisites
-
-- Docker + Docker Compose
-- [uv](https://docs.astral.sh/uv/)
-- Node 20+ and pnpm (for the web app)
+The write path deliberately mirrors Langfuse's proven design — **SDK/OTLP → S3 (durable) → Redis → worker → ClickHouse** — reimplemented in Python, with agent semantics promoted to **first-class indexed columns** (Langfuse keeps them as read-time strings). One adaptation: ClickHouse server-side `async_insert` instead of an in-process write buffer (Celery tasks don't share memory). [Why](design/part2-tracely/01-steal-and-do-not-copy.md)
 
 ## Quickstart
 
-### Option A — everything in Docker (one command)
+**Prerequisites:** Docker + Docker Compose, [uv](https://docs.astral.sh/uv/), and Node 20+ / pnpm for the web app.
 
-`docker compose up` builds and runs the whole stack: ClickHouse, Postgres, Redis, MinIO,
-a one-shot **migrate** job (runs migrations + seeds the default project), **backend**,
-**worker**, and **frontend**.
-
+### Option A — everything in Docker
 ```bash
-docker compose up -d --build --wait        # if host port 8000 is free
-# or, if 8000 is taken on your machine:
-TRACELY_BACKEND_PORT=8088 docker compose up -d --build --wait
+docker compose up -d --build --wait            # ClickHouse, Postgres, Redis, MinIO, migrate, backend, worker, frontend
+# if host ports 8000/3000 are taken (as on some machines):
+TRACELY_BACKEND_PORT=8088 TRACELY_WEB_PORT=3001 docker compose up -d --build --wait
 
-# open the webapp:
-open http://localhost:3000/traces          # (TRACELY_WEB_PORT to change the 3000 mapping)
-
-# send a fake trace (agent -> llm -> failing tool) and refresh the page:
-docker compose exec backend python scripts/send_test_trace.py   # raw OTLP
-docker compose exec backend python sdk/example.py               # via the SDK
-
-docker compose down                        # stop (add -v to wipe data)
+open http://localhost:3000/traces              # the UI
+docker compose exec backend python scripts/send_test_trace.py   # send a sample trace, then refresh
+docker compose down                            # stop  (add -v to wipe data)
 ```
-
-The backend is reachable at `http://localhost:${TRACELY_BACKEND_PORT:-8000}` (OpenAPI at `/docs`).
-Real agents point their OTLP exporter there with `Authorization: Bearer tracely_dev_key`.
+The one-shot **migrate** service runs all migrations + seeds the default project & ingest key (`tracely_dev_key`). `backend`/`worker`/`frontend` run off source volume-mounts, so most edits need only a `docker compose restart <svc>` — **except** the Celery worker, which doesn't hot-reload.
 
 ### Option B — local dev (hot reload)
-
-Infra in Docker, apps run locally (best for active development):
-
 ```bash
 cp .env.example .env
-make infra-up      # clickhouse, postgres, redis, minio (+ bucket)
+make infra-up      # clickhouse, postgres, redis, minio
 make install       # uv sync + pnpm install
 make migrate       # ClickHouse DDL + Alembic (Postgres)
-make seed          # default project + ingest key  ->  tracely_dev_key
-
-# three terminals (BACKEND_PORT note: free :8000 first, or run uvicorn on another port):
-make backend       # http://localhost:8000  (OpenAPI at /docs)
-make workers       # Celery ingestion worker
-make frontend      # http://localhost:3000
-
-make send-trace    # raw OTLP   (or: make sdk-example  to send via the SDK)
-open http://localhost:3000/traces
+make seed          # default project + ingest key → tracely_dev_key
+make backend       # FastAPI  :8000  (OpenAPI at /docs)   ┐
+make workers       # Celery ingestion/eval worker          ├ three terminals
+make frontend      # Next.js  :3000                        ┘
+make send-trace    # sample OTLP   ·   make demo-failures   (seed a failure mix)
+make test          # OTLP-mapper unit tests (no infra)
 ```
 
-## Tests
+## Ingest from your agent
 
-```bash
-make test          # OTLP-mapper unit tests (no infra needed)
-```
+Point any OTLP/HTTP exporter at `POST {endpoint}/v1/traces` with `Authorization: Bearer tracely_dev_key`. Tracely reads standard `gen_ai.*` / OpenInference attributes plus first-class hints — `tracely.agent.id` (auto-registered), `tracely.agent.version`, `tracely.conversation.id` / `turn.*` / `step.*`, `tracely.observation.type`, and `tracely.env` (`prod|staging|ci|dev`, the gating axis). The [`tracely-sdk`](sdk/README.md) is the ergonomic path and also ships the `tracely gate` / `tracely replay` CI commands.
 
-## Layout
+## Repo map — each folder has its own detailed README
 
-```
-backend/                       the `tracely` package: FastAPI API + shared domain
-  tracely/
-    config.py                  settings (pydantic-settings)
-    clickhouse.py              CH client + async_insert path
-    blobstore.py               S3/MinIO (blob-first)
-    db.py                      async + sync SQLAlchemy engines
-    models.py                  registry (Project, IngestKey, Agent, AgentVersion)
-    events.py                  the CH `events` row schema (EVENT_COLUMNS)
-    otel/mapping.py            OTLP span -> event (gen_ai / openinference / tracely.*)
-    ingestion/                 blob-first enqueue
-    celery_app.py, tasks.py    Celery app + ingest_otlp_blob task
-    ch_migrations/             ClickHouse SQL (0001_events, 0002_scores)
-    seed.py, ch_migrate.py     bootstrap helpers
-    api/                       FastAPI (main, auth, routers: health/otlp/reads)
-  migrations/                  Alembic (Postgres)
-  alembic.ini, tests/
-workers/tracely_workers/       Celery worker runtime (imports backend)
-frontend/                      Next.js (trace list + waterfall)
-sdk/tracely_sdk/               Python client SDK (instrument agents -> OTLP)
-scripts/send_test_trace.py     raw-OTLP sample sender
-design/                        full design dossier
-```
+| Folder | What's inside |
+|---|---|
+| [`backend/`](backend/README.md) | The `tracely` package: FastAPI API + the shared domain (OTLP mapping, ClickHouse/Postgres/S3, registry, evaluators, failure intelligence, regression, gate, Celery tasks). |
+| [`workers/`](workers/README.md) | The deployable Celery worker runtime (imports the backend's tasks). |
+| [`frontend/`](frontend/README.md) | The Next.js web app — the hierarchical trace explorer, clusters, cases, gates, trends. |
+| [`sdk/`](sdk/README.md) | The Python SDK (instrument agents over OTLP, hermetic record-replay) + the `tracely` CI gate CLI. |
+| [`scripts/`](scripts/README.md) | Dev/demo helpers (raw-OTLP sender, gate shim). |
+| [`design/`](design/README.md) | The full design dossier — reverse-engineered Langfuse + the Tracely architecture, eval, regression, CI/CD, and failure-intelligence designs. |
 
-## Ingesting from your agent
+## What's next
 
-Point any OTLP/HTTP exporter at `http://localhost:8000/v1/traces` with header
-`Authorization: Bearer tracely_dev_key`. Tracely reads standard `gen_ai.*` / OpenInference
-attributes, plus first-class `tracely.*` hints:
-
-- `tracely.agent.id` — the agent slug (auto-registered)
-- `tracely.agent.version` — config hash / version ref (auto-registered as an AgentVersion)
-- `tracely.conversation.id`, `tracely.turn.id`, `tracely.turn.index`, `tracely.step.id`, `tracely.step.name`
-- `tracely.env` — `prod|staging|ci|dev` (the gating axis)
-
-## What's next (post-MVP)
-
-failure detection → clustering → **promote a failing trace into a regression case** → replay → **CI/CD gate (GitHub Action)**. See [`design/part2-tracely/10-mvp-and-roadmap.md`](design/part2-tracely/10-mvp-and-roadmap.md).
+The near-term execution plan is in **[design/part2-tracely/11-prd-next-steps.md](design/part2-tracely/11-prd-next-steps.md)** — make evaluators first-class & editable (close the Observe→Detect loop), take the trace explorer to GA, and add real projects/auth. The long-term roadmap is in [10-mvp-and-roadmap.md](design/part2-tracely/10-mvp-and-roadmap.md).

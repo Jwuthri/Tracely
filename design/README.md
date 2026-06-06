@@ -84,6 +84,7 @@ flowchart LR
 | [08-cicd-architecture.md](part2-tracely/08-cicd-architecture.md) | `tracely.yaml`, GitHub App/Action, gate decision engine, PR comment, baseline compare |
 | [09-database-schema.md](part2-tracely/09-database-schema.md) | **Schema of record** — copy-pasteable ClickHouse DDL + Prisma models |
 | [10-mvp-and-roadmap.md](part2-tracely/10-mvp-and-roadmap.md) | MVP slice, killer demo, deferrals, P0–P5 roadmap, first 2 weeks / 90 days |
+| [11-prd-next-steps.md](part2-tracely/11-prd-next-steps.md) | **Near-term execution PRD** — close the Observe→Detect loop (evaluators first-class), Trace Explorer GA, multi-tenancy |
 | [90-competitive-landscape.md](part2-tracely/90-competitive-landscape.md) | Braintrust/LangSmith/Phoenix/Galileo/… vs the thesis (research foundation) |
 | [91-techniques-references.md](part2-tracely/91-techniques-references.md) | Trajectory eval, failure clustering, RCA, test-gen techniques (research foundation) |
 | [92-langfuse-verified-facts.md](part2-tracely/92-langfuse-verified-facts.md) | Code-verified Langfuse schemas/enums/keys (the design's ground truth) |

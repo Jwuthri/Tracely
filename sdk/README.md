@@ -1,30 +1,116 @@
-# tracely-sdk
+# `sdk/` — `tracely-sdk` (instrument agents + the CI gate CLI)
 
-Thin Python SDK to instrument an agent and export traces to Tracely over OTLP.
-It's a small wrapper over the OpenTelemetry SDK that sets standard `gen_ai.*` attributes
-plus Tracely's first-class `tracely.*` hints (agent / version / run / conversation / turn / step / env).
+Two things in one small package:
+
+1. an **instrumentation SDK** — a thin wrapper over the OpenTelemetry SDK that emits standard `gen_ai.*` / OpenInference attributes **plus** Tracely's first-class `tracely.*` hints, so the backend can populate its agent-semantic columns; and
+2. the **`tracely` CLI** — `tracely gate` and `tracely replay`, which run an agent's promoted regression suite in CI and gate the PR (exit 0/1 + GitHub status/comment).
+
+Dependencies are just `opentelemetry-sdk` + the OTLP HTTP exporter. Python ≥ 3.10.
+
+```bash
+pip install ./sdk          # or: uv pip install -e sdk
+# CLI becomes available as `tracely` (entry point tracely_sdk.cli:main)
+```
+
+> Already using OpenTelemetry / OpenInference / LangGraph instrumentation? You don't need the instrumentation half — point your existing OTLP exporter at `POST {endpoint}/v1/traces` with `Authorization: Bearer <ingest-key>` and set the `tracely.*` attributes below. This SDK is just the ergonomic path. The **CLI**, however, is how you wire Tracely into CI.
+
+---
+
+## 1. Instrument an agent
 
 ```python
 import tracely_sdk as tracely
 
-tracely.init(endpoint="http://localhost:8000", api_key="tracely_dev_key", service_name="my-agent")
+tracely.init(endpoint="http://localhost:8000", api_key="tracely_dev_key",
+             service_name="support-agent", env="prod")
 
-with tracely.agent("planner", version="v1") as a:           # AGENT span (becomes the run root)
-    with tracely.turn("t1", index=0):                       # multi-turn grouping
-        with tracely.llm("gpt-4o") as g:                    # GENERATION span
-            tracely.set_io(g, input=prompt, output=completion)
-            tracely.set_usage(g, input_tokens=812, output_tokens=96)
-        with tracely.tool("get_weather") as t:              # TOOL span
-            try:
-                ...
-            except Exception as e:
-                tracely.error(t, str(e))                    # level=ERROR -> failure signal
+with tracely.agent("support-agent", version="v3", conversation="conv-1", turn=0) as a:  # AGENT span = run root
+    tracely.set_io(a, input=user_msg, output=answer)                 # what the agent received / returned
+    with tracely.thinking(agent="support-agent") as th:             # THINKING span (reasoning)
+        tracely.set_io(th, output=reasoning); tracely.set_usage(th, thinking_tokens=120)
+    with tracely.llm("gpt-4o", agent="support-agent") as g:          # GENERATION span
+        tracely.set_io(g, input=messages, output=completion)
+        tracely.set_usage(g, input_tokens=812, output_tokens=96)
+    with tracely.tool("get_order", agent="support-agent") as t:      # TOOL span
+        try:
+            result = get_order(order_id)
+            tracely.set_io(t, input={"order_id": order_id}, output=result)
+        except Exception as e:
+            tracely.error(t, str(e))                                 # level=ERROR → the failure signal
 
-tracely.flush()
+tracely.flush()   # force-flush the exporter (call before the process exits)
 ```
 
-Already using OpenTelemetry / OpenInference / LangGraph instrumentation? You don't need this SDK —
-point your existing OTLP exporter at `POST {endpoint}/v1/traces` with
-`Authorization: Bearer <ingest-key>`. This SDK is just the ergonomic path.
+### Span context managers
+| Call | Emits a span of type | Sets |
+|---|---|---|
+| `agent(slug, *, version, run_id, role, conversation, turn)` | `AGENT` (the run root) | `tracely.agent.id`, `.version`, `.run_id`, `.role`, `tracely.conversation.id` + `session.id`, `tracely.turn.index`, `tracely.env`. |
+| `turn(turn_id, *, index)` | a turn marker | `tracely.turn.id` / `.index`. |
+| `step(name, *, step_id)` | a generic step | `tracely.step.name` / `.id`. |
+| `llm(model, *, agent)` | `GENERATION` | `gen_ai.operation.name=chat`, `gen_ai.request.model`. |
+| `tool(name, *, agent)` | `TOOL` | `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`. |
+| `thinking(name="thinking", *, agent)` | `THINKING` | `tracely.observation.type=THINKING` — reasoning emitted as its own span. |
 
-Try it (with the stack running): `uv run python sdk/example.py`
+### Annotating spans
+- `set_io(span, *, input=None, output=None)` → `tracely.input` / `tracely.output` (objects are JSON-encoded).
+- `set_usage(span, *, input_tokens=None, output_tokens=None, thinking_tokens=None)` → `gen_ai.usage.input_tokens` / `output_tokens` / `reasoning_tokens`.
+- `error(span, message="")` → marks the span `StatusCode.ERROR` (→ `level=ERROR` in Tracely) — this is *the* failure-detection signal.
+- `flush()` → force-flush the OTLP exporter.
+
+### What Tracely reads
+Standard `gen_ai.*` / OpenInference attributes, plus first-class hints that become **indexed columns** on the span row: `tracely.agent.id`, `tracely.agent.version`, `tracely.conversation.id`, `tracely.turn.id`/`.index`, `tracely.step.id`/`.name`, `tracely.observation.type`, and `tracely.env` (`prod|staging|ci|dev` — the gating axis). Agent slug + version are auto-registered into the Postgres registry on ingest.
+
+---
+
+## 2. Hermetic replay (`call_tool` / `call_llm` / `fixtures`)
+
+These let the **same agent code** run live in production and deterministically offline in CI. Wrap each external call:
+
+```python
+def run(user_input: str):
+    with tracely.agent("support-agent"):
+        # In prod: calls the real fn and records the output. In replay: serves the recorded output.
+        order = tracely.call_tool("get_order", lambda: get_order(order_id), args={"order_id": order_id})
+        answer = tracely.call_llm("gpt-4o", lambda: chat(messages), input=messages, usage=(812, 96))
+        return answer
+```
+
+- **Production (`--live` or no fixtures active):** `call_tool`/`call_llm` invoke your `fn`, record the output (and any error) on the span, and return it.
+- **CI replay:** `tracely replay` activates the case's recorded **fixture bundle** via `with tracely.fixtures(bundle): ...`; `call_tool`/`call_llm` then **serve the recorded outputs in order** (or by `args` match) and never call your `fn`. A call that errored in production is reproduced on the span **and raised as `tracely.ToolError`**, so the agent's own `try/except` runs exactly as it would live — and the gate sees the same failure condition.
+
+This is what makes replay deterministic, offline, and free (no API keys, no cost). See [regression-testing design](../design/part2-tracely/05-regression-testing.md).
+
+---
+
+## 3. The CI gate CLI
+
+```bash
+tracely gate   <agent> [--env ci] [--api …] [--key …] [--pr N] [--sha …] [--github]
+tracely replay <agent> (--entrypoint module:func | --cmd "…") [--live] [--github]
+```
+
+- **`tracely gate <agent>`** — gate a PR against **pre-emitted** `env=ci` traces (your CI already ran the agent and emitted traces); cases are matched to candidates by `input_digest`.
+- **`tracely replay <agent>`** — re-run the agent **on each promoted case's recorded input** (fetched from `GET /api/gate/suite`), then gate. `--entrypoint module:func` calls a Python function per case; `--cmd "…"` runs a shell command per case (gets `TRACELY_INPUT`) that emits its own trace. Hermetic by default; `--live` makes real tool/LLM calls.
+
+Both **exit 0 (PASS) / 1 (FAIL)** and, inside GitHub Actions (or with `--github`), post a **commit status + PR comment** with per-case results and soft warnings (latency/token deltas vs the last green gate). `--dry-run` prints the GitHub calls instead of sending; `--no-github` never touches GitHub. Config via flags or env (`TRACELY_API`, `TRACELY_KEY`, `TRACELY_AGENT`, `TRACELY_GATE_ENV`, `TRACELY_WEB_URL`, `GITHUB_TOKEN`). A reusable composite action lives at `.github/actions/tracely-gate/`.
+
+---
+
+## Examples (`sdk/examples/` + `sdk/example.py`)
+
+| File | Shows |
+|---|---|
+| `../example.py` | the minimal demo trace (agent → llm → failing tool). `make sdk-example`. |
+| `examples/weather_agent.py` / `weather_agent_cli.py` | a real agent wired with `call_tool`/`call_llm` for `tracely replay --entrypoint` / `--cmd`. |
+| `examples/seed_conversations.py` | rich multi-turn / multi-agent / thinking / multimodal / structured-output demo data (`make` it against the stack). |
+| `examples/seed_multicall.py` / `seed_handler.py` | repeated-call + handler examples for fixture replay. |
+
+---
+
+## Key decisions (and why)
+
+1. **Thin wrapper, not a framework.** It only sets attributes on OTel spans — anyone already on OpenTelemetry/OpenInference can skip it and just emit the `tracely.*` hints. No lock-in.
+2. **First-class `tracely.*` hints.** Agent/conversation/turn/step/env are emitted as semantic attributes so they become indexed columns server-side — the basis for agent-level evals and PR gating.
+3. **`THINKING` is a span type, not a field.** Reasoning is its own observation, so it renders distinctly and carries its own token usage.
+4. **Record-replay in the SDK.** `call_tool`/`call_llm` are the seam that makes "the recorded run is the test" real: the same code path records in prod and replays in CI, reproducing recorded errors via `ToolError` so error-handling behaviour is gated faithfully.
+5. **The CLI is the CI contract.** `gate`/`replay` exit 0/1 and speak GitHub — so wiring Tracely into a pipeline is one step, with the hard gate being fail-to-pass and everything else advisory.
