@@ -50,7 +50,7 @@ export function SessionView({ conv, turns }: { conv: ConvNode; turns: FullTurn[]
       </div>
 
       <div style={wide ? WIDE_STYLE : undefined} className="transition-[width,margin] duration-200">
-        {tab === "table" && <TraceTable conversations={[conv]} mode="detail" autoSelectFirst embedded />}
+        {tab === "table" && <TraceTable conversations={[conv]} embedded />}
         {tab === "timeline" && <Waterfall spans={allSpans} />}
         {tab === "evaluations" && (
           <div className="space-y-5">

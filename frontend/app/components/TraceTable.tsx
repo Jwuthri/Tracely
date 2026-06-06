@@ -544,6 +544,7 @@ const ROLE_CHIP: Record<string, string> = {
   assistant: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
   system: "bg-slate-600/25 text-slate-300 border-slate-600/40",
   tool: "bg-orange-500/10 text-orange-300 border-orange-500/30",
+  thinking: "bg-violet-500/10 text-violet-300 border-violet-500/30",
 };
 function RoleTag({ role }: { role?: string }) {
   const r = (role || "msg").toLowerCase();
@@ -556,7 +557,17 @@ function RoleTag({ role }: { role?: string }) {
 // Full (un-clamped) content for the conversation popover: text wraps, attachments as chips, data as JSON.
 function ContentBody({ value }: { value: unknown }) {
   if (value == null || value === "") return <span className="text-slate-500">—</span>;
-  if (typeof value === "string") return <div className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-slate-300">{value}</div>;
+  if (typeof value === "string") {
+    const s = value.trim();
+    if (/^https?:\/\/\S+$/.test(s)) {
+      return (
+        <a href={s} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="break-all text-[12px] leading-relaxed text-cyan-400 underline decoration-cyan-400/40 underline-offset-2 hover:decoration-cyan-400">
+          {s}
+        </a>
+      );
+    }
+    return <div className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-slate-300">{value}</div>;
+  }
   if (Array.isArray(value)) {
     const parts = value.map(classifyBlock);
     const text = parts
@@ -579,24 +590,66 @@ function ContentBody({ value }: { value: unknown }) {
   );
 }
 
-// The conversation popover body: one card per message (role chip + full content).
-function ChatBody({ msgs }: { msgs: Array<{ role?: string; content?: unknown }> }) {
+type ChatMsg = { role?: string; content?: unknown; tool_calls?: unknown; finish_reason?: unknown };
+
+// A model's tool/function calls (function calling) — name + parsed arguments.
+function ToolCalls({ calls }: { calls: unknown[] }) {
   return (
-    <div className="space-y-2 p-3">
-      {msgs.map((m, i) => (
-        <div key={i} className="rounded-lg border border-slate-700/60 bg-slate-800/40 p-2.5">
-          <div className="mb-1.5">
-            <RoleTag role={m.role} />
+    <div className="mt-2 space-y-1.5">
+      <div className="text-[9.5px] uppercase tracking-wider text-slate-500">Tool calls</div>
+      {calls.map((raw, i) => {
+        const c = (raw ?? {}) as Record<string, unknown>;
+        const fn = (c.function ?? c) as Record<string, unknown>;
+        const name = String(fn.name ?? c.name ?? "tool");
+        let args: unknown = fn.arguments ?? c.arguments ?? c.args;
+        if (typeof args === "string") {
+          try { args = JSON.parse(args); } catch { /* keep string */ }
+        }
+        return (
+          <div key={i} className="rounded-md border border-slate-700/60 bg-slate-900/50 p-2">
+            <div className="flex items-center gap-1.5 font-mono text-[11.5px] font-medium text-violet-300">
+              <span className="text-[10px]">⛭</span>
+              {name}
+            </div>
+            {args != null && args !== "" && (
+              <pre className="mt-1 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-slate-300">
+                <HJson text={typeof args === "string" ? args : JSON.stringify(args, null, 2)} />
+              </pre>
+            )}
           </div>
-          <ContentBody value={m.content} />
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
+// One message card: role chip (+ finish_reason), content rendered by type, then any tool calls.
+function MessageCard({ m }: { m: ChatMsg }) {
+  const calls = Array.isArray(m.tool_calls) ? m.tool_calls : [];
+  const finish = typeof m.finish_reason === "string" ? m.finish_reason : null;
+  const hasContent = m.content != null && m.content !== "";
+  return (
+    <div className="rounded-lg border border-slate-700/60 bg-slate-800/40 p-2.5">
+      <div className="mb-1.5 flex items-center gap-2">
+        <RoleTag role={m.role} />
+        {finish && (
+          <span className="rounded bg-slate-700/50 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-slate-400">{finish}</span>
+        )}
+      </div>
+      {hasContent && <ContentBody value={m.content} />}
+      {calls.length > 0 && <ToolCalls calls={calls} />}
+      {!hasContent && calls.length === 0 && <span className="text-slate-500">—</span>}
+    </div>
+  );
+}
+
+// The conversation popover body: one card per message.
+function ChatBody({ msgs }: { msgs: ChatMsg[] }) {
+  return <div className="space-y-2 p-3">{msgs.map((m, i) => <MessageCard key={i} m={m} />)}</div>;
+}
+
 // A chat transcript shown as a compact pill (role + last message preview) → conversation popover.
-function ChatPill({ msgs }: { msgs: Array<{ role?: string; content?: unknown }> }) {
+function ChatPill({ msgs }: { msgs: ChatMsg[] }) {
   const n = msgs.length;
   const last = msgs[n - 1] ?? {};
   const lastText =
@@ -605,8 +658,15 @@ function ChatPill({ msgs }: { msgs: Array<{ role?: string; content?: unknown }> 
       : Array.isArray(last.content)
         ? (last.content.map(classifyBlock).find((p) => p.kind === "text") as Extract<Part, { kind: "text" }> | undefined)?.text ?? ""
         : "";
+  // No text (e.g. a tool-calling completion)? preview the called tool names instead.
+  const toolNames = Array.isArray(last.tool_calls)
+    ? (last.tool_calls as Record<string, unknown>[])
+        .map((c) => ((c?.function as Record<string, unknown>)?.name ?? c?.name) as string | undefined)
+        .filter(Boolean)
+    : [];
+  const base = lastText || (toolNames.length ? `→ ${toolNames.join(", ")}` : "");
   // Keep the collapsed baseline short — it's a teaser; the full content lives in the popover.
-  const preview = lastText.length > 42 ? `${lastText.slice(0, 42).trimEnd()}…` : lastText;
+  const preview = base.length > 42 ? `${base.slice(0, 42).trimEnd()}…` : base;
   const icon = (
     <IconBox accent="violet">
       <ChatGlyph className="h-3 w-3" />
@@ -649,14 +709,11 @@ function MessageContent({ raw }: { raw: string | null }) {
   if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(isChatMsg)) {
     return <ChatPill msgs={parsed as Array<{ role?: string; content?: unknown }>} />;
   }
-  // a single chat message object {role, content} -> compact message pill (click to expand).
-  // Completion objects (tool_calls / finish_reason) are kept as raw JSON pills below.
-  if (
-    parsed && typeof parsed === "object" && !Array.isArray(parsed) &&
-    "role" in (parsed as object) && "content" in (parsed as object) &&
-    !("tool_calls" in (parsed as object)) && !("finish_reason" in (parsed as object))
-  ) {
-    return <ChatPill msgs={[parsed as { role?: string; content?: unknown }]} />;
+  // a single chat / completion message object {role, …} -> compact message pill (click to expand).
+  // Assistant completions are included: content renders by type and tool_calls / finish_reason are
+  // surfaced. Raw structured data with no `role` (tool args/results, output-schema) stays JSON below.
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "role" in (parsed as object)) {
+    return <ChatPill msgs={[parsed as ChatMsg]} />;
   }
   // one message's multimodal parts (no roles) -> text + image/file chips
   if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(isContentBlock)) {
@@ -1074,8 +1131,6 @@ export function TraceTable({
   embedded = false,
 }: {
   conversations: ConvNode[];
-  mode?: "list" | "detail";
-  autoSelectFirst?: boolean;
   // When embedded in a tabbed trace view, the parent owns the Enlarge/Concise control + the
   // full-width breakout (so it applies across Table/Timeline/Evaluations), so we suppress ours.
   embedded?: boolean;

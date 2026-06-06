@@ -19,7 +19,6 @@ from tracely.config import settings
 log = structlog.get_logger()
 
 RUN = "AGENT_RUN"
-TURN = "TURN"
 TOOL = "TOOL"
 
 

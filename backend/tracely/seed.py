@@ -1,4 +1,4 @@
-"""Seed the default project + a dev ingest key."""
+"""Seed the default project + a dev ingest key + the recommended online evaluators."""
 
 from __future__ import annotations
 
@@ -7,10 +7,31 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from tracely.db import SyncSessionLocal
-from tracely.models import IngestKey, Project
+from tracely.evaluators import TEMPLATES
+from tracely.models import Evaluator, IngestKey, Project
 
 DEFAULT_PROJECT_SLUG = "default"
 DEFAULT_KEY = "tracely_dev_key"
+
+
+def _seed_evaluators(s, project_id: str) -> int:
+    """Install the recommended evaluator catalog as editable records (idempotent by score_name) so
+    online evaluation runs out of the box. Existing rows are left untouched (preserves user edits)."""
+    existing = set(
+        s.execute(select(Evaluator.score_name).where(Evaluator.project_id == project_id)).scalars()
+    )
+    added = 0
+    for t in TEMPLATES:
+        if not t.get("recommended") or t["score_name"] in existing:
+            continue
+        s.add(Evaluator(
+            id=str(uuid4()), project_id=project_id, name=t["name"], description=t.get("description", ""),
+            kind=t["kind"], score_name=t["score_name"], level=t["level"], config=t.get("config") or {},
+        ))
+        added += 1
+    if added:
+        s.commit()
+    return added
 
 
 def main() -> None:
@@ -28,7 +49,8 @@ def main() -> None:
             s.add(IngestKey(id=str(uuid4()), project_id=project.id, key=DEFAULT_KEY))
             s.commit()
 
-        print(f"project_id={project.id}  slug={project.slug}  ingest_key={DEFAULT_KEY}")
+        evaluators = _seed_evaluators(s, project.id)
+        print(f"project_id={project.id}  slug={project.slug}  ingest_key={DEFAULT_KEY}  evaluators+={evaluators}")
 
 
 if __name__ == "__main__":

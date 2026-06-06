@@ -70,7 +70,7 @@ export function TracesExplorer({ conversations }: { conversations: ConvNode[] })
       </div>
 
       <div className="reveal" style={{ animationDelay: "80ms" }}>
-        <TraceTable conversations={shown} mode="list" />
+        <TraceTable conversations={shown} />
       </div>
     </div>
   );

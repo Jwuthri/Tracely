@@ -42,7 +42,7 @@ export function SingleTraceView({
         <WideToggle wide={wide} onToggle={() => setWide(!wide)} />
       </div>
       <div style={wide ? WIDE_STYLE : undefined} className="transition-[width,margin] duration-200">
-        {tab === "table" && <TraceTable conversations={[conv]} mode="detail" autoSelectFirst embedded />}
+        {tab === "table" && <TraceTable conversations={[conv]} embedded />}
         {tab === "timeline" && <Waterfall spans={spans} />}
         {tab === "evaluations" && <Evaluations scores={scores} verdict={verdict} />}
       </div>

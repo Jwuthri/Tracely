@@ -41,24 +41,28 @@ with tracely.agent("support-agent", version="v3", conversation="conv-1", turn=0)
 tracely.flush()   # force-flush the exporter (call before the process exits)
 ```
 
-### Span context managers
-| Call | Emits a span of type | Sets |
+### Span context managers — one per observation type
+| Call | Span type | Sets |
 |---|---|---|
-| `agent(slug, *, version, run_id, role, conversation, turn)` | `AGENT` (the run root) | `tracely.agent.id`, `.version`, `.run_id`, `.role`, `tracely.conversation.id` + `session.id`, `tracely.turn.index`, `tracely.env`. |
-| `turn(turn_id, *, index)` | a turn marker | `tracely.turn.id` / `.index`. |
-| `step(name, *, step_id)` | a generic step | `tracely.step.name` / `.id`. |
-| `llm(model, *, agent)` | `GENERATION` | `gen_ai.operation.name=chat`, `gen_ai.request.model`. |
+| `agent(slug, *, version, run_id, role, conversation, turn, user, trace_name, handoff_from, edge="delegate")` | `AGENT` (run root) | `tracely.agent.id`/`.version`/`.run_id`/`.role`, `tracely.conversation.id` + `session.id`, `tracely.turn.index`, `tracely.env`; `user`→`tracely.user.id`, `trace_name`→`tracely.trace.name`; `handoff_from`→ a handoff edge (`caller`→this agent, `edge.type`). |
+| `llm(model, *, agent, temperature, top_p, max_tokens, frequency_penalty, presence_penalty, seed, tool_calls, metadata)` | `GENERATION` | `gen_ai.request.model` + the sampling params as `gen_ai.request.*`; `tool_calls`→`tracely.tool_calls` (tools the model **requested**); `metadata`→`tracely.metadata.*`. |
 | `tool(name, *, agent)` | `TOOL` | `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`. |
-| `thinking(name="thinking", *, agent)` | `THINKING` | `tracely.observation.type=THINKING` — reasoning emitted as its own span. |
+| `thinking(name="thinking", *, agent, model)` | `THINKING` | reasoning emitted as its own span; optional `model`. |
+| `retriever(name="retrieve", *, agent)` | `RETRIEVER` | a retrieval step — query in `set_io(input=)`, hits in `set_io(output=)`. |
+| `embedding(model, *, agent)` | `EMBEDDING` | `gen_ai.request.model`; record tokens with `set_usage(input_tokens=)`. |
+| `guardrail(name="guardrail", *, agent)` | `GUARDRAIL` | a safety/policy check — verdict in `set_io(output={"action": "allow"\|"block"})`. |
+| `chain(name, *, agent)` | `CHAIN` | a grouping span (e.g. a RAG pipeline) — nest other spans inside it. |
+| `turn(turn_id, *, index)` / `step(name, *, step_id)` | marker / generic | `tracely.turn.*` / `tracely.step.*`. |
 
 ### Annotating spans
-- `set_io(span, *, input=None, output=None)` → `tracely.input` / `tracely.output` (objects are JSON-encoded).
+- `set_io(span, *, input=None, output=None)` → `tracely.input` / `tracely.output` (objects are JSON-encoded; message content is a `{role, content:[blocks]}` object or a content-block list).
 - `set_usage(span, *, input_tokens=None, output_tokens=None, thinking_tokens=None)` → `gen_ai.usage.input_tokens` / `output_tokens` / `reasoning_tokens`.
+- `set_metadata(span, **kv)` → `tracely.metadata.<key>` — arbitrary tags (e.g. prompt version, tenant), surfaced in the span's Metadata and searchable.
 - `error(span, message="")` → marks the span `StatusCode.ERROR` (→ `level=ERROR` in Tracely) — this is *the* failure-detection signal.
 - `flush()` → force-flush the OTLP exporter.
 
 ### What Tracely reads
-Standard `gen_ai.*` / OpenInference attributes, plus first-class hints that become **indexed columns** on the span row: `tracely.agent.id`, `tracely.agent.version`, `tracely.conversation.id`, `tracely.turn.id`/`.index`, `tracely.step.id`/`.name`, `tracely.observation.type`, and `tracely.env` (`prod|staging|ci|dev` — the gating axis). Agent slug + version are auto-registered into the Postgres registry on ingest.
+Standard `gen_ai.*` / OpenInference attributes, plus first-class hints that become **indexed columns** on the span row: `tracely.agent.id`/`.version`/`.role`, `tracely.user.id`, `tracely.trace.name`, `tracely.conversation.id`, `tracely.turn.id`/`.index`, `tracely.step.id`/`.name`, `tracely.observation.type`, `tracely.tool_calls`, `tracely.handoff.*` + `tracely.edge.type`, the `gen_ai.request.*` sampling params, and `tracely.env` (`prod|staging|ci|dev` — the gating axis). Agent slug + version are auto-registered into the Postgres registry on ingest.
 
 ---
 
@@ -102,7 +106,8 @@ Both **exit 0 (PASS) / 1 (FAIL)** and, inside GitHub Actions (or with `--github`
 |---|---|
 | `../example.py` | the minimal demo trace (agent → llm → failing tool). `make sdk-example`. |
 | `examples/weather_agent.py` / `weather_agent_cli.py` | a real agent wired with `call_tool`/`call_llm` for `tracely replay --entrypoint` / `--cmd`. |
-| `examples/seed_conversations.py` | rich multi-turn / multi-agent / thinking / multimodal / structured-output demo data (`make` it against the stack). |
+| `examples/seed_conversations.py` | rich demo data using **every** SDK helper — single/multi-turn, multi-agent + handoffs, RAG (guardrail→embed→retrieve→chain), thinking, multimodal, structured output, multi-model. `make seed-demo`. |
+| `examples/seed_regression.py` | promote a failing trace → run red→green CI gates (fills Cases + Gates). `make seed-regression`. |
 | `examples/seed_multicall.py` / `seed_handler.py` | repeated-call + handler examples for fixture replay. |
 
 ---

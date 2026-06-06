@@ -38,7 +38,7 @@ export function spanMeta(span: SpanOut): Record<string, unknown> {
 // ONLY user-set metadata (tracely.metadata.*), prefix stripped — this is the "metadata" a user
 // chooses to attach (prompt version, tenant, user id, …), shown at the conversation level and used
 // for filtering. The LLM sampling params (gen_ai.request.*) are intentionally excluded here.
-export function customMeta(span: SpanOut): Record<string, unknown> {
+function customMeta(span: SpanOut): Record<string, unknown> {
   const md = span.metadata || {};
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(md)) {

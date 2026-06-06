@@ -1,4 +1,4 @@
-.PHONY: help infra-up infra-down infra-prune install migrate migrate-ch migrate-pg seed backend workers frontend test send-trace demo-failures gate replay sdk-example seed-regression fmt
+.PHONY: help infra-up infra-down infra-prune install migrate migrate-ch migrate-pg seed backend workers frontend test send-trace demo-failures gate replay sdk-example seed-demo seed-regression fmt
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -59,6 +59,9 @@ replay:      ## re-run the example agent on the promoted suite, then gate (ENTRY
 
 sdk-example: ## emit the demo trace via the Tracely SDK
 	uv run python sdk/example.py
+
+seed-demo:   ## seed rich demo conversations (every trace shape: RAG, multi-agent, multimodal, …)
+	TRACELY_API=$(TRACELY_API) uv run python sdk/examples/seed_conversations.py
 
 seed-regression: ## promote a failing trace, then run red→green CI gates (fills Cases + Gates)
 	TRACELY_API=$(TRACELY_API) uv run python sdk/examples/seed_regression.py

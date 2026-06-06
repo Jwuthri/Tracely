@@ -42,10 +42,6 @@ class AgentRole(str, enum.Enum):
     GENERIC = "GENERIC"
 
 
-def _uuid_pk() -> Mapped[str]:
-    return mapped_column(String(36), primary_key=True)
-
-
 class Project(Base):
     __tablename__ = "projects"
 

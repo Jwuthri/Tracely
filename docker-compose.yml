@@ -1,7 +1,7 @@
 # Full Tracely stack. One command:
 #   docker compose up -d --build --wait        (host 8000 free)
 #   TRACELY_BACKEND_PORT=8088 docker compose up -d --build --wait   (host 8000 busy)
-# Then open http://localhost:3000 (or ${TRACELY_WEB_PORT}).
+# Then open http://localhost:3001 (or ${TRACELY_WEB_PORT}).
 
 x-app-env: &app-env
   TRACELY_ENV: docker

@@ -31,8 +31,9 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Span, Status, StatusCode
 
 __all__ = [
-    "init", "agent", "turn", "step", "llm", "tool", "thinking", "set_io", "set_usage", "set_metadata",
-    "error", "flush", "fixtures", "fixture", "call_llm", "call_tool", "ToolError",
+    "init", "agent", "turn", "step", "llm", "tool", "thinking", "retriever", "embedding",
+    "guardrail", "chain", "set_io", "set_usage", "set_metadata", "error", "flush",
+    "fixtures", "fixture", "call_llm", "call_tool", "ToolError",
 ]
 
 
@@ -83,7 +84,15 @@ def agent(
     role: str | None = None,
     conversation: str | None = None,
     turn: int | None = None,
+    user: str | None = None,
+    trace_name: str | None = None,
+    handoff_from: str | None = None,
+    edge: str = "delegate",
 ) -> Iterator[Span]:
+    """An agent run. `conversation` groups runs into a thread (a multi-turn session); `version`
+    is auto-registered for the regression gate. On the run's root, set `user` (end-user id) and
+    `trace_name` (a human label). For a sub-agent invoked by another, pass `handoff_from` (the
+    caller's slug) to record the delegation edge (caller → this agent, `edge` = relationship)."""
     with _t().start_as_current_span(slug) as span:
         span.set_attribute("tracely.agent.id", slug)
         span.set_attribute("tracely.observation.type", "AGENT")
@@ -99,6 +108,14 @@ def agent(
             span.set_attribute("session.id", conversation)
         if turn is not None:
             span.set_attribute("tracely.turn.index", int(turn))
+        if user:
+            span.set_attribute("tracely.user.id", user)
+        if trace_name:
+            span.set_attribute("tracely.trace.name", trace_name)
+        if handoff_from:  # this agent was delegated to by `handoff_from` (a handoff edge)
+            span.set_attribute("tracely.handoff.caller_agent_id", handoff_from)
+            span.set_attribute("tracely.handoff.callee_agent_id", slug)
+            span.set_attribute("tracely.edge.type", edge)
         yield span
 
 
@@ -132,10 +149,12 @@ def llm(
     presence_penalty: float | None = None,
     seed: int | None = None,
     metadata: dict[str, Any] | None = None,
+    tool_calls: list[str] | None = None,
 ) -> Iterator[Span]:
     """An LLM generation. Pass the sampling parameters (temperature/top_p/max_tokens/…) — they're
     recorded as standard `gen_ai.request.*` attributes and surfaced in the generation's Metadata.
-    `metadata` attaches arbitrary key/values (e.g. prompt version, tenant)."""
+    `metadata` attaches arbitrary key/values (e.g. prompt version, tenant). `tool_calls` records the
+    tools the model REQUESTED this turn (even if a tool never runs — the silent-failure signal)."""
     with _t().start_as_current_span(model) as span:
         span.set_attribute("gen_ai.operation.name", "chat")
         span.set_attribute("gen_ai.request.model", model)
@@ -151,6 +170,8 @@ def llm(
         ):
             if val is not None:
                 span.set_attribute(key, val)
+        if tool_calls:
+            span.set_attribute("tracely.tool_calls", list(tool_calls))
         if metadata:
             set_metadata(span, **metadata)
         yield span
@@ -178,6 +199,50 @@ def thinking(name: str = "thinking", *, agent: str | None = None, model: str | N
             span.set_attribute("tracely.agent.id", agent)
         if model:
             span.set_attribute("gen_ai.request.model", model)
+        yield span
+
+
+@contextmanager
+def retriever(name: str = "retrieve", *, agent: str | None = None) -> Iterator[Span]:
+    """A retrieval step (vector / keyword / web search). Put the query in `set_io(input=...)` and
+    the hits in `set_io(output=...)`; tag the store/index with `set_metadata`."""
+    with _t().start_as_current_span(name) as span:
+        span.set_attribute("tracely.observation.type", "RETRIEVER")
+        if agent:
+            span.set_attribute("tracely.agent.id", agent)
+        yield span
+
+
+@contextmanager
+def embedding(model: str, *, agent: str | None = None) -> Iterator[Span]:
+    """An embedding call. Record token usage with `set_usage(input_tokens=...)`; the embedded text
+    goes in `set_io(input=...)`."""
+    with _t().start_as_current_span(model) as span:
+        span.set_attribute("tracely.observation.type", "EMBEDDING")
+        span.set_attribute("gen_ai.request.model", model)
+        if agent:
+            span.set_attribute("tracely.agent.id", agent)
+        yield span
+
+
+@contextmanager
+def guardrail(name: str = "guardrail", *, agent: str | None = None) -> Iterator[Span]:
+    """A safety / policy check. Put the input in `set_io(input=...)` and the verdict in
+    `set_io(output={"action": "allow" | "block", ...})`."""
+    with _t().start_as_current_span(name) as span:
+        span.set_attribute("tracely.observation.type", "GUARDRAIL")
+        if agent:
+            span.set_attribute("tracely.agent.id", agent)
+        yield span
+
+
+@contextmanager
+def chain(name: str, *, agent: str | None = None) -> Iterator[Span]:
+    """A grouping span (a named sub-pipeline, e.g. a RAG pipeline). Nest other spans inside it."""
+    with _t().start_as_current_span(name) as span:
+        span.set_attribute("tracely.observation.type", "CHAIN")
+        if agent:
+            span.set_attribute("tracely.agent.id", agent)
         yield span
 
 

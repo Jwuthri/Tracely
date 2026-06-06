@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import structlog
 
 from tracely import clickhouse
-from tracely.evaluators import TEMPLATES, EvalResult, RunContext, run_evaluator
+from tracely.evaluators import EvalResult, RunContext, run_evaluator
 from tracely.regression import _root, read_trace_spans
 
 log = structlog.get_logger()
@@ -27,8 +27,8 @@ _SCORE_COLS = [
 
 
 def _evaluator_specs(project_id: str) -> list[dict]:
-    """The evaluators to run: the project's enabled Evaluator records, or the recommended
-    built-in catalog when none are configured (or the table isn't available yet)."""
+    """The evaluators to run: the project's enabled Evaluator records. With none configured, online
+    evaluation is a no-op (the Evaluations tab stays empty) — evaluators are opt-in, not auto-run."""
     try:
         from sqlalchemy import select
 
@@ -39,19 +39,13 @@ def _evaluator_specs(project_id: str) -> list[dict]:
             rows = s.execute(
                 select(Evaluator).where(Evaluator.project_id == project_id, Evaluator.enabled.is_(True))
             ).scalars().all()
-        specs = [
+        return [
             {"kind": r.kind, "config": r.config or {}, "score_name": r.score_name, "level": r.level}
             for r in rows
         ]
-        if specs:
-            return specs
-    except Exception as exc:  # table missing / DB hiccup -> fall back to the built-ins
+    except Exception as exc:  # table missing / DB hiccup -> no evals (rather than built-in noise)
         log.warning("evaluator_load_failed", error=str(exc))
-    return [
-        {"kind": t["kind"], "config": t.get("config") or {}, "score_name": t["score_name"], "level": t["level"]}
-        for t in TEMPLATES
-        if t.get("recommended")
-    ]
+        return []
 
 
 def evaluate_run(project_id: str, trace_id: str) -> dict:

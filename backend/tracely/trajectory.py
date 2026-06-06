@@ -6,8 +6,6 @@ Canonical types per design 00-canonical-decisions.md §7.2; match modes per `age
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -21,12 +19,6 @@ _KIND = {
 
 def step_kind(observation_type: str) -> str:
     return _KIND.get((observation_type or "").upper(), "other")
-
-
-def canonical_hash(obj: Any) -> str:
-    """RFC8785-flavored canonical JSON -> short sha256 (lookup/identity key)."""
-    blob = json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
 @dataclass

@@ -30,6 +30,11 @@ _KNOWN_TYPES = {GENERATION, AGENT, TOOL, CHAIN, RETRIEVER, EMBEDDING, GUARDRAIL,
 
 _GENAI_GEN_OPS = {"chat", "completion", "text_completion", "generate_content", "generate"}
 
+_IO_KEYS = frozenset({
+    "tracely.input", "langfuse.observation.input", "input.value", "gen_ai.prompt", "input",
+    "tracely.output", "langfuse.observation.output", "output.value", "gen_ai.completion", "output",
+})
+
 
 def _any_value(v: AnyValue) -> Any:
     kind = v.WhichOneof("value")
@@ -174,8 +179,6 @@ def _map_span(resource_attrs: dict[str, Any], scope_name: str, scope_version: st
         "trace_name": str(_first(a, ["tracely.trace.name"]) or ""),
         "user_id": str(_first(a, ["tracely.user.id", "user.id", "langfuse.user.id"]) or ""),
         "session_id": str(_first(a, ["session.id", "tracely.session.id", "langfuse.session.id"]) or ""),
-        # tracely first-class semantic columns (agent_slug/agent_version_ref are resolved
-        # to registry UUIDs in the worker; agent_id/agent_version_id columns filled there)
         "agent_slug": str(_first(a, ["tracely.agent.id", "langfuse.agent.id"]) or ""),
         "agent_version_ref": str(_first(a, ["tracely.agent.version", "tracely.agent.version_id"]) or ""),
         "agent_run_id": agent_run_id,
@@ -196,8 +199,8 @@ def _map_span(resource_attrs: dict[str, Any], scope_name: str, scope_version: st
         # io
         "input": _to_str(_first(a, ["tracely.input", "langfuse.observation.input", "input.value", "gen_ai.prompt", "input"])),
         "output": _to_str(_first(a, ["tracely.output", "langfuse.observation.output", "output.value", "gen_ai.completion", "output"])),
-        # metadata: keep everything (lossless), stringified
-        "metadata": {k: _to_str(v) or "" for k, v in a.items()},
+        # metadata: keep everything (lossless), stringified — except input/output, which have their
+        "metadata": {k: _to_str(v) or "" for k, v in a.items() if k not in _IO_KEYS},
         # instrumentation provenance
         "source": "otel",
         "service_name": str(resource_attrs.get("service.name", "")),

@@ -39,11 +39,15 @@ The write path deliberately mirrors Langfuse's proven design — **SDK/OTLP → 
 ### Option A — everything in Docker
 ```bash
 docker compose up -d --build --wait            # ClickHouse, Postgres, Redis, MinIO, migrate, backend, worker, frontend
-# if host ports 8000/3000 are taken (as on some machines):
-TRACELY_BACKEND_PORT=8088 TRACELY_WEB_PORT=3001 docker compose up -d --build --wait
+# host ports default to backend :8000 and web :3001 — remap if taken:
+TRACELY_BACKEND_PORT=8088 TRACELY_WEB_PORT=3002 docker compose up -d --build --wait
 
-open http://localhost:3000/traces              # the UI
-docker compose exec backend python scripts/send_test_trace.py   # send a sample trace, then refresh
+open http://localhost:3001/traces              # the UI  (TRACELY_WEB_PORT to remap)
+
+# populate a rich demo, then refresh:
+docker compose exec backend python sdk/examples/seed_conversations.py   # every trace shape (RAG, multi-agent, multimodal, …)
+docker compose exec backend python sdk/examples/seed_regression.py      # + a red→green CI gate demo (fills Cases + Gates)
+# or a single sample trace:  docker compose exec backend python scripts/send_test_trace.py
 docker compose down                            # stop  (add -v to wipe data)
 ```
 The one-shot **migrate** service runs all migrations + seeds the default project & ingest key (`tracely_dev_key`). `backend`/`worker`/`frontend` run off source volume-mounts, so most edits need only a `docker compose restart <svc>` — **except** the Celery worker, which doesn't hot-reload.
@@ -58,8 +62,9 @@ make seed          # default project + ingest key → tracely_dev_key
 make backend       # FastAPI  :8000  (OpenAPI at /docs)   ┐
 make workers       # Celery ingestion/eval worker          ├ three terminals
 make frontend      # Next.js  :3000                        ┘
-make send-trace    # sample OTLP   ·   make demo-failures   (seed a failure mix)
-make test          # OTLP-mapper unit tests (no infra)
+make seed-demo     # rich demo conversations   ·   make seed-regression   (red→green CI gate)
+make send-trace    # a single sample OTLP trace
+make test          # backend unit tests (no infra)
 ```
 
 ## Ingest from your agent
