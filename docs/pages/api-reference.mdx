@@ -1,0 +1,90 @@
+# API reference
+
+Everything in `import tracely_sdk as tracely`. Span helpers are context managers (`with … as span:`);
+annotators take a `span`.
+
+## `init(...)`
+
+```python
+tracely.init(endpoint="http://localhost:8000", api_key="tracely_dev_key",
+             service_name="agent", env="prod") -> Tracer
+```
+
+Configure the OTLP/HTTP exporter pointing at Tracely. Call once at startup. `env` (`prod | staging |
+ci | dev`) is stamped on every span — the gating axis. If you skip `init`, the first span call
+initializes with defaults.
+
+## Span context managers
+
+Each opens a span of the given **observation type** and yields the OpenTelemetry `Span`.
+
+### `agent(slug, *, version=None, run_id=None, role=None, conversation=None, turn=None, user=None, trace_name=None, handoff_from=None, edge="delegate")` → `AGENT`
+
+The run root. Sets `tracely.agent.id`/`.version`/`.run_id`/`.role`, `tracely.env`; `conversation` →
+`tracely.conversation.id` + `session.id` (threads turns); `turn` → `tracely.turn.index`; `user` →
+`tracely.user.id`; `trace_name` → `tracely.trace.name`. `handoff_from` records a delegation edge
+(`caller → this agent`, with `edge.type = edge`) — open the sub-agent inside its caller's span.
+
+### `llm(model, *, agent=None, temperature=None, top_p=None, max_tokens=None, frequency_penalty=None, presence_penalty=None, seed=None, tool_calls=None, metadata=None)` → `GENERATION`
+
+A model call. Sets `gen_ai.request.model` + each provided sampling param as `gen_ai.request.*`.
+`tool_calls` (a list of names) → `tracely.tool_calls` (tools the model *requested*). `metadata`
+(a dict) → `tracely.metadata.*`.
+
+### `tool(name, *, agent=None)` → `TOOL`
+
+A tool / function execution. Sets `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`.
+
+### `thinking(name="thinking", *, agent=None, model=None)` → `THINKING`
+
+Reasoning as its own span. Optional `model` records which model produced it.
+
+### `retriever(name="retrieve", *, agent=None)` → `RETRIEVER`
+
+A retrieval step. Query in `set_io(input=...)`, hits in `set_io(output=...)`.
+
+### `embedding(model, *, agent=None)` → `EMBEDDING`
+
+An embedding call. Sets `gen_ai.request.model`; record tokens with `set_usage(input_tokens=...)`.
+
+### `guardrail(name="guardrail", *, agent=None)` → `GUARDRAIL`
+
+A safety / policy check. Verdict in `set_io(output={"action": "allow" | "block", ...})`.
+
+### `chain(name, *, agent=None)` → `CHAIN`
+
+A grouping span (a named sub-pipeline, e.g. a RAG pipeline). Nest other spans inside it.
+
+### `turn(turn_id, *, index=None)` · `step(name, *, step_id=None)`
+
+A turn marker (`tracely.turn.id`/`.index`) and a generic step (`tracely.step.name`/`.id`).
+
+## Annotators
+
+| Call | Effect |
+|---|---|
+| `set_io(span, *, input=None, output=None)` | `tracely.input` / `tracely.output` (objects JSON-encoded). |
+| `set_usage(span, *, input_tokens=None, output_tokens=None, thinking_tokens=None)` | `gen_ai.usage.input_tokens` / `output_tokens` / `reasoning_tokens`. |
+| `set_metadata(span, **kv)` | `tracely.metadata.<key>` — arbitrary tags (scalars kept; others JSON-encoded). |
+| `error(span, message="")` | Marks the span `StatusCode.ERROR` → `level=ERROR`. The failure signal. |
+| `flush()` | Force-flush the OTLP exporter — call before the process exits. |
+
+## Hermetic replay
+
+`call_tool(name, fn, *, args=None, agent=None)`, `call_llm(model, fn, *, input=None, usage=None,
+agent=None)`, `with fixtures(bundle): …`, `fixture(kind, name)`, and the `ToolError` exception — see
+[Hermetic replay](/replay).
+
+## What Tracely reads
+
+Beyond standard `gen_ai.*` / OpenInference attributes, these `tracely.*` hints become **indexed
+columns** on the span row:
+
+`tracely.agent.id` · `.version` · `.role` · `tracely.user.id` · `tracely.trace.name` ·
+`tracely.conversation.id` · `tracely.turn.id` / `.index` · `tracely.step.id` / `.name` ·
+`tracely.observation.type` · `tracely.tool_calls` · `tracely.handoff.caller_agent_id` /
+`.callee_agent_id` · `tracely.edge.type` · the `gen_ai.request.*` sampling params · `tracely.env`.
+
+Agent slug + version are auto-registered into the Postgres registry on ingest. Input/output are
+stored in dedicated columns (and shown in Input/Output tabs), so they're **excluded** from the
+attributes list to avoid duplication.

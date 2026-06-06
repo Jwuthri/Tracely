@@ -33,6 +33,7 @@ POST /v1/traces                         api/routers/otlp.py
   ─ (worker) ─
   → tasks.ingest_otlp_blob()            blobstore.get_blob()
                                          otel/mapping.parse_otlp_traces() → event dicts
+                                         tasks._apply_default_agent()          ← agent-less spans → trace's agent, else `default`
                                          registry.upsert_agent()/upsert_agent_version()  ← slug → UUID
                                          clickhouse.insert_rows("events", …)
                                          evaluate_run_task.apply_async(…, countdown=4)   ← debounce late spans
@@ -40,7 +41,7 @@ POST /v1/traces                         api/routers/otlp.py
 **Why blob-first:** nothing is queued unless the raw body is durably stored, so a worker crash never loses data. **Why `async_insert`:** Celery tasks are separate processes with no shared in-memory buffer (Langfuse batches in-process), so we let ClickHouse batch server-side.
 
 ### 2. Online evaluation — auto-score every trace
-`tasks.evaluate_run_task` → `eval_runner.evaluate_run()` loads the project's **enabled `Evaluator` records** (or the recommended built-in `TEMPLATES` as a fallback), runs each via `evaluators.run_evaluator()`, and writes `scores` rows. Score ids are a deterministic `uuid5(trace_id:name:span_id)` so re-evaluating a trace (spans arrive across batches) **replaces** rather than duplicates.
+`tasks.evaluate_run_task` → `eval_runner.evaluate_run()` loads the project's **enabled `Evaluator` records**, runs each via `evaluators.run_evaluator()`, and writes `scores` rows. Evaluators are **opt-in**: `seed.py` installs the recommended catalog (`TEMPLATES`) as editable rows so online eval works out of the box, but a project with no enabled evaluators simply produces no scores (no built-in fallback). Score ids are a deterministic `uuid5(trace_id:name:span_id)` so re-evaluating a trace (spans arrive across batches) **replaces** rather than duplicates.
 
 The built-in checks (`evaluators.py`):
 
@@ -55,7 +56,7 @@ The built-in checks (`evaluators.py`):
 
 The judge grades the agent's **real answer** for faithfulness to the actual tool results — it catches hallucinations, not just crashes.
 
-> ⚠️ Evaluators are mid-refactor to fully DB-backed records (`Evaluator` model + migration `0007`). Today `eval_runner` falls back to the built-in `TEMPLATES` when the table is empty/unapplied (logs a benign `evaluator_load_failed`). See the [next-steps PRD](../design/part2-tracely/11-prd-next-steps.md).
+> Evaluators are **fully DB-backed** (`Evaluator` model + migration `0007`) and editable per project (`enabled`, `target_agent`/`target_env`, `sampling`, `config`). `seed.py` seeds the recommended catalog as editable rows (idempotent by `score_name`), so disabling or editing a row sticks across re-seeds. The built-in checks in `evaluators.py` are the implementations these records dispatch to.
 
 ### 3. Failure intelligence — group failures into Issues
 Two stages:
@@ -74,7 +75,7 @@ Two stages:
 
 | File | Purpose |
 |---|---|
-| `config.py` | `Settings` (pydantic-settings) — all env: ClickHouse/Postgres/Redis/S3, OpenAI keys, embedding/judge models, gate thresholds. |
+| `config.py` | `Settings` (pydantic-settings) — all env: ClickHouse/Postgres/Redis/S3, OpenAI keys, embedding/judge models, gate thresholds, `default_agent_slug` (fallback agent for agent-less traces). |
 | `db.py` | SQLAlchemy 2.0 async engine (API) + sync engine (workers/migrations); `AsyncSessionLocal` / `SyncSessionLocal`. |
 | `models.py` | Postgres registry entities + enums (`Project, IngestKey, Agent, AgentVersion, EvaluationSuite/Case, GateRun/Case, FailureCluster/Member, FailureEmbedding, Evaluator, CaseReplay`). |
 | `clickhouse.py` | sync + async CH clients; `insert_rows()` (server-side `async_insert`). |
@@ -93,7 +94,7 @@ Two stages:
 | `agents.py` | LangGraph/LangChain agents (`analyze_cluster`, `consolidate`) — lazy-imported. |
 | `gate.py` | `run_gate`, suite replay, candidate metrics, baseline compare, soft warnings. |
 | `schemas.py` | Pydantic API models (`SpanOut`, `TraceDetail`, …). |
-| `seed.py` / `ch_migrate.py` | bootstrap the default project + ingest key; apply ClickHouse DDL. |
+| `seed.py` / `ch_migrate.py` | bootstrap the default project + ingest key + the recommended evaluators; apply ClickHouse DDL. |
 | `api/` | FastAPI `main.py`, `auth.py` (Bearer → `project_id`), and the routers below. |
 
 ## API surface (`backend/tracely/api/routers/`)
@@ -115,7 +116,7 @@ Every read/write is scoped by `project_id`, resolved from the `Authorization: Be
 ## Data schemas
 
 - **ClickHouse** (`tracely/ch_migrations/*.up.sql`): `0001_events` — the wide span table (identifiers, timing, agent semantics as **first-class indexed columns** `agent_id/agent_run_id/turn_id/step_id/env`, tool edges, `usage_details`/`cost_details` Maps, `input`/`output`, full `metadata` Map), `ReplacingMergeTree(event_ts, is_deleted)`. `0002_scores` — the `scores` sink (`name, verdict, value, evaluation_level, observation_id, source, …`).
-- **Postgres** (`migrations/versions/*`, Alembic): `0001` registry (projects/keys/agents/versions) · `0002` suites/cases/replays · `0003` gate runs/cases · `0004` failure clusters/members/embeddings · `0005` FI extensions · `0006` gate metric columns (latency/tokens/warnings) · `0007` `evaluators` (user-defined: kind, config, score_name, level, enabled, target_agent/env, sampling) — **not yet applied** in deployed DBs.
+- **Postgres** (`migrations/versions/*`, Alembic): `0001` registry (projects/keys/agents/versions) · `0002` suites/cases/replays · `0003` gate runs/cases · `0004` failure clusters/members/embeddings · `0005` FI extensions · `0006` gate metric columns (latency/tokens/warnings) · `0007` `evaluators` (user-defined: kind, config, score_name, level, enabled, target_agent/env, sampling) — applied + seeded with the recommended catalog by `seed.py`.
 
 ## Run it
 

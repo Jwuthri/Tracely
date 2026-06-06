@@ -917,8 +917,10 @@ function DataRow({
   agentCount?: number;
 }) {
   const router = useRouter();
-  // Whole-row click opens the trace (conversation → its session/trace); clicks on interactive
-  // elements (chevron, pills, links, expandable text) are left alone.
+  // Whole-row click zooms in — but only at the conversation and message levels. Step (S) rows are
+  // NOT row-clickable (too easy to mis-click while reading); their expandable objects/pills still
+  // work on their own. Clicks on interactive elements (chevron, pills, links) are always left alone.
+  const isStep = ctx.level === "S";
   const href =
     ctx.level === "C"
       ? ctx.conv.turns > 1
@@ -927,11 +929,19 @@ function DataRow({
       : `/traces/${ctx.turn.trace_id}`;
   return (
     <tr
-      onClick={(e) => {
-        if ((e.target as HTMLElement).closest("button, a, input, label")) return;
-        router.push(href);
-      }}
-      className={clsx("group cursor-pointer border-b border-l-2 border-slate-800 transition-colors hover:bg-slate-800/80", ROW_BG[depth])}
+      onClick={
+        isStep
+          ? undefined
+          : (e) => {
+              if ((e.target as HTMLElement).closest("button, a, input, label")) return;
+              router.push(href);
+            }
+      }
+      className={clsx(
+        "group border-b border-l-2 border-slate-800 transition-colors hover:bg-slate-800/80",
+        !isStep && "cursor-pointer",
+        ROW_BG[depth],
+      )}
     >
       <td style={CTRL} className="px-2 py-2 align-top first:pl-2 sm:px-3 sm:first:pl-4">
         {canExpand ? (

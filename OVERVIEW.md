@@ -145,7 +145,7 @@ Plus a **⌘K command palette** to jump anywhere.
 
 > 🥷 **Silent failures are the star** — a run with zero error spans can still be broken (the model claims it called a tool but didn't, then hallucinates). No structural-only tool catches this.
 
-**🚧 Becoming user-defined** *(in progress)* — per your steer that *the user must own evaluators*, the engine is being refactored from a hardcoded list into **configurable `Evaluator` records** (`models.Evaluator`, migration `0007`): each has a kind (`structural` | `llm_judge`), target agent/env, sampling, and config. The check **implementations** are now config-dispatched (`evaluators.run_evaluator`), the LLM judge takes a **custom rubric + threshold**, and the built-ins ship as an editable **template catalog** (`evaluators.TEMPLATES`). Still to wire: the runner loading these records, an API, and a management UI.
+**✅ User-defined** — per your steer that *the user must own evaluators*, the engine runs **configurable `Evaluator` records** (`models.Evaluator`, migration `0007`): each has a kind (`structural` | `llm_judge`), target agent/env, sampling, and config. The runner (`eval_runner`) loads the project's **enabled** records and dispatches each via `evaluators.run_evaluator` (the LLM judge takes a **custom rubric + threshold**); `seed.py` installs the recommended **template catalog** (`evaluators.TEMPLATES`) as editable rows so eval works out of the box. Evaluation is opt-in — a project with no enabled evaluators produces no scores (no hidden fallback). Still to add: a CRUD **API** + a management **UI**.
 
 `evaluators.py` · `eval_runner.py` · scores → ClickHouse `scores` (deterministic ids → idempotent re-eval)
 
@@ -246,7 +246,7 @@ Signature touches: **`[ID]` copy chips** (long ids never shown raw), the **⌘K 
 
 ## ⚠️ Honest limitations
 
-- 🚧 **User-defined evaluators are mid-migration** — the model, migration, config-driven implementations, and template catalog exist, but the **runner still uses the old hardcoded list**, and there's no seed/API/UI yet. (A worker restart would break eval until the runner is wired to `run_evaluator`.)
+- 🛠️ **No evaluator management API/UI yet** — evaluators are fully DB-backed and the runner loads them (seeded with the recommended catalog), but editing/adding one means touching the `evaluators` table directly; the CRUD API + Evaluators page are still to build.
 - 🔓 **Auth is wide open** — single dev key `tracely_dev_key`, no multi-tenancy/RBAC, single project.
 - 🟰 **All-SKIP passes the gate** — a replay harness that emits no matching traces yields a false green.
 - 🧱 **Single-node, single-process worker** (`--pool=solo`) — fine for the demo, not for scale.
@@ -258,7 +258,7 @@ Signature touches: **`[ID]` copy chips** (long ids never shown raw), the **⌘K 
 ## 🚀 What's next
 
 **Near-term**
-1. **Finish user-defined evaluators** — wire `eval_runner` to load `Evaluator` records via `run_evaluator`, seed the recommended templates (editable), add the CRUD API + an Evaluators page with a "set up evaluator" flow (so the "Create evaluator" button on a cluster lands somewhere).
+1. **Evaluator management API + UI** — the runner already loads DB `Evaluator` records and `seed.py` installs the recommended (editable) catalog; what's left is a CRUD API + an Evaluators page with a "set up evaluator" flow (so the "Create evaluator" button on a cluster lands somewhere).
 2. **Eval-score-delta gate** + an LLM-judge assertion inside replay.
 3. **Multi-tenancy + real auth.**
 

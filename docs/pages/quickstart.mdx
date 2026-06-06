@@ -1,0 +1,81 @@
+import { Callout, Steps } from "nextra/components";
+
+# Quickstart
+
+Instrument an agent and see the trace in Tracely in about five minutes.
+
+## Install
+
+```bash
+pip install tracely-sdk
+# or, from this repo:  uv pip install -e sdk   /   pip install ./sdk
+```
+
+Requires Python ≥ 3.10. Dependencies are just `opentelemetry-sdk` + the OTLP/HTTP exporter. The
+install also adds the `tracely` CLI (entry point `tracely_sdk.cli:main`).
+
+<Callout type="info">
+  You need a running Tracely backend. From the repo root: `docker compose up -d --build --wait`,
+  then the API is at `http://localhost:8000` with the dev ingest key `tracely_dev_key`.
+</Callout>
+
+## Instrument an agent
+
+<Steps>
+
+### Initialize once at startup
+
+```python
+import tracely_sdk as tracely
+
+tracely.init(
+    endpoint="http://localhost:8000",   # your Tracely API
+    api_key="tracely_dev_key",          # an ingest key
+    service_name="support-agent",
+    env="prod",                         # prod | staging | ci | dev  — the gating axis
+)
+```
+
+### Describe a run with context managers
+
+Each `with` block is a span; nesting builds the trace tree.
+
+```python
+with tracely.agent("support-agent", version="v3",
+                   conversation="conv-1", turn=0,
+                   user="u_42", trace_name="order status") as a:
+    tracely.set_io(a, input="Where is order ORD-4471?", output="It's out for delivery, ETA today.")
+
+    with tracely.llm("gpt-4o", agent="support-agent", temperature=0.2) as g:
+        tracely.set_io(g, input=[{"role": "user", "content": "Where is order ORD-4471?"}],
+                          output={"role": "assistant", "content": "calling track_order…",
+                                  "finish_reason": "tool_calls"})
+        tracely.set_usage(g, input_tokens=180, output_tokens=24)
+
+    with tracely.tool("track_order", agent="support-agent") as t:
+        tracely.set_io(t, input={"order_id": "ORD-4471"},
+                          output={"status": "out_for_delivery", "eta": "today"})
+```
+
+### Flush before the process exits
+
+```python
+tracely.flush()   # force-flush the OTLP exporter
+```
+
+</Steps>
+
+## See it
+
+Open the Tracely UI (`http://localhost:3001` by default) → **Traces**. Your run appears as a
+conversation; expand it to see the agent → llm → tool tree, token usage, and cost.
+
+<Callout type="default">
+  Want a fully-populated demo instead? `docker compose exec backend python sdk/examples/seed_conversations.py`
+  seeds rich conversations exercising every helper (RAG, multi-agent handoffs, multimodal, …).
+</Callout>
+
+## What's next
+
+- [Core concepts](/concepts) — what the observation types mean and how runs thread into conversations.
+- [Instrumenting an agent](/instrumentation) — retrievers, embeddings, guardrails, thinking, handoffs, metadata.

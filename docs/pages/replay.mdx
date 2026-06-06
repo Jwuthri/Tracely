@@ -1,0 +1,57 @@
+import { Callout } from "nextra/components";
+
+# Hermetic replay
+
+This is the seam that makes **"the recorded run _is_ the test"** real: the *same* agent code runs
+live in production and deterministically offline in CI — no API keys, no cost, no flakiness.
+
+## The idea
+
+Wrap each external call in `call_tool` / `call_llm` instead of calling it directly:
+
+```python
+import tracely_sdk as tracely
+
+def run(user_input: str) -> str:
+    with tracely.agent("support-agent"):
+        order = tracely.call_tool("get_order", lambda: get_order(order_id),
+                                  args={"order_id": order_id})
+        answer = tracely.call_llm("gpt-4o", lambda: chat(messages),
+                                  input=messages, usage=(812, 96))
+        return answer
+```
+
+- **In production** (no fixtures active): `call_tool` / `call_llm` invoke your `fn`, record its
+  output (and any error) on the span, and return it — a normal traced run.
+- **In CI replay**: `tracely replay` loads the regression case's recorded **fixture bundle** and
+  activates it; `call_tool` / `call_llm` then **serve the recorded outputs** (in order, or matched
+  by `args`) and never call your `fn`.
+
+<Callout type="info">
+  A call that **errored** in production is reproduced on the replayed span **and raised as
+  `tracely.ToolError`** — so your agent's own `try/except` runs exactly as it would live, and the
+  gate sees the same failure condition. Faithful error-handling replay, for free.
+</Callout>
+
+## Activating fixtures manually
+
+`tracely replay` does this for you, but the primitive is public:
+
+```python
+with tracely.fixtures(bundle):     # bundle = the case's recorded tool/LLM outputs
+    run(case_input)                # call_tool/call_llm now serve recorded values
+# outside the block, calls are live again
+```
+
+`fixture(kind, name)` peeks the next recorded output for a tool/model without consuming it.
+
+## Why this matters
+
+- **Deterministic** — the agent sees the exact tool/LLM outputs the production trace saw.
+- **Offline & free** — no live keys or spend in CI; `lambda: …` is never called under fixtures.
+- **Faithful** — recorded errors replay as `ToolError`, so error-handling logic is gated, not bypassed.
+
+The reference agent in
+[`sdk/examples/weather_agent.py`](https://github.com/julien-heysam/Tracely/blob/master/sdk/examples/weather_agent.py)
+wires this up (`run`, `run_broken`, `run_handles`, …) and is what `tracely replay --entrypoint
+weather_agent:run` executes. Next: the [CI gate CLI](/cli).

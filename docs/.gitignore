@@ -1,0 +1,6 @@
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+.DS_Store

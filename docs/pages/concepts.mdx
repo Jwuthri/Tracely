@@ -1,0 +1,88 @@
+import { Callout } from "nextra/components";
+
+# Core concepts
+
+## Spans & observation types
+
+A trace is a tree of **spans**. Every span carries an **observation type** that tells Tracely what it
+is, so the UI can render it correctly and evaluators/gates can reason about it. Each type has a
+dedicated SDK helper:
+
+| Helper | Type | What it represents |
+|---|---|---|
+| `agent(...)` | `AGENT` | An agent run — the root of a turn. |
+| `llm(model, …)` | `GENERATION` | A model call (chat/completion). |
+| `tool(name, …)` | `TOOL` | A tool / function execution. |
+| `thinking(…)` | `THINKING` | Reasoning / chain-of-thought, as its own span. |
+| `retriever(name, …)` | `RETRIEVER` | A retrieval step (vector / keyword / web search). |
+| `embedding(model, …)` | `EMBEDDING` | An embedding call. |
+| `guardrail(name, …)` | `GUARDRAIL` | A safety / policy check. |
+| `chain(name, …)` | `CHAIN` | A grouping span (a named sub-pipeline). |
+| `step(name, …)` | `SPAN` | A generic step (anything else). |
+
+<Callout type="info">
+  Observation type is set from `tracely.observation.type` (these helpers), else inferred from
+  OpenInference (`openinference.span.kind`) or GenAI (`gen_ai.operation.name`) conventions — so
+  existing instrumentation is classified too.
+</Callout>
+
+## Conversations, turns & sessions
+
+Agents are multi-turn. Tracely models that without you stitching anything together:
+
+- **Each turn is its own trace** (one `agent(...)` run).
+- Pass the same **`conversation`** id to every turn's `agent(...)` and Tracely groups them into a
+  **thread** (a session) you can replay end-to-end.
+- **`turn`** is the 0-based index within the conversation.
+
+```python
+for i, user_msg in enumerate(conversation):
+    with tracely.agent("support-agent", conversation="conv-1", turn=i) as a:
+        ...
+```
+
+A single-shot agent just omits `conversation` (it's a one-turn thread).
+
+## Multi-agent runs & handoffs
+
+When an orchestrator delegates to a specialist, open the specialist's `agent(...)` **inside** the
+orchestrator's span and record the **handoff edge**:
+
+```python
+with tracely.agent("router", role="orchestrator", conversation="c1") as root:
+    with tracely.agent("billing-agent", role="specialist",
+                       conversation="c1", handoff_from="router"):
+        ...
+```
+
+`handoff_from` records `router → billing-agent` (with an `edge` relationship, default `"delegate"`),
+which powers the multi-agent graph view.
+
+## Input / output is structured
+
+`set_io` accepts strings, but message content is best expressed as a **structured object** so it
+renders richly and is self-describing across modalities:
+
+```python
+tracely.set_io(span, input={"role": "user", "content": [
+    {"type": "text", "text": "What's wrong with this?"},
+    {"type": "image_url", "image_url": {"url": "https://…/photo.jpg"}},
+    {"type": "input_file", "filename": "receipt.pdf", "url": "https://…/receipt.pdf"},
+]})
+```
+
+A bare message array (`[{"role": …, "content": …}]`) renders as a conversation; a single message
+object renders as one bubble; typed content blocks render text + image/file chips. Tracely never
+shows you a half-text/half-JSON smush.
+
+## Environment — the gating axis
+
+Every span carries **`env`** (`prod | staging | ci | dev`), set once in `init(env=...)`. It's the
+axis Tracely gates on: production failures become regression cases, and CI runs (tagged `env=ci`)
+are checked against them. See the [CI gate CLI](/cli).
+
+## Usage & cost
+
+Report tokens with `set_usage` (input / output / thinking). **Cost is derived** from the model name
++ token counts via a price table — you don't trace it. Pass sampling parameters to `llm(...)`
+(`temperature`, `top_p`, `max_tokens`, `seed`, …) and they show up in the generation's metadata.

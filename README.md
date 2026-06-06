@@ -79,6 +79,7 @@ Point any OTLP/HTTP exporter at `POST {endpoint}/v1/traces` with `Authorization:
 | [`workers/`](workers/README.md) | The deployable Celery worker runtime (imports the backend's tasks). |
 | [`frontend/`](frontend/README.md) | The Next.js web app — the hierarchical trace explorer, clusters, cases, gates, trends. |
 | [`sdk/`](sdk/README.md) | The Python SDK (instrument agents over OTLP, hermetic record-replay) + the `tracely` CI gate CLI. |
+| [`docs/`](docs/README.md) | The **SDK documentation site** (Nextra / Next.js + MDX) — how it works, instrumentation guide, full API reference, hermetic replay, CI gate. `make docs` → :3002. |
 | [`scripts/`](scripts/README.md) | Dev/demo helpers (raw-OTLP sender, gate shim). |
 | [`design/`](design/README.md) | The full design dossier — reverse-engineered Langfuse + the Tracely architecture, eval, regression, CI/CD, and failure-intelligence designs. |
 

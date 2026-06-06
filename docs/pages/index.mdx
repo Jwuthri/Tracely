@@ -1,0 +1,68 @@
+import { Callout } from "nextra/components";
+
+# Tracely SDK
+
+**Instrument your AI agents and ship their traces to Tracely over OTLP.** `tracely-sdk` is a thin
+wrapper over the OpenTelemetry SDK: you describe an agent run with a handful of context managers, and
+it emits standard `gen_ai.*` / OpenInference attributes **plus** Tracely's first-class `tracely.*`
+hints — so the backend can light up agent-native features (conversations, evaluators, failure
+clusters, regression gates) instead of treating everything as opaque spans.
+
+<Callout type="info">
+  **The recorded run _is_ the test.** You never hand-author a dataset of questions and ideal
+  answers — production already handed you the perfect failing example. The same SDK that records a
+  run in production *replays* it deterministically in CI ([Hermetic replay](/replay)).
+</Callout>
+
+It's two things in one small package:
+
+1. an **instrumentation SDK** — `tracely.agent(...)`, `tracely.llm(...)`, `tracely.tool(...)`, … (this guide), and
+2. the **`tracely` CLI** — `tracely gate` / `tracely replay`, which run an agent's promoted regression suite in CI and gate the PR ([CI gate CLI](/cli)).
+
+## How it works
+
+You annotate spans; everything downstream is derived from them. The write path mirrors a proven
+design — **durable blob first, then async fan-in** — so an ingest spike never drops a trace:
+
+```
+your agent
+  │  tracely.agent("planner") · llm(...) · tool(...)        ← this SDK (OpenTelemetry spans)
+  ▼
+POST {endpoint}/v1/traces   (OTLP/HTTP, Bearer <ingest-key>)
+  │
+  ▼
+FastAPI  ─writes raw OTLP blob→  S3 / MinIO   (the source of truth)
+  │  enqueue
+  ▼
+Redis ──► Celery worker
+            • read the blob
+            • map OTLP span → event row  (gen_ai.* / openinference / tracely.*)
+            • resolve agent slug → registry id
+            • insert into ClickHouse `events`
+            • (debounced) run configured evaluators → `scores`
+  │
+  ▼
+ClickHouse (events + scores)  ─►  the Tracely UI: traces · clusters · cases · gates · trends
+```
+
+The payoff of the `tracely.*` hints: agent / conversation / turn / step / observation-type / env
+become **first-class indexed columns** on each span — not read-time string parsing — which is what
+makes per-agent evaluation, conversation threading, and PR gating possible.
+
+## Do you even need this SDK?
+
+<Callout type="default">
+  Already on OpenTelemetry / OpenInference / a framework instrumentor (LangGraph, etc.)? You can skip
+  the instrumentation half — point your existing OTLP exporter at `POST {endpoint}/v1/traces` and set
+  the [`tracely.*` attributes](/api-reference#what-tracely-reads) yourself. This SDK is just the
+  ergonomic path. The **CLI**, though, is how you wire Tracely into CI.
+</Callout>
+
+## Next
+
+- [**Quickstart**](/quickstart) — install, instrument an agent, see it in the UI.
+- [**Core concepts**](/concepts) — observation types, conversations, the trace tree.
+- [**Instrumenting an agent**](/instrumentation) — every helper, with examples.
+- [**API reference**](/api-reference) — the full surface.
+- [**Hermetic replay**](/replay) — record in prod, replay in CI.
+- [**CI gate CLI**](/cli) — `tracely gate` / `tracely replay` + the GitHub Action.

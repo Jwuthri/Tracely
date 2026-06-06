@@ -1,0 +1,116 @@
+import { Callout } from "nextra/components";
+
+# Instrumenting an agent
+
+A cookbook of every helper, with realistic snippets. All of these are exercised end-to-end in
+[`sdk/examples/seed_conversations.py`](https://github.com/julien-heysam/Tracely/blob/master/sdk/examples/seed_conversations.py).
+
+## The run root — `agent(...)`
+
+The root of a turn. Put the user-facing message in `set_io`; tag the run with `user` and a human
+`trace_name`.
+
+```python
+with tracely.agent("support-agent", version="v4", conversation="conv-1", turn=0,
+                   user="u_7741", trace_name="docs Q&A") as a:
+    tracely.set_io(a, input={"role": "user", "content": [{"type": "text", "text": question}]},
+                      output={"role": "assistant", "content": [{"type": "text", "text": answer}]})
+```
+
+`version` is auto-registered into the agent registry — it's what the regression gate pins to.
+
+## Generations — `llm(...)`
+
+Sampling parameters become `gen_ai.request.*` (shown in the generation's Metadata). `metadata`
+attaches arbitrary tags. `tool_calls` records the tools the model **requested** this turn.
+
+```python
+with tracely.llm("gpt-4o", agent="support-agent",
+                 temperature=0.7, top_p=1.0, max_tokens=1024, seed=7,
+                 tool_calls=["get_weather"],            # requested (even if it never runs)
+                 metadata={"prompt_version": "v3", "tenant": "acme"}) as g:
+    tracely.set_io(g, input=messages, output={"role": "assistant", "content": answer,
+                                              "finish_reason": "stop"})
+    tracely.set_usage(g, input_tokens=760, output_tokens=88, thinking_tokens=40)
+```
+
+<Callout type="info">
+  **Input** is best as a bare message array (`[{"role","content"}]`) so it renders as a transcript.
+  **Output** is the completion message object the chat API returns — or a dict (an output-schema
+  result), emitted as-is.
+</Callout>
+
+## Tools — `tool(...)`
+
+Mark a failed tool with `error(...)` — that's *the* failure-detection signal.
+
+```python
+with tracely.tool("get_charges", agent="billing-agent") as t:
+    tracely.set_io(t, input={"order_id": "ORD-4471"})
+    try:
+        tracely.set_io(t, output=charges_api(order_id))
+    except Exception as e:
+        tracely.error(t, f"billing upstream timeout: {e}")   # level=ERROR
+```
+
+A model that **requests** a tool that never runs is a *silent failure* — record the request with
+`llm(tool_calls=[...])` and simply don't emit the `tool(...)` span.
+
+## Reasoning — `thinking(...)`
+
+Chain-of-thought as its own span, with reasoning-token usage:
+
+```python
+with tracely.thinking(agent="support-agent", model="gpt-4o") as th:
+    tracely.set_io(th, output={"role": "thinking", "content": "Plan: search docs, then answer."})
+    tracely.set_usage(th, thinking_tokens=120)
+```
+
+## RAG: `guardrail` → `embedding` → `retriever`, grouped in a `chain`
+
+```python
+tracely.set_io  # (set on the agent root, omitted here)
+with tracely.guardrail("input_guardrail", agent="support-agent") as gr:
+    tracely.set_io(gr, input=question, output={"action": "allow", "flags": []})
+
+with tracely.chain("rag_pipeline", agent="support-agent"):     # groups the retrieval sub-steps
+    with tracely.embedding("text-embedding-3-small", agent="support-agent") as e:
+        tracely.set_io(e, input=question, output={"dims": 1536})
+        tracely.set_usage(e, input_tokens=12)
+    with tracely.retriever("search_docs", agent="support-agent") as r:
+        tracely.set_io(r, input={"query": question, "top_k": 3}, output={"hits": hits})
+        tracely.set_metadata(r, vector_store="pgvector")
+```
+
+A **blocked** guardrail just records `{"action": "block", "flags": [...]}` and the agent returns a
+safe refusal.
+
+## Metadata — `set_metadata(...)`
+
+Arbitrary tags on any span (`tracely.metadata.<key>`), surfaced in the span panel and searchable:
+
+```python
+tracely.set_metadata(span, tenant="acme", prompt_version="v3", feature_flag="rag_v2")
+```
+
+## Multimodal input
+
+Build content blocks — text + image + file — in one user message:
+
+```python
+user_msg = {"role": "user", "content": [
+    {"type": "text", "text": "My order arrived cracked — photo + receipt attached."},
+    {"type": "image_url", "image_url": {"url": "https://…/photo.jpg"}},
+    {"type": "input_file", "filename": "receipt.pdf", "url": "https://…/receipt.pdf",
+     "mime_type": "application/pdf"},
+]}
+tracely.set_io(agent_span, input=user_msg)
+```
+
+The message-level Content cell renders the text plus an image thumbnail and a file chip.
+
+## Putting it together
+
+See the eleven scenarios in `seed_conversations.py` — single & multi-turn, multi-agent + handoffs,
+RAG, multimodal, structured output, tool error + recovery, guardrail block, hallucination, silent
+tool, and a deep-research run. Run it with `make seed-demo`.
