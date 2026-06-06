@@ -141,14 +141,17 @@ def tool(name: str, *, agent: str | None = None) -> Iterator[Span]:
 
 
 @contextmanager
-def thinking(name: str = "thinking", *, agent: str | None = None) -> Iterator[Span]:
+def thinking(name: str = "thinking", *, agent: str | None = None, model: str | None = None) -> Iterator[Span]:
     """A reasoning step. First-class observation type THINKING — the model's chain-of-thought,
     emitted as its own span so it shows up distinctly from the GENERATION that follows. Put the
-    reasoning text in `set_io(span, output=...)` and reasoning tokens in `set_usage(..., thinking_tokens=)`."""
+    reasoning text in `set_io(span, output=...)` and reasoning tokens in `set_usage(..., thinking_tokens=)`.
+    Pass `model` to record which model produced the reasoning (shown in the Model column)."""
     with _t().start_as_current_span(name) as span:
         span.set_attribute("tracely.observation.type", "THINKING")
         if agent:
             span.set_attribute("tracely.agent.id", agent)
+        if model:
+            span.set_attribute("gen_ai.request.model", model)
         yield span
 
 

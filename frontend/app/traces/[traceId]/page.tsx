@@ -44,6 +44,7 @@ export default async function TracePage({ params }: { params: Promise<{ traceId:
     last_output: output,
     tokens: totalTokens,
     cost: totalCost,
+    first_ts: root?.start_time ?? "",
     last_ts: root?.start_time ?? "",
     last_trace_id: traceId,
     failing: failing ? 1 : 0,

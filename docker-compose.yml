@@ -62,7 +62,7 @@ services:
     image: redis:7
     command: ["redis-server", "--maxmemory-policy", "noeviction"]
     ports:
-      - "6379:6379"
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -171,7 +171,7 @@ services:
       backend:
         condition: service_healthy
     ports:
-      - "${TRACELY_WEB_PORT:-3000}:3000"
+      - "${TRACELY_WEB_PORT:-3001}:3000"
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
       interval: 5s

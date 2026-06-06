@@ -1,7 +1,7 @@
 import { getSession, getTrace, type ConvNode, type FullTurn } from "../../lib/api";
 import { convUsage, fmtUsd } from "../../lib/usage";
 import { CopyId } from "../../components/CopyId";
-import { TraceTable } from "../../components/TraceTable";
+import { SessionView } from "../../components/SessionView";
 import { IconArrowLeft } from "../../components/icons";
 
 export default async function ThreadPage({ params }: { params: Promise<{ threadId: string }> }) {
@@ -22,6 +22,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
     last_output: turns[turns.length - 1]?.output ?? null,
     tokens: totalTokens,
     cost: totalCost,
+    first_ts: turns[0]?.ts ?? "",
     last_ts: turns[turns.length - 1]?.ts ?? "",
     last_trace_id: turns[turns.length - 1]?.trace_id ?? threadId,
     failing,
@@ -52,7 +53,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
         <div className="card p-10 text-center text-[13px] text-fg-faint">Thread not found.</div>
       ) : (
         <div className="reveal" style={{ animationDelay: "60ms" }}>
-          <TraceTable conversations={[conv]} mode="detail" autoSelectFirst />
+          <SessionView conv={conv} turns={fullTurns} />
         </div>
       )}
     </div>

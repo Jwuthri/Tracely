@@ -2,9 +2,11 @@
 
 import clsx from "clsx";
 import { useState } from "react";
+import { HighlightedJson } from "./JsonView";
 
-// Smart input/output renderer: chat arrays -> conversation bubbles, objects -> collapsible JSON,
-// everything else -> readable text. Replaces raw <pre> dumps so traces are actually legible.
+// Smart input/output renderer: chat arrays -> conversation bubbles, objects -> collapsible JSON
+// (syntax-highlighted), everything else -> readable text. Replaces raw <pre> dumps so traces are
+// actually legible.
 
 type Msg = { role?: string; content?: unknown };
 
@@ -92,11 +94,11 @@ function Json({ data }: { data: unknown }) {
     <div>
       <pre
         className={clsx(
-          "overflow-auto rounded-lg border border-line bg-ink-900 p-3 font-mono text-[11.5px] leading-relaxed text-fg-muted",
+          "overflow-auto rounded-lg border border-line bg-ink-900 p-3 font-mono text-[11.5px] leading-relaxed text-slate-300",
           open ? "max-h-80" : "max-h-20",
         )}
       >
-        {body}
+        <HighlightedJson text={body} />
       </pre>
       {big && (
         <button onClick={() => setOpen((o) => !o)} className="mt-1.5 font-mono text-[11px] text-signal hover:underline">

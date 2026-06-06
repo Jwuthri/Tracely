@@ -18,6 +18,7 @@ Covers every shape the table renders:
 from __future__ import annotations
 
 import os
+import time
 import uuid
 
 import tracely_sdk as tracely
@@ -28,15 +29,17 @@ tracely.init(endpoint=API, api_key=KEY, service_name="support-agent", env="prod"
 
 
 # ── small helpers over the SDK ───────────────────────────────────────────────
-def think(agent: str, text: str, tokens: int = 90):
-    with tracely.thinking(agent=agent) as t:
+def think(agent: str, text: str, tokens: int = 90, *, model: str = "gpt-4o"):
+    with tracely.thinking(agent=agent, model=model) as t:
         tracely.set_io(t, output=text)
         tracely.set_usage(t, thinking_tokens=tokens)
+        time.sleep(0.08)
 
 
 def gen(agent: str, messages, output, in_tok: int, out_tok: int, *, model: str = "gpt-4o", think_tok: int | None = None, tool_calls=None):
     with tracely.llm(model, agent=agent) as g:
-        # An LLM generation's output is the structured completion message object (role / content /
+        # An LLM generation's input is a bare message array (Array<{role, content}>) so the
+        # frontend ChatPill triggers. Output is the structured completion object (role / content /
         # finish_reason), like the chat-completions API returns — not a bare string. A dict output
         # (e.g. an output-schema result) is emitted as-is.
         out_obj = output if not isinstance(output, str) else {"role": "assistant", "content": output, "finish_reason": "stop"}
@@ -44,6 +47,9 @@ def gen(agent: str, messages, output, in_tok: int, out_tok: int, *, model: str =
         tracely.set_usage(g, input_tokens=in_tok, output_tokens=out_tok, thinking_tokens=think_tok)
         if tool_calls:
             g.set_attribute("tracely.tool_calls", list(tool_calls))
+        # Simulate realistic LLM latency so the span has a meaningful duration.
+        latency = max(0.15, in_tok * 0.0004 + out_tok * 0.0012)
+        time.sleep(latency)
 
 
 def use_tool(name: str, agent: str, args, result=None, *, error: str | None = None):
@@ -53,10 +59,41 @@ def use_tool(name: str, agent: str, args, result=None, *, error: str | None = No
             tracely.error(t, error)
         else:
             tracely.set_io(t, output=result)
+        time.sleep(0.12)  # simulate round-trip to the tool
 
 
 def sys_user(system: str, user) -> list:
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def as_content(text: str | None = None, *, images: list[str] | None = None, files: list[tuple] | None = None) -> list:
+    """Canonical message-level content: a list of typed blocks (text / image / file) — so a
+    message is ALWAYS a self-describing object, never a bare string (we can't know up front
+    whether it's text, an image, a file, or a mix). `images` are url/path strings; `files` are
+    (filename, url_or_path, mime_type) tuples."""
+    blocks: list = []
+    if text:
+        blocks.append({"type": "text", "text": text})
+    for url in images or []:
+        blocks.append({"type": "image_url", "image_url": {"url": url}})
+    for f in files or []:
+        name, url = f[0], f[1]
+        mime = f[2] if len(f) > 2 else "application/octet-stream"
+        blocks.append({"type": "input_file", "filename": name, "url": url, "mime_type": mime})
+    return blocks
+
+
+def turn_io(span, user, assistant) -> None:
+    """Set a turn's (message-level) user input + assistant output as structured MESSAGE OBJECTS —
+    `{"role": ..., "content": [content blocks]}` — never bare strings. Content is always a typed
+    block list (text/image/file), so a message is self-describing regardless of modality."""
+    u = user if isinstance(user, list) else as_content(user)
+    a = assistant if isinstance(assistant, list) else as_content(assistant)
+    tracely.set_io(
+        span,
+        input={"role": "user", "content": u},
+        output={"role": "assistant", "content": a},
+    )
 
 
 SHOP = "shopping-assistant"
@@ -74,7 +111,7 @@ def seed_laptop():
         u0 = "I need a laptop for college. Budget is $800-1000, and battery life matters."
         ans0 = ("For your budget I'd go with the **Aero 14 Air** ($949) — 18-hour battery, 1.29 kg, "
                 "16 GB / 512 GB. The Nimbus 13 Lite ($829) is a lighter, cheaper runner-up.")
-        tracely.set_io(a, input=u0, output=ans0)
+        turn_io(a, u0, ans0)
         gen(SHOP, sys_user("Classify the shopper's intent into the schema.", u0),
             {"intent": "product_recommendation", "category": "laptop",
              "budget_usd": {"min": 800, "max": 1000}, "priorities": ["battery_life", "portability"]},
@@ -93,11 +130,17 @@ def seed_laptop():
         gen(SHOP, sys_user("You are a concise shopping assistant. Recommend from the catalog.", u0),
             ans0, 540, 96)
 
+    time.sleep(1.4)  # user reading + typing between turns
+
     # turn 1
     with tracely.agent(SHOP, version="v3", conversation=conv, turn=1) as a:
         u1 = "How's the battery on the Aero compared to the Vertex?"
         ans1 = "The Aero 14 Air lasts ~18 h vs ~11 h on the Vertex 15 Pro — clear win for the Aero."
-        tracely.set_io(a, input=u1, output=ans1)
+        turn_io(a, u1, ans1)
+        # Fetch BOTH products this turn so every figure in the answer is grounded in this turn's
+        # tool results (the per-turn judge can't see turn 0's lookups).
+        use_tool("get_product", SHOP, {"sku": "LP-14-AIR"},
+                 {"sku": "LP-14-AIR", "battery_hours": 18, "weight_kg": 1.29, "ram_gb": 16, "storage_gb": 512})
         use_tool("get_product", SHOP, {"sku": "LP-15-PRO"},
                  {"sku": "LP-15-PRO", "battery_hours": 11, "weight_kg": 1.7, "ram_gb": 16, "storage_gb": 1024})
         # Full transcript (history) as the generation input -> step Input renders the whole conversation.
@@ -105,11 +148,13 @@ def seed_laptop():
                    {"role": "user", "content": u0}, {"role": "assistant", "content": ans0},
                    {"role": "user", "content": u1}], ans1, 380, 60)
 
+    time.sleep(1.1)  # user reading + typing between turns
+
     # turn 2
     with tracely.agent(SHOP, version="v3", conversation=conv, turn=2) as a:
         u2 = "Great — add the Aero to my cart."
         ans2 = "Done! The Aero 14 Air is in your cart (CART-5582) — subtotal $949.00."
-        tracely.set_io(a, input=u2, output=ans2)
+        turn_io(a, u2, ans2)
         use_tool("add_to_cart", SHOP, {"sku": "LP-14-AIR", "qty": 1},
                  {"cart_id": "CART-5582", "items": 1, "subtotal_usd": 949.0})
         gen(SHOP, sys_user("Confirm the cart action.", u2), ans2, 210, 38)
@@ -127,7 +172,7 @@ def seed_order_issue():
         u0 = "Where is my order ORD-4471, and why was I charged twice?"
         ans0 = ("Your order ORD-4471 is in transit (ETA Jun 8). I couldn't reach billing to verify the "
                 "duplicate charge just now — I've flagged it and we'll follow up shortly.")
-        tracely.set_io(root, input=u0, output=ans0)
+        turn_io(root, u0, ans0)
         think("router", "Two intents: (1) shipment status, (2) possible double charge. Delegate shipping "
                         "to shipping-agent and billing to billing-agent, then merge.", 110)
 
@@ -143,11 +188,13 @@ def seed_order_issue():
 
         gen("router", sys_user("Merge the specialists' findings into one answer.", u0), ans0, 610, 90, think_tok=70)
 
+    time.sleep(1.8)  # user reading + composing follow-up
+
     # turn 1 — refund succeeds (PASS)
     with tracely.agent("billing-agent", version="v2", role="specialist", conversation=conv, turn=1) as a:
         u1 = "Please just refund the duplicate $49.99 charge."
         ans1 = "Refund of $49.99 started (RF-7741) — it'll post to your card in 3-5 business days."
-        tracely.set_io(a, input=u1, output=ans1)
+        turn_io(a, u1, ans1)
         use_tool("issue_refund", "billing-agent", {"order_id": "ORD-4471", "amount_usd": 49.99, "reason": "duplicate_charge"},
                  {"refund_id": "RF-7741", "status": "pending", "eta_days": "3-5"})
         gen("billing-agent", sys_user("Confirm the refund.", u1), ans1, 260, 52)
@@ -160,14 +207,14 @@ def seed_order_issue():
 def seed_multimodal():
     conv = "conv-" + uuid.uuid4().hex[:8]
     with tracely.agent(SUPPORT, version="v4", conversation=conv, turn=0) as a:
-        user_msg = [
-            {"type": "text", "text": "My order arrived with a cracked screen — photo and receipt attached. I'd like a replacement."},
-            {"type": "image_url", "image_url": {"url": "https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=240"}},
-            {"type": "input_file", "filename": "receipt-ORD-4471.pdf", "mime_type": "application/pdf"},
-        ]
+        user_msg = as_content(
+            "My order arrived with a cracked screen — photo and receipt attached. I'd like a replacement.",
+            images=["https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=240"],
+            files=[("receipt-ORD-4471.pdf", "https://files.tracely.dev/uploads/receipt-ORD-4471.pdf", "application/pdf")],
+        )
         ans = ("So sorry about the cracked screen! I've opened a free replacement (RMA-2208) and emailed a "
                "prepaid return label. Your replacement ships as soon as the carrier scans the return.")
-        tracely.set_io(a, input=user_msg, output=ans)
+        turn_io(a, user_msg, ans)
         think(SUPPORT, "User reports damage with photo + receipt. Verify the order exists, then open a "
                        "damage return and generate a prepaid label.", 95)
         use_tool("lookup_order", SUPPORT, {"order_id": "ORD-4471"},
@@ -188,7 +235,7 @@ def seed_hallucination():
     with tracely.agent(SHOP, version="v3", conversation=conv, turn=0) as a:
         u = "Is the Aero 14 Air in stock? I need it this week."
         ans = "Good news — the Aero 14 Air is in stock and ships today! 🎉"  # contradicts the tool
-        tracely.set_io(a, input=u, output=ans)
+        turn_io(a, u, ans)
         use_tool("check_inventory", SHOP, {"sku": "LP-14-AIR"},
                  {"sku": "LP-14-AIR", "in_stock": False, "available": 0, "restock_eta": "2026-07-01"})
         gen(SHOP, sys_user("Answer the stock question from the tool result.", u), ans, 240, 40)
@@ -202,7 +249,7 @@ def seed_missing_tool():
     with tracely.agent(SUPPORT, version="v4", conversation=conv, turn=0) as a:
         u = "What's my current account balance?"
         ans = "Your current account balance is $12.40."
-        tracely.set_io(a, input=u, output=ans)
+        turn_io(a, u, ans)
         think(SUPPORT, "Need the live balance — should call get_account_balance before answering.", 40)
         # The generation claims a tool call, but no get_account_balance TOOL span is emitted.
         gen(SUPPORT, sys_user("Look up and report the account balance.", u), ans, 180, 30,
@@ -217,9 +264,42 @@ def seed_faq():
     with tracely.agent(SUPPORT, version="v4", conversation=conv, turn=0) as a:
         u = "What are your support hours?"
         ans = "We're here 24/7 via chat, and 8 am-8 pm ET by phone."
-        tracely.set_io(a, input=u, output=ans)
+        turn_io(a, u, ans)
         gen(SUPPORT, sys_user("Answer the FAQ.", u), ans, 90, 28)
     seeded.append(f"{conv}  quick FAQ")
+    return conv
+
+
+# ── 7) Warranty claim — 1 turn · user attaches an IMAGE (url) + a DOCUMENT (url) (PASS) ──
+# The user message carries an image block (url/path) and a file block (url/path to the doc) —
+# the message-level Content cell renders the text plus an image thumbnail + a file chip.
+def seed_attachments():
+    conv = "conv-" + uuid.uuid4().hex[:8]
+    img_url = "https://picsum.photos/seed/tracely-damage/320/200"          # image attachment (url/path)
+    doc_url = "https://files.tracely.dev/uploads/warranty-claim-ORD-4471.pdf"  # document attachment (url/path)
+    with tracely.agent(SUPPORT, version="v4", conversation=conv, turn=0) as a:
+        user_msg = as_content(
+            "Here's the photo of the damaged item and the signed warranty claim form — please process a replacement.",
+            images=[img_url],
+            files=[("warranty-claim-ORD-4471.pdf", doc_url, "application/pdf")],
+        )
+        ans = ("Thanks for the photo and the warranty form! I've logged both to claim WC-3391 and approved a "
+               "free replacement — it ships within 2 business days. You'll get tracking by email.")
+        turn_io(a, user_msg, ans)
+        think(SUPPORT, "User attached an image + a PDF. Run vision on the image, parse the form, verify warranty, "
+                       "then open + approve a warranty claim.", 95)
+        use_tool("vision_inspect", SUPPORT, {"image_url": img_url},
+                 {"defect": "cracked_screen", "confidence": 0.97, "region": "top-left"})
+        use_tool("parse_document", SUPPORT, {"file_url": doc_url},
+                 {"order_id": "ORD-4471", "purchase_date": "2026-05-20", "warranty_valid": True, "signed": True})
+        use_tool("create_warranty_claim", SUPPORT,
+                 {"order_id": "ORD-4471", "defect": "cracked_screen", "resolution": "replacement",
+                  "evidence": {"image": img_url, "document": doc_url}},
+                 {"claim_id": "WC-3391", "status": "approved", "ship_eta_days": 2})
+        # The generation sees the same multimodal user message (text + image + file).
+        gen(SUPPORT, [{"role": "system", "content": "You are a warranty specialist. Verify evidence, then resolve."},
+                      {"role": "user", "content": user_msg}], ans, 560, 96, think_tok=60)
+    seeded.append(f"{conv}  warranty claim (image + document attachments)")
     return conv
 
 
@@ -230,6 +310,7 @@ if __name__ == "__main__":
     seed_hallucination()
     seed_missing_tool()
     seed_faq()
+    seed_attachments()
     tracely.flush()
     print(f"seeded {len(seeded)} conversations:")
     for line in seeded:

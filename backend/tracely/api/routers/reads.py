@@ -75,6 +75,7 @@ async def list_sessions(limit: int = 50, project_id: str = Depends(get_project_i
           sum(t_output_tokens)                  AS output_tokens,
           argMax(t_model, t_tokens)             AS model,
           sum(t_cost)                           AS cost,
+          min(ts_min)                           AS first_ts,
           max(ts_max)                           AS last_ts,
           argMax(trace_id, ts_max)              AS last_trace_id,
           max(t_failing)                        AS failing

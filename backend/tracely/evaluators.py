@@ -123,26 +123,59 @@ DEFAULT_JUDGE_PROMPT = (
 )
 
 
+def _extract_text(v: Any) -> str:
+    """Pull readable text out of structured message content (a content-block list, a chat-message
+    list, or a {content} object) — recursively. Image/file blocks contribute no text."""
+    if isinstance(v, str):
+        return v
+    if isinstance(v, list):
+        return "\n".join(p for p in (_extract_text(x) for x in v) if p)
+    if isinstance(v, dict):
+        if isinstance(v.get("text"), str):
+            return v["text"]
+        if isinstance(v.get("content"), str):
+            return v["content"]
+        if v.get("content") is not None:
+            return _extract_text(v["content"])
+    return ""
+
+
+def _content_text(value: Any) -> str:
+    """Message text for the judge: handles plain strings AND structured content (JSON content-block
+    arrays / chat messages), so the judge grades the actual answer text, not its JSON wrapper."""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        return _extract_text(value)
+    s = value.strip()
+    if s[:1] in ("[", "{"):
+        try:
+            return _extract_text(json.loads(s)) or value
+        except (ValueError, TypeError):
+            return value
+    return value
+
+
 def _first_io(spans: list[dict], key: str) -> str:
     for s in reversed(spans):
         if s.get(key):
-            return str(s[key])
+            return _content_text(s[key])
     return ""
 
 
 def _answer(ctx: RunContext) -> str:
     if ctx.root.get("output"):
-        return str(ctx.root["output"])
+        return _content_text(ctx.root["output"])
     for s in reversed(ctx.spans):
         if s.get("output") and s.get("type") != TOOL:
-            return str(s["output"])
+            return _content_text(s["output"])
     return _first_io(ctx.spans, "output")
 
 
 def check_llm_judge(ctx: RunContext, config: dict) -> list[EvalResult]:
     if not settings.llm_judge_api_key:
         return []  # no key -> judge skipped
-    user_in = ctx.root.get("input") or _first_io(ctx.spans, "input")
+    user_in = _content_text(ctx.root.get("input")) or _first_io(ctx.spans, "input")
     answer = _answer(ctx)
     if not answer:
         return []

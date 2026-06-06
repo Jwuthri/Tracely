@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { ConvNode, FullTurn, SpanOut, ThreadTurn } from "../lib/api";
 import { convUsage, fmtUsd, spanUsage, turnUsage, usageSummary } from "../lib/usage";
+import { HighlightedJson } from "./JsonView";
 import { TypeChip } from "./ui";
 
 // ── A TurnWise-style hierarchical spreadsheet over Tracely's real tree ─────────
@@ -67,11 +68,14 @@ type Col = { key: string; label: string; group: Group; width: number };
 
 const COLUMNS: Col[] = [
   { key: "conversation", label: "Conversation", group: "C", width: 260 },
+  { key: "ctime",        label: "Time",         group: "C", width: 88 },
+  { key: "cdur",         label: "Duration",     group: "C", width: 96 },
   { key: "summary", label: "Summary", group: "C", width: 320 },
   { key: "cusage", label: "Usage", group: "C", width: 180 },
   { key: "role", label: "Role", group: "M", width: 110 },
   { key: "mindex", label: "#", group: "M", width: 56 },
   { key: "mtime", label: "Time", group: "M", width: 96 },
+  { key: "mdur",  label: "Duration", group: "M", width: 96 },
   { key: "content", label: "Content", group: "M", width: 420 },
   { key: "musage", label: "Usage", group: "M", width: 180 },
   { key: "sindex", label: "#", group: "S", width: 56 },
@@ -80,7 +84,6 @@ const COLUMNS: Col[] = [
   { key: "sdur", label: "Duration", group: "S", width: 96 },
   { key: "agent", label: "Agent", group: "S", width: 120 },
   { key: "model", label: "Model", group: "S", width: 120 },
-  { key: "thinking", label: "Thinking", group: "S", width: 220 },
   { key: "name", label: "Name", group: "S", width: 170 },
   { key: "input", label: "Input", group: "S", width: 240 },
   { key: "output", label: "Output", group: "S", width: 240 },
@@ -128,9 +131,38 @@ function durationMs(span: SpanOut): number | null {
   }
   return null;
 }
+// Pull the first human-readable text out of a value that may be a string, a content-block
+// array ([{type:"text",text}, {type:"image_url"}…]), a chat-message array, or a {content} object.
+function firstText(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (Array.isArray(v)) {
+    for (const item of v) {
+      const t = firstText(item);
+      if (t) return t;
+    }
+    return "";
+  }
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    if (typeof o.text === "string") return o.text;
+    if (typeof o.content === "string") return o.content;
+    if (o.content != null) return firstText(o.content);
+  }
+  return "";
+}
+
 function deriveTitle(s: string | null): string {
   if (!s) return "Conversation";
-  const line = s.split("\n")[0].trim();
+  let text = s;
+  const t = s.trim();
+  if (t.startsWith("[") || t.startsWith("{")) {
+    try {
+      text = firstText(JSON.parse(t)) || s;
+    } catch {
+      /* not JSON — use raw */
+    }
+  }
+  const line = text.split("\n")[0].trim();
   const words = line.split(/\s+/).slice(0, 7).join(" ");
   return words.length < line.length ? `${words}…` : words || "Conversation";
 }
@@ -154,67 +186,9 @@ function modelColor(m: string): string {
 // usage / cost derivation (spanUsage / turnUsage / convUsage / usageSummary / fmtUsd) lives in
 // ../lib/usage so the detail-page headers can reuse the exact same logic.
 
-// Thinking is reasoning emitted by a step. Surfaced from a THINKING-typed span, an
-// explicit metadata field, or a `thinking` content-block inside a generation.
-function extractThinking(span: SpanOut): string | null {
-  if ((span.type || "").toUpperCase() === "THINKING") return span.output ?? span.input ?? null;
-  const md = span.metadata || {};
-  for (const k of ["thinking", "reasoning", "reasoning_content", "thought"]) {
-    if (md[k]) return String(md[k]);
-  }
-  for (const raw of [span.output, span.input]) {
-    if (!raw) continue;
-    const t = raw.trim();
-    if (!t.startsWith("[") && !t.startsWith("{")) continue;
-    try {
-      const parsed = JSON.parse(t);
-      const arr = Array.isArray(parsed) ? parsed : [parsed];
-      for (const m of arr) {
-        if (!m || typeof m !== "object") continue;
-        const mm = m as Record<string, unknown>;
-        if ((mm.type === "thinking" || mm.role === "thinking") && (mm.thinking || mm.content || mm.text)) {
-          return String(mm.thinking ?? mm.content ?? mm.text);
-        }
-        if (Array.isArray(mm.content)) {
-          for (const c of mm.content) {
-            if (c && typeof c === "object" && (c as Record<string, unknown>).type === "thinking") {
-              const cc = c as Record<string, unknown>;
-              if (cc.thinking || cc.text) return String(cc.thinking ?? cc.text);
-            }
-          }
-        }
-      }
-    } catch {
-      /* not JSON */
-    }
-  }
-  return null;
-}
-
 // ── JSON detail popover (portal — escapes the table's overflow) ──────────────────
-function HJson({ text }: { text: string }) {
-  const out: ReactNode[] = [];
-  const re = /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  let i = 0;
-  while ((m = re.exec(text))) {
-    if (m.index > last) out.push(text.slice(last, m.index));
-    if (m[1] !== undefined && m[2] !== undefined) {
-      out.push(<span key={i++} className="text-fuchsia-400">{m[1]}</span>);
-      out.push(<span key={i++} className="text-slate-500">{m[2]}</span>);
-    } else if (m[1] !== undefined) {
-      out.push(<span key={i++} className="text-cyan-300">{m[1]}</span>);
-    } else if (m[3] !== undefined) {
-      out.push(<span key={i++} className="text-violet-400">{m[3]}</span>);
-    } else if (m[4] !== undefined) {
-      out.push(<span key={i++} className="text-amber-300">{m[4]}</span>);
-    }
-    last = re.lastIndex;
-  }
-  if (last < text.length) out.push(text.slice(last));
-  return <>{out}</>;
-}
+// Shared syntax highlighter (also used by the timeline span panel + attributes list).
+const HJson = HighlightedJson;
 
 const ChatGlyph = (p: SVGProps<SVGSVGElement>) => (
   <svg {...svg(p)}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
@@ -471,7 +445,7 @@ function UsageCell({ usage }: { usage: Record<string, number> }) {
 type Part =
   | { kind: "text"; text: string }
   | { kind: "image"; url?: string; label: string }
-  | { kind: "file"; label: string }
+  | { kind: "file"; url?: string; label: string }
   | { kind: "json"; data: unknown };
 
 function isChatMsg(x: unknown): boolean {
@@ -498,27 +472,51 @@ function classifyBlock(b: unknown): Part {
     if (type.includes("file") || type.includes("document") || o.file || o.filename || o.file_id) {
       const file = (o.file ?? {}) as Record<string, unknown>;
       const name = (o.filename as string) ?? (file.filename as string) ?? (o.name as string) ?? (o.file_id as string) ?? "file";
-      return { kind: "file", label: String(name) };
+      const furl = (o.url as string) ?? (o.file_url as string) ?? (file.url as string) ?? (src.url as string);
+      return { kind: "file", url: typeof furl === "string" ? furl : undefined, label: String(name) };
     }
     if (type.includes("text") || typeof o.text === "string") return { kind: "text", text: String(o.text ?? o.content ?? "") };
   }
   return { kind: "json", data: b };
 }
 
+const ExternalLink = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...svg(p)}><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>
+);
+
+// A compact attachment chip. Deliberately lightweight — it shows an icon + name and NEVER loads
+// the full image inline (a table can hold many of these). When the block carries a url/path the
+// chip is a link that opens the image/document in a new tab.
 function Attachment({ part }: { part: Exclude<Part, { kind: "text" }> }) {
   if (part.kind === "json") return <JsonPill raw={JSON.stringify(part.data)} />;
   const isImg = part.kind === "image";
-  const showThumb = isImg && part.url && /^(https?:|data:image)/.test(part.url);
+  const url = part.url;
+  const icon = isImg ? (
+    <ImageIcon className="h-3.5 w-3.5 shrink-0 text-fuchsia-400" />
+  ) : (
+    <FileIcon className="h-3.5 w-3.5 shrink-0 text-sky-400" />
+  );
+  const base =
+    "inline-flex max-w-[200px] items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-[11px] text-slate-300";
+  if (url && /^(https?:|data:)/.test(url)) {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        title={`Open ${part.label}`}
+        className={clsx(base, "transition-colors hover:border-slate-500 hover:bg-slate-700/70 hover:text-white")}
+      >
+        {icon}
+        <span className="truncate">{part.label}</span>
+        <ExternalLink className="h-3 w-3 shrink-0 text-slate-500" />
+      </a>
+    );
+  }
   return (
-    <span className="inline-flex max-w-[160px] items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-[11px] text-slate-300">
-      {showThumb ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={part.url} alt="" loading="lazy" className="h-6 w-6 rounded object-cover" />
-      ) : isImg ? (
-        <ImageIcon className="h-3.5 w-3.5 shrink-0 text-fuchsia-400" />
-      ) : (
-        <FileIcon className="h-3.5 w-3.5 shrink-0 text-sky-400" />
-      )}
+    <span className={base}>
+      {icon}
       <span className="truncate">{part.label}</span>
     </span>
   );
@@ -612,6 +610,8 @@ function ChatPill({ msgs }: { msgs: Array<{ role?: string; content?: unknown }> 
       : Array.isArray(last.content)
         ? (last.content.map(classifyBlock).find((p) => p.kind === "text") as Extract<Part, { kind: "text" }> | undefined)?.text ?? ""
         : "";
+  // Keep the collapsed baseline short — it's a teaser; the full content lives in the popover.
+  const preview = lastText.length > 42 ? `${lastText.slice(0, 42).trimEnd()}…` : lastText;
   const icon = (
     <IconBox accent="violet">
       <ChatGlyph className="h-3 w-3" />
@@ -623,7 +623,7 @@ function ChatPill({ msgs }: { msgs: Array<{ role?: string; content?: unknown }> 
       summary={
         <span className="flex items-center gap-1.5 truncate">
           <span className="uppercase text-slate-400">{(last.role || "msg").toString()}</span>
-          {lastText && <span className="truncate text-slate-500">{lastText}</span>}
+          {preview && <span className="truncate text-slate-500">{preview}</span>}
         </span>
       }
       badge={<span className="rounded bg-slate-700/60 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-slate-400">{n}</span>}
@@ -653,6 +653,15 @@ function MessageContent({ raw }: { raw: string | null }) {
   // chat transcript -> compact pill that opens a clean conversation view
   if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(isChatMsg)) {
     return <ChatPill msgs={parsed as Array<{ role?: string; content?: unknown }>} />;
+  }
+  // a single chat message object {role, content} -> compact message pill (click to expand).
+  // Completion objects (tool_calls / finish_reason) are kept as raw JSON pills below.
+  if (
+    parsed && typeof parsed === "object" && !Array.isArray(parsed) &&
+    "role" in (parsed as object) && "content" in (parsed as object) &&
+    !("tool_calls" in (parsed as object)) && !("finish_reason" in (parsed as object))
+  ) {
+    return <ChatPill msgs={[parsed as { role?: string; content?: unknown }]} />;
   }
   // one message's multimodal parts (no roles) -> text + image/file chips
   if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(isContentBlock)) {
@@ -718,16 +727,32 @@ function parseMaybe(s: string | null): unknown {
   return s;
 }
 
+// Turn I/O may already be a message object ({role, content}); if so use it directly, else wrap the
+// raw value with the given role — so the summary never double-nests a message inside a message.
+function toMsg(role: string, raw: string | null): { role: string; content: unknown } | null {
+  if (!raw) return null;
+  const v = parseMaybe(raw);
+  if (v && typeof v === "object" && !Array.isArray(v) && "role" in (v as object)) {
+    const m = v as { role?: string; content?: unknown };
+    return { role: m.role ?? role, content: m.content };
+  }
+  return { role, content: v };
+}
+
 function ConvSummaryCell({ conv }: { conv: ConvNode }) {
   const msgs: Array<{ role: string; content: unknown }> = [];
   if (conv.turnsData) {
     for (const t of conv.turnsData) {
-      if (t.input) msgs.push({ role: "user", content: parseMaybe(t.input) });
-      if (t.output) msgs.push({ role: "assistant", content: parseMaybe(t.output) });
+      const u = toMsg("user", t.input);
+      const a = toMsg("assistant", t.output);
+      if (u) msgs.push(u);
+      if (a) msgs.push(a);
     }
   } else {
-    if (conv.first_input) msgs.push({ role: "user", content: parseMaybe(conv.first_input) });
-    if (conv.last_output) msgs.push({ role: "assistant", content: parseMaybe(conv.last_output) });
+    const u = toMsg("user", conv.first_input);
+    const a = toMsg("assistant", conv.last_output);
+    if (u) msgs.push(u);
+    if (a) msgs.push(a);
   }
   if (msgs.length === 0) return <span className="text-slate-500">—</span>;
   return <ChatPill msgs={msgs} />;
@@ -744,6 +769,17 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
     // C group
     case "conversation":
       return ctx.level === "C" ? <ConvTitleCell conv={ctx.conv} /> : null;
+    case "ctime":
+      return ctx.level === "C"
+        ? <span className="font-mono text-xs text-slate-400">{fmtClock(ctx.conv.first_ts)}</span>
+        : null;
+    case "cdur": {
+      if (ctx.level !== "C") return null;
+      const durMs = ctx.conv.first_ts
+        ? new Date(ctx.conv.last_ts).getTime() - new Date(ctx.conv.first_ts).getTime()
+        : null;
+      return <span className="font-mono text-xs tabular-nums text-slate-400">{fmtMs(durMs)}</span>;
+    }
     case "summary":
       return ctx.level === "C" ? <ConvSummaryCell conv={ctx.conv} /> : null;
     case "cusage":
@@ -763,6 +799,10 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
       return ctx.level === "M" ? <span className="font-mono text-xs tabular-nums text-slate-500">{ctx.index}</span> : null;
     case "mtime":
       return ctx.level === "M" ? <span className="font-mono text-xs text-slate-400">{fmtClock(ctx.turn.ts)}</span> : null;
+    case "mdur":
+      return ctx.level === "M" && ctx.role === "assistant"
+        ? <span className="font-mono text-xs tabular-nums text-slate-400">{fmtMs(ctx.turn.latency_ms)}</span>
+        : null;
     case "content":
       return ctx.level === "M" ? <MessageContent raw={ctx.role === "user" ? ctx.turn.input : ctx.turn.output} /> : null;
     case "musage":
@@ -783,18 +823,13 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
     }
     case "model":
       return ctx.level === "S" && ctx.span.model_id ? <ModelBadge model={ctx.span.model_id} /> : null;
-    case "thinking": {
-      if (ctx.level !== "S") return null;
-      const think = extractThinking(ctx.span);
-      return think ? <ExpandableText text={think} /> : null;
-    }
     case "name":
       return ctx.level === "S" ? <Plain text={ctx.span.step_name || ctx.span.name || ""} /> : null;
     case "input":
       return ctx.level === "S" ? <MessageContent raw={ctx.span.input} /> : null;
     case "output":
-      // A THINKING step's reasoning already shows in the Thinking column.
-      return ctx.level === "S" && (ctx.span.type || "").toUpperCase() !== "THINKING" ? <MessageContent raw={ctx.span.output} /> : null;
+      // THINKING is its own Type — its reasoning text lives in the span's output, shown here.
+      return ctx.level === "S" ? <MessageContent raw={ctx.span.output} /> : null;
     case "susage":
       return ctx.level === "S" ? <UsageCell usage={spanUsage(ctx.span)} /> : null;
     default:

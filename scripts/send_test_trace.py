@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 import urllib.request
@@ -21,6 +22,15 @@ from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Sp
 
 API = os.environ.get("TRACELY_API", "http://localhost:8000")
 KEY = os.environ.get("TRACELY_KEY", "tracely_dev_key")
+
+# A handful of realistic user queries so random runs don't all look identical.
+_QUERIES = [
+    ("What's the weather like in San Francisco right now?", "San Francisco, CA"),
+    ("Give me a weather update for New York.", "New York, NY"),
+    ("Is it going to rain in Seattle today?", "Seattle, WA"),
+    ("How hot is it in Austin this afternoon?", "Austin, TX"),
+    ("Weather forecast for Chicago this weekend?", "Chicago, IL"),
+]
 
 
 def kv(k: str, v) -> KeyValue:
@@ -39,7 +49,7 @@ def kv_arr(k: str, items) -> KeyValue:
 
 
 def main() -> None:
-    # Four demo runs of the same agent/input:
+    # Four demo run variants:
     #   default       -> get_weather ERRORS              (explicit failure)
     #   FIXED=1       -> get_weather SUCCEEDS            (the fix; gate PASS)
     #   SILENT=1      -> model requests get_weather but it NEVER runs  (SILENT failure:
@@ -51,59 +61,123 @@ def main() -> None:
     silent = os.environ.get("SILENT", "") not in ("", "0", "false")
     hallucinate = os.environ.get("HALLUCINATE", "") not in ("", "0", "false")
     env = os.environ.get("ENV", "")  # e.g. "ci" for a CI run; empty -> prod
+    random_run = os.environ.get("RANDOM", "") not in ("", "0", "false")
 
-    # Deterministic base time so re-sending dedups; distinct trace id per variant/env.
-    base = 0xFACADE if hallucinate else 0x511EE7 if silent else 0xF0FFEE if fixed else 0xC0FFEE
-    now = 1_717_400_000_000_000_000 + (
-        3_000_000_000 if hallucinate else 1_000_000_000 if fixed else 2_000_000_000
-    )
-    if os.environ.get("RANDOM", "") not in ("", "0", "false"):
+    if random_run:
         import secrets
-
-        trace_id = secrets.token_bytes(16)  # a distinct failing run (for cluster demos)
+        trace_id = secrets.token_bytes(16)
+        # Spread random runs over the last 3 days so they don't all pile on the same second.
+        spread_ns = secrets.randbelow(3 * 24 * 3600 * 1_000_000_000)
+        now = time.time_ns() - spread_ns
+        # Pick a random query variant for diversity.
+        idx = int.from_bytes(trace_id[:1], "big") % len(_QUERIES)
     else:
+        # Deterministic base: same variant always produces the same trace_id so re-runs dedup.
+        base = 0xFACADE if hallucinate else 0x511EE7 if silent else 0xF0FFEE if fixed else 0xC0FFEE
         trace_id = (base + (0x010000 if env == "ci" else 0)).to_bytes(16, "big")
-    root_id, llm_id, tool_id = (1).to_bytes(8, "big"), (2).to_bytes(8, "big"), (3).to_bytes(8, "big")
+        now = time.time_ns()
+        idx = 0
+
+    user_query, city = _QUERIES[idx]
+
+    root_id = (1).to_bytes(8, "big")
+    llm_id  = (2).to_bytes(8, "big")
+    tool_id = (3).to_bytes(8, "big")
+
+    # ── Compose realistic LLM input / output as proper message objects ───────
+    # Bare array — the frontend ChatPill triggers on Array<{role}>
+    llm_input = json.dumps([
+        {"role": "system", "content": "You are a helpful assistant with access to real-time weather tools."},
+        {"role": "user",   "content": user_query},
+    ])
 
     if hallucinate:
-        # tool succeeds, but the model confidently fabricates an absurd, contradictory answer
-        answer = (
-            "It's 9000°F and snowing heavily in San Francisco right now, "
-            "and the midnight sun is blazing over the bay."
-        )
+        # Tool succeeds but the model fabricates a contradictory answer.
+        llm_output = json.dumps({
+            "role": "assistant",
+            "content": (
+                "It's 9000°F and snowing heavily in San Francisco right now, "
+                "and the midnight sun is blazing over the bay."
+            ),
+            "finish_reason": "stop",
+        })
+        agent_answer = "It's 9000°F and snowing heavily in San Francisco right now."
     elif fixed or silent:
-        answer = "It's 64°F and sunny in San Francisco."
+        llm_output = json.dumps({
+            "role": "assistant",
+            "content": None,
+            "finish_reason": "tool_calls",
+            "tool_calls": [{
+                "id": "call_abc123",
+                "type": "function",
+                "function": {"name": "get_weather", "arguments": json.dumps({"city": city})},
+            }],
+        })
+        agent_answer = f"It's 64°F and sunny in {city}."
     else:
-        answer = "Sorry, I couldn't fetch the weather right now."
+        llm_output = json.dumps({
+            "role": "assistant",
+            "content": None,
+            "finish_reason": "tool_calls",
+            "tool_calls": [{
+                "id": "call_abc123",
+                "type": "function",
+                "function": {"name": "get_weather", "arguments": json.dumps({"city": city})},
+            }],
+        })
+        agent_answer = f"Sorry, I couldn't fetch the weather for {city} right now."
 
-    root = Span(name="planner", trace_id=trace_id, span_id=root_id,
-                start_time_unix_nano=now, end_time_unix_nano=now + 5_000_000)
-    root.attributes.extend([kv("tracely.agent.id", "planner"),
-                            kv("tracely.observation.type", "AGENT"),
-                            kv("session.id", "sess-1")])
+    # ── Spans ─────────────────────────────────────────────────────────────────
+    root = Span(
+        name="planner", trace_id=trace_id, span_id=root_id,
+        start_time_unix_nano=now,
+        end_time_unix_nano=now + 5_000_000_000,
+    )
+    root.attributes.extend([
+        kv("tracely.agent.id", "planner"),
+        kv("tracely.observation.type", "AGENT"),
+        kv("session.id", "sess-1"),
+        # message-level I/O as structured message objects (role + typed content blocks)
+        kv("tracely.input",  json.dumps({"role": "user", "content": [{"type": "text", "text": user_query}]})),
+        kv("tracely.output", json.dumps({"role": "assistant", "content": [{"type": "text", "text": agent_answer}]})),
+    ])
 
-    llm = Span(name="gpt-4o", trace_id=trace_id, span_id=llm_id, parent_span_id=root_id,
-               start_time_unix_nano=now + 1_000_000, end_time_unix_nano=now + 3_000_000)
-    llm.attributes.extend([kv("gen_ai.operation.name", "chat"),
-                           kv("gen_ai.request.model", "gpt-4o"),
-                           kv("gen_ai.usage.input_tokens", 812),
-                           kv("gen_ai.usage.output_tokens", 96),
-                           kv("tracely.agent.id", "planner"),
-                           kv("tracely.input", "what's the weather in SF?"),
-                           kv("tracely.output", answer),
-                           kv_arr("tracely.tool_calls", ["get_weather"])])  # model REQUESTS the tool
+    llm = Span(
+        name="gpt-4o", trace_id=trace_id, span_id=llm_id, parent_span_id=root_id,
+        start_time_unix_nano=now + 100_000_000,
+        end_time_unix_nano=now + 3_000_000_000,
+    )
+    llm.attributes.extend([
+        kv("gen_ai.operation.name", "chat"),
+        kv("gen_ai.request.model", "gpt-4o"),
+        kv("gen_ai.usage.input_tokens", 812),
+        kv("gen_ai.usage.output_tokens", 96),
+        kv("tracely.agent.id", "planner"),
+        kv("tracely.input",  llm_input),   # structured messages array
+        kv("tracely.output", llm_output),  # structured assistant message
+        kv_arr("tracely.tool_calls", ["get_weather"]),
+    ])
 
     spans = [root, llm]
+
     if not silent:
-        tool = Span(name="get_weather", trace_id=trace_id, span_id=tool_id, parent_span_id=root_id,
-                    start_time_unix_nano=now + 3_500_000, end_time_unix_nano=now + 4_000_000)
+        tool = Span(
+            name="get_weather", trace_id=trace_id, span_id=tool_id, parent_span_id=root_id,
+            start_time_unix_nano=now + 3_200_000_000,
+            end_time_unix_nano=now + 4_500_000_000,
+        )
+        tool_input  = json.dumps({"city": city})
+        tool_output = json.dumps({"tempF": 64, "condition": "sunny", "humidity_pct": 58})
         if not fixed and not hallucinate:
             tool.status.code = 2  # ERROR
-            tool.status.message = "upstream timeout"
-        tool.attributes.extend([kv("gen_ai.operation.name", "execute_tool"),
-                                kv("gen_ai.tool.name", "get_weather"),
-                                kv("tracely.agent.id", "planner"),
-                                kv("tracely.output", '{"tempF": 64}')])
+            tool.status.message = "upstream timeout after 3 retries"
+        tool.attributes.extend([
+            kv("gen_ai.operation.name", "execute_tool"),
+            kv("gen_ai.tool.name", "get_weather"),
+            kv("tracely.agent.id", "planner"),
+            kv("tracely.input",  tool_input),
+            kv("tracely.output", tool_output),
+        ])
         spans.append(tool)
 
     if env:
@@ -112,8 +186,10 @@ def main() -> None:
 
     req = ExportTraceServiceRequest(resource_spans=[
         ResourceSpans(
-            resource=Resource(attributes=[kv("service.name", "demo"),
-                                          kv("telemetry.sdk.language", "python")]),
+            resource=Resource(attributes=[
+                kv("service.name", "demo"),
+                kv("telemetry.sdk.language", "python"),
+            ]),
             scope_spans=[ScopeSpans(scope=InstrumentationScope(name="demo"), spans=spans)],
         )
     ])

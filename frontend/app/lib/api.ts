@@ -61,6 +61,7 @@ export type Thread = {
   output_tokens?: number;
   model?: string;
   cost: number;
+  first_ts: string;
   last_ts: string;
   last_trace_id: string;
   failing: number;
