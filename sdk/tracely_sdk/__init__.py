@@ -211,6 +211,12 @@ _INSTRUMENTORS: dict[str, list[tuple[str, str]]] = {
     ],
     "llama-index": [("openinference.instrumentation.llama_index", "LlamaIndexInstrumentor")],
     "crewai": [("openinference.instrumentation.crewai", "CrewAIInstrumentor")],
+    # first-party agent SDKs (each emits AGENT/TOOL/LLM spans via its OpenInference instrumentor)
+    "openai-agents": [("openinference.instrumentation.openai_agents", "OpenAIAgentsInstrumentor")],
+    "google-adk": [("openinference.instrumentation.google_adk", "GoogleADKInstrumentor")],
+    "claude-agent-sdk": [
+        ("openinference.instrumentation.claude_agent_sdk", "ClaudeAgentSDKInstrumentor")
+    ],
 }
 # provider/harness keys that wrap an LLM provider directly (vs. harnesses that route through them) —
 # used by the LangChain de-dup guard to know what to suppress under "auto".
@@ -226,6 +232,13 @@ _ALIASES = {
     "llamaindex": "llama-index",
     "aws": "bedrock",
     "bedrock-runtime": "bedrock",
+    "openai_agents": "openai-agents",
+    "openai-agents-sdk": "openai-agents",
+    "agents": "openai-agents",
+    "adk": "google-adk",
+    "google_adk": "google-adk",
+    "claude-agent": "claude-agent-sdk",
+    "claude_agent_sdk": "claude-agent-sdk",
 }
 # SDK import name used to detect a provider for instrument="auto". Only providers whose SDK presence
 # strongly implies intent to trace them (litellm/bedrock are opt-in: a router / boto3 is too common).

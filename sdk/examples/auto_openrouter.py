@@ -1,79 +1,71 @@
-"""OpenRouter — automatic tracing, zero span code (PRD 12).
+"""OpenRouter — automatic tracing via LangChain `create_agent` (PRD 12).
 
-OpenRouter speaks the OpenAI wire protocol, so there's **no separate instrumentor**: point the OpenAI
-SDK at OpenRouter's base URL and the OpenAI instrumentor traces it. The routed model id flows through
-as `vendor/model` (e.g. `anthropic/claude-3.5-sonnet`) into `model_id`. Same support-agent
-tool-calling loop as `auto_openai.py`.
+OpenRouter routes one API to 100+ models. LangChain ships a first-party `ChatOpenRouter`
+(`langchain-openrouter`) — drop it into `create_agent` as the model and the LangChain instrumentor
+traces the whole tool-calling agent. The model is the OpenRouter `provider/model` id.
 
-    pip install "tracely-sdk[openai]"
+    pip install "tracely-sdk[langchain,openrouter]" "langchain>=1.0" langchain-openrouter
     export OPENROUTER_API_KEY=sk-or-...
     TRACELY_API=http://localhost:8000 uv run python sdk/examples/auto_openrouter.py
 
-Every big framework's OpenRouter handler is just that framework's LLM client with OpenRouter's
-base_url, so the framework's instrumentor traces it the same way — no Tracely change needed:
-
-    # LangChain  → instrument=["langchain"]
-    ChatOpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY,
-               model="anthropic/claude-3.5-sonnet")
-    # LiteLLM    → instrument=["litellm"]
-    litellm.completion(model="openrouter/anthropic/claude-3.5-sonnet", messages=[...])
-    # LlamaIndex → instrument=["llama-index"]
-    from llama_index.llms.openrouter import OpenRouter; OpenRouter(model="anthropic/claude-3.5-sonnet")
+Alternative (no langchain): point the OpenAI SDK at OpenRouter's base_url — it's OpenAI-compatible,
+so the OpenAI instrumentor traces it (see the comment in auto_openai.py / the docs).
 """
 
 from __future__ import annotations
 
-import json
+import importlib.util
 import os
 
+import _fake_db
 import tracely_sdk as tracely
-from _fake_db import OPENAI_TOOLS, QUESTION, SYSTEM, run_tool
+from _fake_db import QUESTION, SYSTEM
 
 API = os.environ.get("TRACELY_API", "http://localhost:8000")
 KEY = os.environ.get("TRACELY_KEY", "tracely_dev_key")
 
-# OpenRouter is OpenAI-compatible → the OpenAI instrumentor captures it.
 tracely.init(
-    endpoint=API, api_key=KEY, service_name="support-agent", env="prod", instrument=["openai"]
+    endpoint=API, api_key=KEY, service_name="support-agent", env="prod", instrument=["langchain"]
 )
 
-MODEL = "anthropic/claude-3.5-sonnet"  # any OpenRouter model — vendor/model
+MODEL = "anthropic/claude-3.5-sonnet"  # OpenRouter "provider/model" format — route to any model
 
 
 def main() -> None:
-    if "openai" not in tracely._instrumented:
-        print('OpenAI instrumentation not active — pip install "tracely-sdk[openai]"')
+    if "langchain" not in tracely._instrumented:
+        print('LangChain instrumentation not active — pip install "tracely-sdk[langchain]"')
+        return
+    if importlib.util.find_spec("langchain_openrouter") is None:
+        print("pip install langchain-openrouter")
         return
     if not os.environ.get("OPENROUTER_API_KEY"):
         print("Set OPENROUTER_API_KEY to make a real call.")
         return
 
-    from openai import OpenAI
+    from langchain.agents import create_agent
+    from langchain_core.tools import tool
+    from langchain_openrouter import ChatOpenRouter
 
-    client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=os.environ["OPENROUTER_API_KEY"],
-        default_headers={"HTTP-Referer": "https://tracely.dev", "X-Title": "Tracely example"},
+    @tool
+    def get_order_status(order_id: str) -> dict:
+        """Look up an order's delivery status and ETA by its order id."""
+        return _fake_db.get_order_status(order_id)
+
+    @tool
+    def check_inventory(sku: str) -> dict:
+        """Check current stock level and price for a product SKU."""
+        return _fake_db.check_inventory(sku)
+
+    # ChatOpenRouter is a LangChain ChatModel → pass it straight into create_agent as the model.
+    agent = create_agent(
+        ChatOpenRouter(model=MODEL), tools=[get_order_status, check_inventory], system_prompt=SYSTEM
     )
-    messages: list = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": QUESTION}]
     with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
-        for _ in range(5):
-            resp = client.chat.completions.create(
-                model=MODEL, messages=messages, tools=OPENAI_TOOLS
-            )
-            msg = resp.choices[0].message
-            messages.append(msg.model_dump(exclude_none=True))
-            if not msg.tool_calls:
-                print("agent:", msg.content)
-                break
-            for call in msg.tool_calls:
-                result = run_tool(call.function.name, json.loads(call.function.arguments))
-                messages.append(
-                    {"role": "tool", "tool_call_id": call.id, "content": json.dumps(result)}
-                )
+        result = agent.invoke({"messages": [{"role": "user", "content": QUESTION}]})
+        print("agent:", result["messages"][-1].content)
 
     tracely.flush()
-    print(f"sent — traced via the OpenAI instrumentor; model_id is the routed '{MODEL}'.")
+    print(f"sent — OpenRouter '{MODEL}' via create_agent, traced by the LangChain instrumentor.")
 
 
 if __name__ == "__main__":

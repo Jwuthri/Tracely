@@ -138,16 +138,18 @@ Both **exit 0 (PASS) / 1 (FAIL)** and, inside GitHub Actions (or with `--github`
 ## Examples (`sdk/examples/` + `sdk/example.py`)
 
 [`examples/README.md`](examples/README.md) is the full index — **one runnable file per way of
-tracing**: each frontier provider (OpenAI, Anthropic, Gemini, Mistral, Bedrock), each harness
-(LangChain, LangGraph, LiteLLM, LlamaIndex, CrewAI), and each approach (`@observe`+`trace`, the
-`wrap_openai` drop-in, manual spans). A few highlights:
+tracing**, all the same fake-DB tool-calling support agent: each frontier provider (OpenAI, Anthropic,
+Gemini, Mistral, Bedrock) + OpenRouter, each harness (LangChain `create_agent`, LangGraph, LiteLLM,
+LlamaIndex, CrewAI), each first-party agent SDK (OpenAI Agents, Claude Agent SDK, Google ADK), and
+each approach (`@observe`+`trace`, the `wrap_openai`/`wrap_anthropic` drop-ins, manual spans). Highlights:
 
 | File | Shows |
 |---|---|
 | `../example.py` | the minimal demo trace (agent → llm → failing tool). `make sdk-example`. |
-| `examples/auto_openai.py` · `auto_anthropic.py` · `auto_gemini.py` · … | **automatic** provider tracing — zero span code (one file per frontier provider). |
-| `examples/auto_langchain.py` · `auto_langgraph.py` · `auto_litellm.py` · … | **automatic** harness tracing (one file per framework). |
-| `examples/auto_agent.py` | **automatic** `@observe` + `trace()` agent → gen/tool/gen tree. `make auto-agent`. |
+| `examples/auto_openai.py` · `auto_anthropic.py` · `auto_gemini.py` · … | **automatic** provider tracing — zero span code (one file per frontier provider + OpenRouter). |
+| `examples/auto_langchain.py` (`create_agent`) · `auto_langgraph.py` · `auto_litellm.py` · … | **automatic** harness tracing (one file per framework, current APIs). |
+| `examples/auto_openai_agents.py` · `auto_claude_agent.py` · `auto_google_adk.py` | **automatic** first-party agent-SDK tracing (OpenAI Agents / Claude Agent SDK / Google ADK). |
+| `examples/auto_agent.py` | **automatic** `@observe` + `trace()` agent → thinking/gen/tool tree. `make auto-agent`. |
 | `examples/dropin_openai.py` · `dropin_anthropic.py` | non-patching `wrap_openai` / `wrap_anthropic` drop-ins. |
 | `examples/manual_spans.py` | the manual escape-hatch API as a full agent (no provider/key needed). |
 | `examples/weather_agent.py` / `weather_agent_cli.py` | a real agent wired with `call_tool`/`call_llm` for `tracely replay --entrypoint` / `--cmd`. |

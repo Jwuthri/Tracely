@@ -1,9 +1,10 @@
-"""LangGraph — automatic tracing of a ReAct tool-calling agent (PRD 12, R11).
+"""LangGraph — automatic tracing of a custom graph you build yourself (PRD 12, R11).
 
-`create_react_agent` builds the canonical agent/tools graph; it loops (call model → call tools →
-call model) until it answers. LangGraph is built on LangChain's callbacks, so the same instrumentor
-traces it: the graph is a CHAIN, nodes are child CHAINs (node name → `step_name`/`step_id`), tool
-calls are TOOL spans, and the LLM calls are GENERATION spans — all nested under `tracely.trace(...)`.
+For the high-level prebuilt agent, use `create_agent` (see auto_langchain.py — `create_react_agent`
+is deprecated). LangGraph proper is for *custom* control flow: here a hand-built ReAct loop — a model
+node + a `ToolNode` + conditional routing (`tools_condition`). LangGraph runs on LangChain's
+callbacks, so the same instrumentor traces it: the graph → each node → GENERATION/TOOL spans, nested
+under `tracely.trace(...)`.
 
     pip install "tracely-sdk[langchain]" langgraph langchain-openai
     export OPENAI_API_KEY=sk-...
@@ -34,9 +35,11 @@ def main() -> None:
         print("Set OPENAI_API_KEY to make a real call.")
         return
 
+    from langchain_core.messages import SystemMessage
     from langchain_core.tools import tool
     from langchain_openai import ChatOpenAI
-    from langgraph.prebuilt import create_react_agent
+    from langgraph.graph import START, MessagesState, StateGraph
+    from langgraph.prebuilt import ToolNode, tools_condition
 
     @tool
     def get_order_status(order_id: str) -> dict:
@@ -48,16 +51,28 @@ def main() -> None:
         """Check current stock level and price for a product SKU."""
         return _fake_db.check_inventory(sku)
 
-    agent = create_react_agent(
-        ChatOpenAI(model="gpt-4o-mini"), [get_order_status, check_inventory], prompt=SYSTEM
-    )
+    tools = [get_order_status, check_inventory]
+    model = ChatOpenAI(model="gpt-4o-mini").bind_tools(tools)
+
+    def call_model(state: MessagesState) -> dict:
+        return {"messages": [model.invoke([SystemMessage(SYSTEM), *state["messages"]])]}
+
+    graph = StateGraph(MessagesState)
+    graph.add_node("model", call_model)
+    graph.add_node("tools", ToolNode(tools))
+    graph.add_edge(START, "model")
+    graph.add_conditional_edges("model", tools_condition)  # -> "tools" or END
+    graph.add_edge("tools", "model")
+    app = graph.compile()
 
     with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
-        out = agent.invoke({"messages": [("user", QUESTION)]})
+        out = app.invoke({"messages": [{"role": "user", "content": QUESTION}]})
         print("agent:", out["messages"][-1].content)
 
     tracely.flush()
-    print("sent — open Tracely → Traces to see the ReAct graph → node → GENERATION/TOOL tree.")
+    print(
+        "sent — open Tracely → Traces to see the StateGraph → model/tools nodes → GENERATION/TOOL."
+    )
 
 
 if __name__ == "__main__":

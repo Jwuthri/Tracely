@@ -224,12 +224,20 @@ def test_provider_map_and_aliases() -> None:
         "langchain",
         "llama-index",
         "crewai",
+        "openai-agents",
+        "google-adk",
+        "claude-agent-sdk",
     ):
         assert name in tracely._INSTRUMENTORS, name
     assert tracely._ALIASES["gemini"] == "google"
     assert tracely._ALIASES["llama_index"] == "llama-index"
-    # provider keys (suppressed under the auto LangChain guard) exclude harnesses
-    assert "openai" in tracely._PROVIDER_KEYS and "langchain" not in tracely._PROVIDER_KEYS
+    assert tracely._ALIASES["adk"] == "google-adk"
+    assert tracely._ALIASES["claude_agent_sdk"] == "claude-agent-sdk"
+    # provider keys (suppressed under the auto LangChain guard) exclude harnesses + agent SDKs
+    assert "openai" in tracely._PROVIDER_KEYS
+    assert (
+        "langchain" not in tracely._PROVIDER_KEYS and "openai-agents" not in tracely._PROVIDER_KEYS
+    )
 
 
 def test_litellm_callback_wiring(monkeypatch) -> None:

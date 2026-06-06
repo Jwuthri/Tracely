@@ -26,12 +26,17 @@ langchain = ["openinference-instrumentation-langchain>=0.1.0"]  # also covers La
 llama-index = ["openinference-instrumentation-llama-index>=0.1.0"]
 crewai = ["openinference-instrumentation-crewai>=0.1.0"]
 litellm = ["litellm>=1.40"]
+# first-party agent SDKs (the instrumentor; install the SDK itself alongside)
+openai-agents = ["openinference-instrumentation-openai-agents>=0.1.0"]
+google-adk = ["openinference-instrumentation-google-adk>=0.1.0"]
+claude-agent-sdk = ["openinference-instrumentation-claude-agent-sdk>=0.1.0"]
+openrouter = ["langchain-openrouter>=0.1.0"]  # first-party OpenRouter chat model (traced via langchain)
 # OpenLLMetry (Traceloop) alternative — init("auto") detects these too
 openllmetry = [
   "opentelemetry-instrumentation-openai-v2>=2.0b0",
   "opentelemetry-instrumentation-anthropic>=0.30b0",
 ]
-all = ["tracely-sdk[openai,anthropic,google,mistral,bedrock,groq,langchain,llama-index,crewai,litellm]"]
+all = ["tracely-sdk[openai,anthropic,google,mistral,bedrock,groq,langchain,llama-index,crewai,litellm,openai-agents,google-adk,claude-agent-sdk,openrouter]"]
 
 [project.scripts]
 tracely = "tracely_sdk.cli:main"

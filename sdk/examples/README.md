@@ -32,19 +32,19 @@ uv run python sdk/examples/<file>.py
 | [`auto_gemini.py`](auto_gemini.py) | `["gemini"]` | `[google]` | `GEMINI_API_KEY` |
 | [`auto_mistral.py`](auto_mistral.py) | `["mistral"]` | `[mistral]` | `MISTRAL_API_KEY` |
 | [`auto_bedrock.py`](auto_bedrock.py) | `["bedrock"]` | `[bedrock]` | AWS creds + `AWS_REGION` |
-| [`auto_openrouter.py`](auto_openrouter.py) | `["openai"]` | `[openai]` | `OPENROUTER_API_KEY` |
+| [`auto_openrouter.py`](auto_openrouter.py) | `["langchain"]` | `[langchain,openrouter]` | `OPENROUTER_API_KEY` |
 
-> **Gateways (OpenRouter, etc.) need no special handling** — they're OpenAI-wire-compatible, so the
-> OpenAI instrumentor (or LangChain/LiteLLM/LlamaIndex's OpenRouter handler, traced by *its*
-> instrumentor) captures them. Just set the `base_url`; the routed model (`vendor/model`) flows into
-> `model_id`. `auto_openrouter.py` shows the direct OpenAI-SDK path + the framework variants.
+> **OpenRouter** routes one API to 100+ models. `auto_openrouter.py` uses LangChain's first-party
+> `ChatOpenRouter` (`langchain-openrouter`) inside `create_agent`, traced by the LangChain
+> instrumentor. (OpenRouter is also OpenAI-wire-compatible, so pointing the OpenAI SDK at its
+> `base_url` works too — traced by the OpenAI instrumentor.)
 
 ## Harnesses (L1 — orchestration frameworks)
 
-| File | `instrument=` | Extra | Agent pattern |
+| File | `instrument=` | Extra | Agent pattern (current API) |
 |---|---|---|---|
-| [`auto_langchain.py`](auto_langchain.py) | `["langchain"]` | `[langchain]` | `create_tool_calling_agent` + `AgentExecutor` with the fake-DB tools |
-| [`auto_langgraph.py`](auto_langgraph.py) | `["langchain"]` | `[langchain]` | `create_react_agent` (ReAct graph; node name → `step_name`) |
+| [`auto_langchain.py`](auto_langchain.py) | `["langchain"]` | `[langchain]` | `langchain.agents.create_agent` (LangChain 1.0+; replaces `AgentExecutor`/`create_react_agent`) |
+| [`auto_langgraph.py`](auto_langgraph.py) | `["langchain"]` | `[langchain]` | a custom `StateGraph` + `ToolNode` + `tools_condition` (hand-built ReAct loop) |
 | [`auto_litellm.py`](auto_litellm.py) | `["litellm"]` | `[litellm]` | OpenAI-shaped tool-calling loop via one callback |
 | [`auto_llama_index.py`](auto_llama_index.py) | `["llama-index"]` | `[llama-index]` | `ReActAgent` over `FunctionTool`s |
 | [`auto_crewai.py`](auto_crewai.py) | `["crewai"]` | `[crewai]` | a `Crew` whose agent is equipped with the tools |
@@ -52,6 +52,17 @@ uv run python sdk/examples/<file>.py
 > `instrument="auto"` activates whichever of these are importable; when a harness instrumentor (e.g.
 > LangChain) is present it owns the LLM spans and the provider instrumentors are skipped to avoid
 > duplicate spans (override with an explicit list). See the docs [Automatic instrumentation](../../docs/pages/automatic.mdx) page.
+
+## Agent frameworks — first-party SDKs (L1)
+
+The big labs now ship their own agent harnesses; each has an OpenInference instrumentor that
+`init(instrument=[...])` activates, emitting AGENT/TOOL/LLM spans to Tracely.
+
+| File | `instrument=` | Extra (+ SDK) | Framework |
+|---|---|---|---|
+| [`auto_openai_agents.py`](auto_openai_agents.py) | `["openai-agents"]` | `[openai-agents]` + `openai-agents` | OpenAI Agents SDK (`agents`: `Agent`/`Runner`/`@function_tool`) |
+| [`auto_claude_agent.py`](auto_claude_agent.py) | `["claude-agent-sdk"]` | `[claude-agent-sdk]` + `claude-agent-sdk` | Anthropic Claude Agent SDK (`@tool`/`create_sdk_mcp_server`/`ClaudeSDKClient`; needs the Claude Code CLI) |
+| [`auto_google_adk.py`](auto_google_adk.py) | `["google-adk"]` | `[google-adk]` + `google-adk` | Google ADK (`google.adk.agents.Agent` + `InMemoryRunner`; instrument **before** importing `google.adk`) |
 
 ## Demo data & CI-gate examples (not tracing how-tos)
 

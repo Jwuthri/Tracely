@@ -130,10 +130,19 @@ pip install "tracely-sdk[langchain]"
 ```
 
 Chains, agents, and **LangGraph** graphs trace end-to-end with no manual spans — `init()`
-auto-registers the LangChain callback handler. A LangGraph run nests correctly: the graph is a
-`CHAIN` span, each node a child `CHAIN` (its name + step number become the span's `step_name` /
-`step_id`), and the LLM calls inside are `GENERATION` spans — all carrying the enclosing
-`tracely.trace(...)` context.
+auto-registers the LangChain callback handler. Build agents with the current **LangChain 1.0+** API,
+`from langchain.agents import create_agent` (it replaces the deprecated `create_react_agent` and
+`create_tool_calling_agent` + `AgentExecutor`):
+
+```python
+from langchain.agents import create_agent
+agent = create_agent("openai:gpt-4o-mini", tools=[get_order_status], system_prompt="…")
+agent.invoke({"messages": [{"role": "user", "content": "…"}]})
+```
+
+A LangGraph run nests correctly: the graph is a `CHAIN` span, each node a child `CHAIN` (its name +
+step number become the span's `step_name` / `step_id`), and the LLM calls inside are `GENERATION`
+spans — all carrying the enclosing `tracely.trace(...)` context.
 
 <Callout type="warning">
   **LangChain + provider de-dup.** LangChain calls providers through their SDKs, so running *both*
@@ -166,20 +175,47 @@ for full streaming capture, prefer the instrumentor path above.
 
 ## OpenRouter & other OpenAI-compatible gateways
 
-No special handling needed — OpenRouter (and similar gateways) speak the OpenAI wire protocol, so the
-**OpenAI instrumentor already traces them**. Point the OpenAI SDK at the gateway:
+OpenRouter routes one API to 100+ models, and needs no special instrumentor. The recommended path is
+LangChain's first-party **`ChatOpenRouter`** (`langchain-openrouter`) inside `create_agent`, traced by
+the LangChain instrumentor:
 
 ```python
-from openai import OpenAI
+from langchain.agents import create_agent
+from langchain_openrouter import ChatOpenRouter   # pip install langchain-openrouter
+agent = create_agent(ChatOpenRouter(model="anthropic/claude-3.5-sonnet"), tools=[...], system_prompt="…")
+```
+
+OpenRouter is also OpenAI-wire-compatible, so pointing the OpenAI SDK at its `base_url` works too —
+traced by the **OpenAI instrumentor**:
+
+```python
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ["OPENROUTER_API_KEY"])
 client.chat.completions.create(model="anthropic/claude-3.5-sonnet", messages=[...])   # traced
 ```
 
-The routed model id (`vendor/model`, e.g. `anthropic/claude-3.5-sonnet`) flows into `model_id`, and
-cost is derived from it (the rate table matches on substring, so `openai/gpt-4o` → gpt-4o pricing).
-Using a framework's OpenRouter handler? It's just that framework's LLM client with OpenRouter's
-`base_url`, so its instrumentor traces it: LangChain `ChatOpenAI(base_url=…)` → `["langchain"]`,
-LiteLLM `model="openrouter/…"` → `["litellm"]`, LlamaIndex `OpenRouter(…)` → `["llama-index"]`.
+Either way the routed model id (`vendor/model`) flows into `model_id`, and cost is derived from it
+(the rate table matches on substring, so `openai/gpt-4o` → gpt-4o pricing).
+
+## Agent frameworks — first-party SDKs
+
+The big labs ship their own agent harnesses, each with an OpenInference instrumentor that
+`init(instrument=[...])` activates (emitting AGENT/TOOL/LLM spans into Tracely):
+
+| Framework | `instrument=` | Extra (+ SDK) |
+|---|---|---|
+| OpenAI Agents SDK (`agents`) | `["openai-agents"]` | `[openai-agents]` + `openai-agents` |
+| Anthropic Claude Agent SDK | `["claude-agent-sdk"]` | `[claude-agent-sdk]` + `claude-agent-sdk` |
+| Google ADK (`google.adk`) | `["google-adk"]` | `[google-adk]` + `google-adk` |
+
+```python
+tracely.init(instrument=["openai-agents"])      # then use the SDK normally — runs are traced
+from agents import Agent, Runner, function_tool
+```
+
+<Callout type="info">
+  **Google ADK** patches at import time, so `init(instrument=["google-adk"])` must run **before** you
+  `import google.adk`. The **Claude Agent SDK** needs the Claude Code CLI installed and is async-only.
+</Callout>
 
 ## LiteLLM — 100+ providers through one path
 
