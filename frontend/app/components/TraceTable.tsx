@@ -115,7 +115,8 @@ function fmtDateTime(ts?: string | null): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 function fmtMs(ms?: number | null): string {
-  if (ms == null || ms <= 0) return "—";
+  if (ms == null || ms < 0) return "—";
+  if (ms === 0) return "<1ms"; // sub-millisecond runs (synthetic demo spans) → don't show "—"
   if (ms < 1) return `${ms.toFixed(2)}ms`;
   if (ms < 1000) return `${Math.round(ms)}ms`;
   return `${(ms / 1000).toFixed(2)}s`;
@@ -135,15 +136,19 @@ function firstText(v: unknown): string {
   if (Array.isArray(v)) {
     // A chat-message array ([{role|type, content}, …]) — prefer the first user/human turn over a
     // leading system prompt or tool message, so the conversation title is the actual user question.
+    // Skip messages whose extracted content is empty (e.g. LangGraph's root captures the input as
+    // [{role:"user", content:""}] when the real text is one level deeper).
     if (v.some((m) => m && typeof m === "object" && "content" in m && ("role" in m || "type" in m))) {
       const role = (m: Record<string, unknown>) => String(m.role ?? m.type ?? "");
       const msgs = v as Record<string, unknown>[];
+      const withText = msgs
+        .map((m) => ({ m, t: firstText(m.content ?? m.text ?? "") }))
+        .filter((x) => x.t);
       const pick =
-        msgs.find((m) => /user|human/i.test(role(m))) ??
-        msgs.find((m) => !/system|tool/i.test(role(m))) ??
-        msgs[0];
-      const t = pick ? firstText(pick.content ?? pick.text ?? "") : "";
-      if (t) return t;
+        withText.find((x) => /user|human/i.test(role(x.m))) ??
+        withText.find((x) => !/system|tool/i.test(role(x.m))) ??
+        withText[0];
+      if (pick) return pick.t;
     }
     for (const item of v) {
       const t = firstText(item);
@@ -157,6 +162,14 @@ function firstText(v: unknown): string {
     if (typeof o.text === "string") return o.text;
     if (typeof o.content === "string") return o.content;
     if (o.content != null) return firstText(o.content);
+    // @observe captures fn args as {kwarg_name: value}. Probe common prompt-shaped keys first,
+    // then fall back to the sole string value if the dict is single-shaped (e.g. {question:"…"}).
+    for (const k of ["prompt", "input", "question", "query", "user_input", "msg", "message"]) {
+      const t = firstText(o[k]);
+      if (t) return t;
+    }
+    const stringVals = Object.values(o).filter((x) => typeof x === "string") as string[];
+    if (stringVals.length === 1) return stringVals[0];
   }
   return "";
 }
@@ -167,12 +180,19 @@ function deriveTitle(s: string | null): string {
   const t = s.trim();
   if (t.startsWith("[") || t.startsWith("{")) {
     try {
-      text = firstText(JSON.parse(t)) || s;
+      const parsed = JSON.parse(t);
+      const found = firstText(parsed);
+      if (found) text = found;
+      // Parsed but no extractable text (e.g. LangGraph's [{role:"user",content:""}] at the root —
+      // the actual message lives in a child span). Show a placeholder instead of the raw JSON.
+      else return "Conversation";
     } catch {
       /* not JSON — use raw */
     }
   }
-  const line = text.split("\n")[0].trim();
+  // Find the first non-empty line (some frameworks prefix the content with `\n` — CrewAI's
+  // `\nCurrent Task: …`, for instance — so a naive split-on-newline yields "").
+  const line = text.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
   const words = line.split(/\s+/).slice(0, 7).join(" ");
   return words.length < line.length ? `${words}…` : words || "Conversation";
 }
@@ -750,6 +770,23 @@ function MessageContent({ raw }: { raw: string | null }) {
   if (parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).content)) {
     return <ContentParts value={(parsed as Record<string, unknown>).content} />;
   }
+  // @observe captures fn args as {kwarg_name: value}. If the dict is just a single prompt-shaped
+  // string (e.g. {question: "…"} or {prompt: "…"}), unwrap and render as text — otherwise the user
+  // M-row Content shows a `{} question: "…"` JSON pill instead of the actual user message.
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const o = parsed as Record<string, unknown>;
+    const keys = Object.keys(o);
+    const promptish = ["prompt", "input", "question", "query", "user_input", "msg", "message", "text"];
+    const k = keys.find((x) => promptish.includes(x) && typeof o[x] === "string");
+    if (k) {
+      const s = o[k] as string;
+      return s.length > 56 ? <ExpandableText text={s} /> : <Plain text={s} />;
+    }
+    if (keys.length === 1 && typeof o[keys[0]] === "string") {
+      const s = o[keys[0]] as string;
+      return s.length > 56 ? <ExpandableText text={s} /> : <Plain text={s} />;
+    }
+  }
   // structured data (tool args/results, output schema) -> JSON pill
   if (typeof parsed === "object") return <JsonPill raw={t} />;
   const s = String(parsed);
@@ -874,6 +911,12 @@ function toMsg(role: string, raw: string | null): { role: string; content: unkno
   const v = parseMaybe(raw);
   if (v && typeof v === "object" && !Array.isArray(v) && "role" in (v as object)) {
     const m = v as { role?: string; content?: unknown };
+    return { role: m.role ?? role, content: m.content };
+  }
+  // Many provider outputs JSON-stringify as a single-element chat-message array (e.g. OpenInference
+  // captures `[{"role":"assistant","content":"…"}]`). Unwrap that so the pill shows the text.
+  if (Array.isArray(v) && v.length === 1 && v[0] && typeof v[0] === "object" && "role" in (v[0] as object)) {
+    const m = v[0] as { role?: string; content?: unknown };
     return { role: m.role ?? role, content: m.content };
   }
   return { role, content: v };

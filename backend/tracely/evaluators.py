@@ -20,6 +20,8 @@ log = structlog.get_logger()
 
 RUN = "AGENT_RUN"
 TOOL = "TOOL"
+GENERATION = "GENERATION"
+CHAIN = "CHAIN"
 
 
 @dataclass
@@ -165,8 +167,14 @@ def _first_io(spans: list[dict], key: str) -> str:
 def _answer(ctx: RunContext) -> str:
     if ctx.root.get("output"):
         return _content_text(ctx.root["output"])
+    # Prefer the LAST GENERATION span — that's the model's final reply. Skipping CHAIN/AGENT
+    # outputs avoids picking up framework routing signals (LangGraph's `tools_condition` outputs
+    # `"__end__"`, etc.) and presenting them to the judge as the agent's answer.
     for s in reversed(ctx.spans):
-        if s.get("output") and s.get("type") != TOOL:
+        if s.get("type") == GENERATION and s.get("output"):
+            return _content_text(s["output"])
+    for s in reversed(ctx.spans):
+        if s.get("output") and s.get("type") not in (TOOL, CHAIN):
             return _content_text(s["output"])
     return _first_io(ctx.spans, "output")
 

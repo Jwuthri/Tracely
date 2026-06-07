@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import tracely_sdk as tracely
+
 # ── the "database" ───────────────────────────────────────────────────────────
 ORDERS: dict[str, dict[str, Any]] = {
     "ORD-4471": {
@@ -34,7 +36,12 @@ INVENTORY: dict[str, dict[str, Any]] = {
 }
 
 
-# ── tools (plain Python — also usable directly as Gemini / @observe tools) ─────
+# ── tools (plain Python — pass directly to frameworks that wrap them) ─────────
+# Kept RAW (no @observe) so framework examples that auto-trace tool dispatch (LangChain `@tool`,
+# LlamaIndex FunctionTool, CrewAI, OpenAI Agents SDK, Google ADK, Claude Agent SDK) don't get a
+# duplicate inner TOOL span on top of the framework's own. Provider-SDK examples that dispatch
+# tools themselves (OpenAI/Anthropic/Mistral/Bedrock/LiteLLM + drop-ins) call `observed_tools()`
+# below to get @observe-wrapped versions, so the run_tool dispatch becomes a real TOOL span.
 def get_order_status(order_id: str) -> dict:
     """Look up an order's delivery status and ETA by its order id (e.g. ORD-4471)."""
     return ORDERS.get(order_id, {"error": f"no order {order_id}"})
@@ -42,10 +49,17 @@ def get_order_status(order_id: str) -> dict:
 
 def check_inventory(sku: str) -> dict:
     """Check current stock level and price for a product SKU (e.g. SKU-COAT-01)."""
-    return INVENTORY.get(sku, {"error": f"no SKU {sku}"})
+    # tolerate both "SKU-COAT-01" and "COAT-01" — models often strip the prefix
+    if sku in INVENTORY:
+        return INVENTORY[sku]
+    if f"SKU-{sku}" in INVENTORY:
+        return INVENTORY[f"SKU-{sku}"]
+    return {"error": f"no SKU {sku}"}
 
 
 TOOL_IMPLS = {"get_order_status": get_order_status, "check_inventory": check_inventory}
+
+
 
 _DESCRIPTIONS = {
     "get_order_status": "Look up an order's delivery status and ETA by its order id.",
@@ -94,6 +108,16 @@ QUESTION = "Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-
 
 
 def run_tool(name: str, args: dict) -> dict:
-    """Dispatch a model-requested tool call to the fake DB."""
+    """Dispatch a model-requested tool call to the fake DB — wraps each dispatch in a TOOL span so
+    provider-SDK examples (OpenAI/Anthropic/Mistral/Bedrock/LiteLLM) get a real TOOL in their trace
+    without per-example boilerplate. Framework examples (LangChain/LlamaIndex/CrewAI/agent-SDKs)
+    bypass this and use raw `get_order_status`/`check_inventory` directly, so the framework's own
+    tool-tracing isn't double-wrapped."""
     fn = TOOL_IMPLS.get(name)
-    return fn(**args) if fn else {"error": f"unknown tool {name}"}
+    if not fn:
+        return {"error": f"unknown tool {name}"}
+    with tracely.tool(name) as span:
+        tracely.set_io(span, input=args)
+        result = fn(**args)
+        tracely.set_io(span, output=result)
+        return result

@@ -13,6 +13,11 @@ from __future__ import annotations
 
 import os
 
+# CrewAI ships its own tracer that competes with our TracerProvider; turn it off so Tracely owns
+# tracing (and the LiteLLM instrumentor's GENERATION spans flow through).
+os.environ.setdefault("CREWAI_TRACING_ENABLED", "false")
+os.environ.setdefault("OTEL_SDK_DISABLED", "false")
+
 import _fake_db
 import tracely_sdk as tracely
 from _fake_db import QUESTION
@@ -21,7 +26,14 @@ API = os.environ.get("TRACELY_API", "http://localhost:8000")
 KEY = os.environ.get("TRACELY_KEY", "tracely_dev_key")
 
 tracely.init(
-    endpoint=API, api_key=KEY, service_name="support-agent", env="prod", instrument=["crewai"]
+    endpoint=API,
+    api_key=KEY,
+    service_name="support-agent",
+    env="prod",
+    # CrewAI's instrumentor traces lifecycle (crew/agent/task/tool); it routes models via LiteLLM
+    # which in turn calls the OpenAI SDK — the OpenAI instrumentor adds the underlying GENERATION
+    # spans with token counts.
+    instrument=["crewai", "openai"],
 )
 
 
@@ -36,13 +48,18 @@ def main() -> None:
     from crewai import Agent, Crew, Task
     from crewai.tools import tool
 
+    # CrewAI's instrumentor doesn't emit per-tool spans, so we wrap with @observe(as_type="tool")
+    # to get TOOL spans (one per dispatch) into the trace tree. Function name == tool name so the
+    # tool_consistency eval matches the "requested" tools against the "executed" span names.
     @tool("get_order_status")
-    def order_status(order_id: str) -> str:
+    @tracely.observe(as_type="tool")
+    def get_order_status(order_id: str) -> str:
         """Look up an order's delivery status and ETA by its order id."""
         return str(_fake_db.get_order_status(order_id))
 
     @tool("check_inventory")
-    def inventory(sku: str) -> str:
+    @tracely.observe(as_type="tool")
+    def check_inventory(sku: str) -> str:
         """Check current stock level and price for a product SKU."""
         return str(_fake_db.check_inventory(sku))
 
@@ -50,7 +67,7 @@ def main() -> None:
         role="Customer-support agent",
         goal="Answer the customer's question using the lookup tools",
         backstory="You resolve order + stock questions accurately and concisely.",
-        tools=[order_status, inventory],
+        tools=[get_order_status, check_inventory],
     )
     task = Task(description=QUESTION, expected_output="A concise, helpful answer.", agent=support)
     crew = Crew(agents=[support], tasks=[task])

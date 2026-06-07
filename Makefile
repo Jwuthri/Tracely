@@ -1,4 +1,4 @@
-.PHONY: help infra-up infra-down infra-prune install migrate migrate-ch migrate-pg seed backend workers frontend docs test send-trace demo-failures gate replay sdk-example auto-openai auto-agent seed-demo seed-regression fmt
+.PHONY: help infra-up infra-down infra-prune install migrate migrate-ch migrate-pg seed backend workers frontend docs test send-trace demo-failures gate replay sdk-example auto-openai auto-agent run-all-examples seed-demo seed-regression fmt
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -68,6 +68,9 @@ auto-openai: ## automatic tracing of plain OpenAI calls (needs tracely-sdk[opena
 
 auto-agent:  ## automatic tracing via @observe + trace() (agent -> gen/tool/gen tree)
 	TRACELY_API=$(TRACELY_API) uv run python sdk/examples/auto_agent.py
+
+run-all-examples: ## run every sdk/examples/*.py (skips ones missing a key/dep); pass WIPE=1 to clear traces first
+	TRACELY_API=$(TRACELY_API) scripts/run_all_examples.sh $${WIPE:+--wipe}
 
 seed-demo:   ## seed rich demo conversations (every trace shape: RAG, multi-agent, multimodal, …)
 	TRACELY_API=$(TRACELY_API) uv run python sdk/examples/seed_conversations.py

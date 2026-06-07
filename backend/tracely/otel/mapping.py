@@ -155,7 +155,7 @@ def map_observation_type(attrs: dict[str, Any]) -> str:
 
     if _first(attrs, ["gen_ai.tool.name", "tool.name"]):
         return TOOL
-    if _first(attrs, ["gen_ai.request.model", "gen_ai.response.model", "llm.model_name"]):
+    if _first(attrs, ["gen_ai.request.model", "gen_ai.response.model", "llm.model_name", "llm.openai.model"]):
         return GENERATION
     return SPAN
 
@@ -167,8 +167,33 @@ def _usage(attrs: dict[str, Any]) -> dict[str, int]:
     present (else it would double-count). Reasoning/cache breakdowns are subsets of input/output
     (and provider-dependent — §13), so they stay out of this map and ride along in `metadata`."""
     out: dict[str, int] = {}
+    # When the user explicitly set the span's observation type to something non-LLM (AGENT, CHAIN,
+    # THINKING, TOOL, etc.), skip auto-extracting `gen_ai.*`/`llm.*` token counts. Callbacks like
+    # LiteLLM's `otel` dump completion attrs onto the CURRENT span — if that's an enclosing AGENT
+    # wrapper, we'd double-count tokens (parent + each GENERATION child). The child GENERATION span
+    # the callback also creates already carries the canonical numbers.
+    explicit = _first(attrs, ["tracely.observation.type", "langfuse.observation.type"])
+    if explicit and str(explicit).upper() not in {GENERATION, EMBEDDING}:
+        return out
+    # LiteLLM's `otel` callback packs the usage dict as a Python-repr string under `llm.openai.usage`
+    # (e.g. "{'prompt_tokens':274,'completion_tokens':66,'total_tokens':340,...}"). Lift those fields
+    # into the attrs map first so the lookups below pick them up like a normal flat key/value.
+    raw_usage = attrs.get("llm.openai.usage")
+    if raw_usage and isinstance(raw_usage, str):
+        try:
+            parsed_usage = json.loads(raw_usage.replace("'", '"'))
+            if isinstance(parsed_usage, dict):
+                attrs = {**attrs, **{f"llm.openai.usage.{k}": v for k, v in parsed_usage.items()}}
+        except (ValueError, json.JSONDecodeError):
+            pass
     inp = _first(
-        attrs, ["gen_ai.usage.input_tokens", "gen_ai.usage.prompt_tokens", "llm.token_count.prompt"]
+        attrs,
+        [
+            "gen_ai.usage.input_tokens",
+            "gen_ai.usage.prompt_tokens",
+            "llm.token_count.prompt",
+            "llm.openai.usage.prompt_tokens",
+        ],
     )
     outp = _first(
         attrs,
@@ -176,9 +201,13 @@ def _usage(attrs: dict[str, Any]) -> dict[str, int]:
             "gen_ai.usage.output_tokens",
             "gen_ai.usage.completion_tokens",
             "llm.token_count.completion",
+            "llm.openai.usage.completion_tokens",
         ],
     )
-    total = _first(attrs, ["gen_ai.usage.total_tokens", "llm.token_count.total"])
+    total = _first(
+        attrs,
+        ["gen_ai.usage.total_tokens", "llm.token_count.total", "llm.openai.usage.total_tokens"],
+    )
     for name, v in (("input", inp), ("output", outp)):
         if v is not None:
             try:
@@ -369,20 +398,82 @@ def _io_messages(attrs: dict[str, Any], direction: str) -> list[dict[str, Any]] 
     return genai or None
 
 
+def _parse_litellm_attr(raw: Any) -> Any:
+    """LiteLLM's `otel` callback serializes Python objects via `repr()` (single quotes, None/True/
+    False). Convert to JSON-parseable text best-effort."""
+    if not isinstance(raw, str):
+        return raw
+    s = raw.strip()
+    # cheap repr → JSON: swap quote style, normalize Python literals
+    swapped = s.replace("'", '"').replace(": None", ": null").replace(": True", ": true").replace(": False", ": false")
+    try:
+        return json.loads(swapped)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def _has_text(v: Any) -> bool:
+    """True if `v` (a message-list / message-dict / content blocks / string) contains any non-empty
+    text. Used to drop structurally-present-but-semantically-empty messages like LangGraph's root
+    `[{"role":"user","content":""}]` where the real text lives one span deeper."""
+    if isinstance(v, str):
+        return bool(v.strip())
+    if isinstance(v, list):
+        return any(_has_text(x) for x in v)
+    if isinstance(v, dict):
+        for k in ("text", "content", "value"):
+            if k in v and _has_text(v[k]):
+                return True
+        if "tool_calls" in v and v.get("tool_calls"):
+            return True
+    return False
+
+
 def _io_field(attrs: dict[str, Any], direction: str) -> str | None:
     """Resolve the `input`/`output` column. Manual `tracely.*` wins; then reassembled instrumentor
-    messages; then the single-value string conventions."""
+    messages; then the single-value string conventions. Drops messages whose content is structurally
+    empty so the read-side aggregation (which picks the earliest non-empty input) doesn't pin the
+    conversation title to a placeholder framework wrapper."""
     manual = _first(attrs, [f"tracely.{direction}", f"langfuse.observation.{direction}"])
     if manual is not None:
         return _to_str(manual)
     msgs = _io_messages(attrs, direction)
-    if msgs is not None:
+    if msgs is not None and _has_text(msgs):
         return _to_str(msgs)
+    # LiteLLM's `otel` callback stores OpenAI-shaped IO as Python-repr strings under
+    # `llm.openai.{messages,choices}`. Pull out the message list (for choices: choice.message) so
+    # we end up with the same `[{role,content}, …]` shape every other path produces.
+    if direction == "input":
+        raw_msgs = attrs.get("llm.openai.messages")
+        if raw_msgs:
+            parsed = _parse_litellm_attr(raw_msgs)
+            if parsed:
+                return _to_str(parsed)
+    else:  # output
+        raw_choices = attrs.get("llm.openai.choices")
+        if raw_choices:
+            parsed = _parse_litellm_attr(raw_choices)
+            if isinstance(parsed, list):
+                msgs = [c.get("message") for c in parsed if isinstance(c, dict) and c.get("message")]
+                if msgs:
+                    return _to_str(msgs)
     fallback = {
         "input": ["input.value", "gen_ai.prompt", "input"],
         "output": ["output.value", "gen_ai.completion", "output"],
     }[direction]
-    return _to_str(_first(attrs, fallback))
+    raw = _first(attrs, fallback)
+    if raw is None:
+        return None
+    # `input.value` from OpenInference is often a JSON string for tool/chain spans (e.g. LangGraph
+    # roots) — peek into it before discarding.
+    if isinstance(raw, str) and raw.startswith(("[", "{")):
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            parsed = None
+        if parsed is not None and not _has_text(parsed):
+            return None
+    return _to_str(raw)
 
 
 def _tool_call_names(attrs: dict[str, Any], otype: str) -> list[str]:
@@ -478,7 +569,14 @@ def _map_span(
         "start_time": _ns_to_dt(span.start_time_unix_nano),
         "end_time": _ns_to_dt(span.end_time_unix_nano),
         "completion_start_time": _completion_start(a),
-        "name": span.name or "",
+        # For TOOL spans, prefer the actual tool name from attrs over the framework's generic span
+        # name (LlamaIndex uses `FunctionTool.acall`, etc.) — so the UI shows the tool name and the
+        # tool_consistency eval can match "requested" against "executed".
+        "name": (
+            str(_first(a, ["tool.name", "gen_ai.tool.name"]) or span.name or "")
+            if otype == TOOL
+            else (span.name or "")
+        ),
         "type": otype,
         "environment": str(
             _first(a, ["deployment.environment", "langfuse.environment"]) or "default"
@@ -522,6 +620,7 @@ def _map_span(
                     "gen_ai.response.model",
                     "gen_ai.request.model",
                     "llm.model_name",
+                    "llm.openai.model",
                     "tracely.model",
                 ],
             )

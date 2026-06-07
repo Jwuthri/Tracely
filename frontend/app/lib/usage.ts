@@ -8,8 +8,14 @@ import type { ConvNode, FullTurn, SpanOut } from "./api";
 // "anthropic/claude-3.5-sonnet" hits /sonnet/. Open-model rates are rough and route-dependent on
 // OpenRouter; specific patterns must come before general ones (first match wins).
 const PRICES: [RegExp, number, number][] = [
+  [/gpt-5\.?\d*-?nano/, 0.05, 0.4],
+  [/gpt-5\.?\d*-?mini/, 0.25, 2],
+  [/gpt-5/, 1.25, 10],
   [/gpt-4o-mini/, 0.15, 0.6],
   [/gpt-4o/, 2.5, 10],
+  [/gpt-4\.1-nano/, 0.1, 0.4],
+  [/gpt-4\.1-mini/, 0.4, 1.6],
+  [/gpt-4\.1/, 2, 8],
   [/gpt-4-turbo/, 10, 30],
   [/gpt-4/, 30, 60],
   [/gpt-3\.5/, 0.5, 1.5],

@@ -1,9 +1,11 @@
 """OpenAI — automatic tracing of a real tool-calling agent (PRD 12, P0).
 
 A support agent answers a multi-part question by calling fake-DB tools (`get_order_status`,
-`check_inventory`) in an agentic loop, then summarizing. Every model call and tool round-trip is
-captured automatically as a GENERATION span — **no span code**. `tracely.trace(...)` attaches the
-run's agent/conversation/user to all of them.
+`check_inventory`) in an agentic loop, then summarizing. Every model call is captured automatically
+as a GENERATION span by the OpenAI instrumentor — **no span code on the LLM calls**. One
+`@observe(as_type="agent")` on the loop gives the run a single AGENT root so the generations + tool
+spans land in one trace tree (instead of each chat.completions.create() becoming its own trace);
+`tracely.trace(...)` attaches the run's agent/conversation/user metadata onto every span inside.
 
     pip install "tracely-sdk[openai]"
     export OPENAI_API_KEY=sk-...
@@ -37,9 +39,10 @@ def main() -> None:
     from openai import OpenAI
 
     client = OpenAI()
-    messages: list = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": QUESTION}]
 
-    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
+    @tracely.observe(as_type="agent")
+    def support_agent(question: str) -> str:
+        messages: list = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": question}]
         for _ in range(5):  # agentic loop: call tools until the model gives a final answer
             resp = client.chat.completions.create(
                 model="gpt-4o-mini", messages=messages, tools=OPENAI_TOOLS
@@ -47,8 +50,7 @@ def main() -> None:
             msg = resp.choices[0].message
             messages.append(msg.model_dump(exclude_none=True))
             if not msg.tool_calls:
-                print("agent:", msg.content)
-                break
+                return msg.content or ""
             for call in msg.tool_calls:  # run each requested tool against the fake DB
                 result = run_tool(call.function.name, json.loads(call.function.arguments))
                 print(
@@ -57,6 +59,10 @@ def main() -> None:
                 messages.append(
                     {"role": "tool", "tool_call_id": call.id, "content": json.dumps(result)}
                 )
+        return "(loop limit hit)"
+
+    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
+        print("agent:", support_agent(QUESTION))
 
     tracely.flush()
     print(

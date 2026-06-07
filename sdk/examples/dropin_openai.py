@@ -36,8 +36,10 @@ def main() -> None:
     from tracely_sdk.openai import OpenAI  # a pre-wrapped client (= wrap_openai(openai.OpenAI()))
 
     client = OpenAI()
-    messages: list = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": QUESTION}]
-    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
+
+    @tracely.observe(as_type="agent")
+    def support_agent(question: str) -> str:
+        messages: list = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": question}]
         for _ in range(5):
             resp = client.chat.completions.create(
                 model="gpt-4o-mini", messages=messages, tools=OPENAI_TOOLS
@@ -45,13 +47,16 @@ def main() -> None:
             msg = resp.choices[0].message
             messages.append(msg.model_dump(exclude_none=True))
             if not msg.tool_calls:
-                print("agent:", msg.content)
-                break
+                return msg.content or ""
             for call in msg.tool_calls:
                 result = run_tool(call.function.name, json.loads(call.function.arguments))
                 messages.append(
                     {"role": "tool", "tool_call_id": call.id, "content": json.dumps(result)}
                 )
+        return "(loop limit hit)"
+
+    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
+        print("agent:", support_agent(QUESTION))
 
     tracely.flush()
     print("sent — tool-calling agent traced via the drop-in; nothing patched globally.")

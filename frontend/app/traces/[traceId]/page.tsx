@@ -21,8 +21,15 @@ export default async function TracePage({ params }: { params: Promise<{ traceId:
 
   // Derive the user/assistant text for the turn from the run's root span.
   const input = root?.input ?? spans.find((s) => s.input)?.input ?? null;
+  // Prefer the LAST GENERATION output (the model's real reply), then root, then any non-TOOL/non-
+  // CHAIN span. Skipping CHAIN avoids framework routing signals (LangGraph's `tools_condition`
+  // outputs `"__end__"`) being shown as the assistant's answer.
+  const reversed = [...spans].reverse();
   const output =
-    root?.output ?? [...spans].reverse().find((s) => s.output && s.type !== "TOOL")?.output ?? null;
+    reversed.find((s) => s.type === "GENERATION" && s.output)?.output ??
+    root?.output ??
+    reversed.find((s) => s.output && s.type !== "TOOL" && s.type !== "CHAIN")?.output ??
+    null;
 
   const turn: FullTurn = {
     trace_id: traceId,
