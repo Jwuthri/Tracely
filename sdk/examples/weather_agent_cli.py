@@ -23,7 +23,7 @@ tracely.init(
 )
 
 prompt = os.environ.get("TRACELY_INPUT", "")
-with tracely.agent("planner"):
+with tracely.trace(example=os.path.basename(__file__)), tracely.agent("planner"):
     with tracely.llm("gpt-4o") as g:
         tracely.set_io(g, input=prompt, output="(decides to call get_weather)")
     with tracely.tool("get_weather") as t:

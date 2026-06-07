@@ -43,7 +43,13 @@ export function TracesExplorer({ conversations }: { conversations: ConvNode[] })
 
   return (
     <div className="space-y-3">
-      <div className="reveal flex flex-wrap items-center justify-between gap-3" style={{ animationDelay: "60ms" }}>
+      {/* Password-manager extensions (e.g. Proton Pass) inject data-protonpass-form="" onto this
+          input wrapper before hydration; suppress the resulting attribute-only mismatch. */}
+      <div
+        className="reveal flex flex-wrap items-center justify-between gap-3"
+        style={{ animationDelay: "60ms" }}
+        suppressHydrationWarning
+      >
         <div className="flex items-center gap-1.5">
           {(["all", "failing", "multi"] as const).map((f) => (
             <button
@@ -66,6 +72,7 @@ export function TracesExplorer({ conversations }: { conversations: ConvNode[] })
           onChange={(e) => setQ(e.target.value)}
           placeholder="Filter by text, model, metadata…"
           className="w-56 rounded-lg border border-line bg-ink-800 px-3 py-1.5 text-[12.5px] text-fg placeholder:text-fg-faint focus:border-signal/40 focus:outline-none"
+          suppressHydrationWarning
         />
       </div>
 

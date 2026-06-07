@@ -37,7 +37,7 @@ def main() -> None:
 
     client = boto3.client("bedrock-runtime", region_name=region)
     messages: list = [{"role": "user", "content": [{"text": QUESTION}]}]
-    with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
+    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
         for _ in range(5):
             resp = client.converse(
                 modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",

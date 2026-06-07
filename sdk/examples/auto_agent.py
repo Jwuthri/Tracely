@@ -85,7 +85,7 @@ def main() -> None:
             '    pip install "tracely-sdk[openai]" && export OPENAI_API_KEY=sk-...'
         )
         return
-    with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
+    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
         print("agent:", support_agent(QUESTION))
     tracely.flush()
     print("sent — open Tracely → Traces to see the agent → thinking · generations · tools tree.")

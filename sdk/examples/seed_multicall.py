@@ -19,7 +19,7 @@ KEY = os.environ.get("TRACELY_KEY", "tracely_dev_key")
 
 tracely.init(endpoint=API, api_key=KEY, service_name="multiweather", env="prod")
 
-with tracely.agent("multiweather") as a:
+with tracely.trace(example=os.path.basename(__file__)), tracely.agent("multiweather") as a:
     # message-level I/O as structured message objects (role + typed content blocks)
     tracely.set_io(
         a,

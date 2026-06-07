@@ -57,7 +57,7 @@ async def run() -> None:
         mcp_servers={"store": server},
         allowed_tools=["mcp__store__get_order_status", "mcp__store__check_inventory"],
     )
-    with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
+    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
         async with ClaudeSDKClient(options=options) as client:
             await client.query(QUESTION)
             async for message in client.receive_response():

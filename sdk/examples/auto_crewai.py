@@ -55,7 +55,7 @@ def main() -> None:
     task = Task(description=QUESTION, expected_output="A concise, helpful answer.", agent=support)
     crew = Crew(agents=[support], tasks=[task])
 
-    with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
+    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
         print("agent:", crew.kickoff())
 
     tracely.flush()

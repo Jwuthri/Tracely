@@ -49,15 +49,23 @@ function pickNum(md: Record<string, string>, keys: string[]): number | undefined
 export function spanUsage(span: SpanOut): Record<string, number> {
   const md = span.metadata || {};
   const u: Record<string, number> = {};
-  const it = pickNum(md, ["gen_ai.usage.input_tokens", "input_tokens", "prompt_tokens"]);
-  const ot = pickNum(md, ["gen_ai.usage.output_tokens", "output_tokens", "completion_tokens"]);
-  const tt = pickNum(md, ["gen_ai.usage.reasoning_tokens", "thinking_tokens", "reasoning_tokens"]);
+  // Accept OpenInference's `llm.token_count.*` alongside `gen_ai.usage.*` / OpenLLMetry keys — else
+  // the detail view (which reads per-span metadata) shows no input/output breakdown for LangChain etc.
+  const it = pickNum(md, ["gen_ai.usage.input_tokens", "input_tokens", "prompt_tokens", "llm.token_count.prompt"]);
+  const ot = pickNum(md, ["gen_ai.usage.output_tokens", "output_tokens", "completion_tokens", "llm.token_count.completion"]);
+  const tt = pickNum(md, ["gen_ai.usage.reasoning_tokens", "thinking_tokens", "reasoning_tokens", "llm.token_count.completion_details.reasoning"]);
   if (it != null) u.input_tokens = it;
   if (ot != null) u.output_tokens = ot;
   if (tt != null) u.thinking_tokens = tt;
   // total = input + output (matches the backend token total, which excludes reasoning tokens);
   // thinking_tokens is surfaced separately.
-  const total = span.tokens || (it || 0) + (ot || 0);
+  // Trust the input+output breakdown over any stored aggregate: a producer that reports total AND
+  // its components gets them summed into `tokens` (double-count), so prefer it+ot when both exist;
+  // fall back to the aggregate/total only when the components aren't both present.
+  const total =
+    it != null && ot != null
+      ? it + ot
+      : span.tokens || pickNum(md, ["gen_ai.usage.total_tokens", "llm.token_count.total"]) || (it || 0) + (ot || 0);
   if (total > 0) u.total_tokens = total;
   const model = md["gen_ai.request.model"] || span.model_id || "";
   const [ri, ro] = rateFor(model);
@@ -81,7 +89,7 @@ function usageFrom(it: number, ot: number, total: number, cost: number, model: s
   const u: Record<string, number> = {};
   if (it) u.input_tokens = it;
   if (ot) u.output_tokens = ot;
-  const tot = total || it + ot;
+  const tot = it && ot ? it + ot : total || it + ot; // prefer the breakdown over a possibly-doubled total
   if (tot) u.total_tokens = tot;
   const [ri, ro] = rateFor(model);
   const ip = it && ri ? round((it / 1e6) * ri) : 0;

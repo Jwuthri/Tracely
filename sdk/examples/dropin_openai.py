@@ -37,7 +37,7 @@ def main() -> None:
 
     client = OpenAI()
     messages: list = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": QUESTION}]
-    with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
+    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
         for _ in range(5):
             resp = client.chat.completions.create(
                 model="gpt-4o-mini", messages=messages, tools=OPENAI_TOOLS

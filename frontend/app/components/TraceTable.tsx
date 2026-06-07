@@ -8,7 +8,7 @@ import type { ConvNode, FullTurn, SpanOut, ThreadTurn } from "../lib/api";
 import { convUsage, fmtUsd, spanUsage, turnUsage, usageSummary } from "../lib/usage";
 import { mergeMeta } from "../lib/meta";
 import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
-import { HighlightedJson } from "./JsonView";
+import { HighlightedJson, prettyJson } from "./JsonView";
 import { TypeChip } from "./ui";
 
 // ── A TurnWise-style hierarchical spreadsheet over Tracely's real tree ─────────
@@ -64,20 +64,20 @@ type Col = { key: string; label: string; group: Group; width: number };
 
 const COLUMNS: Col[] = [
   { key: "conversation", label: "Conversation", group: "C", width: 260 },
-  { key: "ctime",        label: "Time",         group: "C", width: 88 },
+  { key: "ctime",        label: "Datetime",     group: "C", width: 160 },
   { key: "cdur",         label: "Duration",     group: "C", width: 96 },
   { key: "summary", label: "Summary", group: "C", width: 320 },
   { key: "cmeta", label: "Metadata", group: "C", width: 200 },
   { key: "cusage", label: "Usage", group: "C", width: 180 },
   { key: "role", label: "Role", group: "M", width: 110 },
   { key: "mindex", label: "#", group: "M", width: 56 },
-  { key: "mtime", label: "Time", group: "M", width: 96 },
+  { key: "mtime", label: "Datetime", group: "M", width: 160 },
   { key: "mdur",  label: "Duration", group: "M", width: 96 },
   { key: "content", label: "Content", group: "M", width: 420 },
   { key: "musage", label: "Usage", group: "M", width: 180 },
   { key: "sindex", label: "#", group: "S", width: 56 },
   { key: "type", label: "Type", group: "S", width: 120 },
-  { key: "stime", label: "Time", group: "S", width: 96 },
+  { key: "stime", label: "Datetime", group: "S", width: 160 },
   { key: "sdur", label: "Duration", group: "S", width: 96 },
   { key: "agent", label: "Agent", group: "S", width: 120 },
   { key: "model", label: "Model", group: "S", width: 120 },
@@ -107,10 +107,12 @@ const HEAD_TH =
 const PREFS_KEY = "tracely.traceTable.prefs";
 
 // ── format helpers ──────────────────────────────────────────────────────────────
-function fmtClock(ts?: string | null): string {
+function fmtDateTime(ts?: string | null): string {
   if (!ts) return "";
   const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString("en-US", { hour12: false });
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 function fmtMs(ms?: number | null): string {
   if (ms == null || ms <= 0) return "—";
@@ -131,6 +133,18 @@ function durationMs(span: SpanOut): number | null {
 function firstText(v: unknown): string {
   if (typeof v === "string") return v;
   if (Array.isArray(v)) {
+    // A chat-message array ([{role|type, content}, …]) — prefer the first user/human turn over a
+    // leading system prompt or tool message, so the conversation title is the actual user question.
+    if (v.some((m) => m && typeof m === "object" && "content" in m && ("role" in m || "type" in m))) {
+      const role = (m: Record<string, unknown>) => String(m.role ?? m.type ?? "");
+      const msgs = v as Record<string, unknown>[];
+      const pick =
+        msgs.find((m) => /user|human/i.test(role(m))) ??
+        msgs.find((m) => !/system|tool/i.test(role(m))) ??
+        msgs[0];
+      const t = pick ? firstText(pick.content ?? pick.text ?? "") : "";
+      if (t) return t;
+    }
     for (const item of v) {
       const t = firstText(item);
       if (t) return t;
@@ -139,6 +153,7 @@ function firstText(v: unknown): string {
   }
   if (v && typeof v === "object") {
     const o = v as Record<string, unknown>;
+    if (Array.isArray(o.messages)) return firstText(o.messages); // {messages:[…]} chat-input wrapper
     if (typeof o.text === "string") return o.text;
     if (typeof o.content === "string") return o.content;
     if (o.content != null) return firstText(o.content);
@@ -566,6 +581,19 @@ function ContentBody({ value }: { value: unknown }) {
         </a>
       );
     }
+    // Tool messages (and the occasional structured assistant return) often arrive as a JSON-encoded
+    // string. Render them with the same pretty-printed, syntax-highlighted treatment we use for
+    // tool-call arguments so the popover doesn't show a wall of escaped braces.
+    if (s.startsWith("{") || s.startsWith("[")) {
+      const pretty = prettyJson(s);
+      if (pretty && pretty !== s) {
+        return (
+          <pre className="whitespace-pre-wrap break-words rounded-md border border-slate-700/60 bg-slate-900/50 p-2 font-mono text-[11px] leading-relaxed text-slate-300">
+            <HJson text={pretty} />
+          </pre>
+        );
+      }
+    }
     return <div className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-slate-300">{value}</div>;
   }
   if (Array.isArray(value)) {
@@ -728,6 +756,66 @@ function MessageContent({ raw }: { raw: string | null }) {
   return s.length > 56 ? <ExpandableText text={s} /> : <Plain text={s} />;
 }
 
+// ── message-level content (this side's last message only) ────────────────────────
+// A turn's input/output is frequently the agent's whole state — the entire {messages:[…]} history
+// (LangGraph) or a full chat array — not just this turn's one message. At the message (M) level we
+// show only THIS side: the last user message on the user row, the last assistant message on the
+// assistant row. (Steps keep their full raw I/O.)
+const MESSAGE_TYPES = new Set(["human", "ai", "system", "tool", "function", "user", "assistant", "developer"]);
+
+// OpenAI messages carry `role`; LangChain/LangGraph carry `type` ("human"/"ai"/…). Normalize both.
+function msgRole(m: Record<string, unknown>): string {
+  const r = String(m.role ?? m.type ?? "").toLowerCase();
+  if (r === "human") return "user";
+  if (r === "ai") return "assistant";
+  return r;
+}
+function looksLikeMessage(m: unknown): m is Record<string, unknown> {
+  if (!m || typeof m !== "object") return false;
+  const o = m as Record<string, unknown>;
+  return "role" in o || MESSAGE_TYPES.has(String(o.type ?? "").toLowerCase());
+}
+// The messages inside a turn payload: the {messages:[…]} state wrapper, or a bare chat array. Returns
+// null for anything else (a single message, multimodal content blocks, plain text, data) so the
+// caller renders it verbatim.
+function messageList(parsed: unknown): Record<string, unknown>[] | null {
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const msgs = (parsed as Record<string, unknown>).messages;
+    if (Array.isArray(msgs)) return msgs.filter((m): m is Record<string, unknown> => !!m && typeof m === "object");
+  }
+  if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(looksLikeMessage)) return parsed as Record<string, unknown>[];
+  return null;
+}
+// The last message of `role`, normalized to {role, content, …} with content kept structured (so
+// multimodal parts/attachments still render). `undefined` ⇒ not a message-list shape (render
+// verbatim); `null` ⇒ a list with nothing from this side.
+function lastTurnMessage(raw: string | null, role: "user" | "assistant"): ChatMsg | null | undefined {
+  const list = messageList(parseMaybe(raw));
+  if (!list) return undefined;
+  let found: Record<string, unknown> | undefined;
+  for (const m of list) if (msgRole(m) === role) found = m;
+  if (!found) return null;
+  const kwargs = (found.kwargs ?? {}) as Record<string, unknown>; // LangChain "serialized" message form
+  return {
+    role,
+    content: found.content ?? kwargs.content,
+    tool_calls: found.tool_calls ?? kwargs.tool_calls,
+    finish_reason: found.finish_reason,
+  };
+}
+function TurnMessage({ raw, role }: { raw: string | null; role: "user" | "assistant" }) {
+  const msg = useMemo(() => lastTurnMessage(raw, role), [raw, role]);
+  if (msg === undefined) return <MessageContent raw={raw} />; // not a message list → render as-is
+  if (msg === null) return <span className="text-slate-500">—</span>;
+  const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+  if (calls.length > 0) return <ChatPill msgs={[msg]} />; // assistant tool call(s) → keep them visible
+  const c = msg.content;
+  if (c == null || c === "" || (Array.isArray(c) && c.length === 0)) return <span className="text-slate-500">—</span>;
+  // Render the content itself (not the {messages} blob): text clamps + expands; image/file parts
+  // become attachment chips — the multimodal object kept intact.
+  return <MessageContent raw={typeof c === "string" ? c : JSON.stringify(c)} />;
+}
+
 // ── badges ──────────────────────────────────────────────────────────────────────
 function RoleBadge({ role }: { role: "user" | "assistant" }) {
   const cls = role === "user" ? "bg-sky-500/10 text-sky-400 border-sky-500/30" : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
@@ -823,7 +911,7 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
       return ctx.level === "C" ? <ConvTitleCell conv={ctx.conv} /> : null;
     case "ctime":
       return ctx.level === "C"
-        ? <span className="font-mono text-xs text-slate-400">{fmtClock(ctx.conv.first_ts)}</span>
+        ? <span className="font-mono text-xs text-slate-400">{fmtDateTime(ctx.conv.first_ts)}</span>
         : null;
     case "cdur": {
       if (ctx.level !== "C") return null;
@@ -859,13 +947,13 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
     case "mindex":
       return ctx.level === "M" ? <span className="font-mono text-xs tabular-nums text-slate-500">{ctx.index}</span> : null;
     case "mtime":
-      return ctx.level === "M" ? <span className="font-mono text-xs text-slate-400">{fmtClock(ctx.turn.ts)}</span> : null;
+      return ctx.level === "M" ? <span className="font-mono text-xs text-slate-400">{fmtDateTime(ctx.turn.ts)}</span> : null;
     case "mdur":
       return ctx.level === "M" && ctx.role === "assistant"
         ? <span className="font-mono text-xs tabular-nums text-slate-400">{fmtMs(ctx.turn.latency_ms)}</span>
         : null;
     case "content":
-      return ctx.level === "M" ? <MessageContent raw={ctx.role === "user" ? ctx.turn.input : ctx.turn.output} /> : null;
+      return ctx.level === "M" ? <TurnMessage raw={ctx.role === "user" ? ctx.turn.input : ctx.turn.output} role={ctx.role} /> : null;
     case "musage":
       return ctx.level === "M" && ctx.role === "assistant" ? <UsageCell usage={turnUsage(ctx.turn)} /> : null;
     // S group
@@ -874,7 +962,7 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
     case "type":
       return ctx.level === "S" ? <TypeChip type={ctx.span.type} /> : null;
     case "stime":
-      return ctx.level === "S" ? <span className="font-mono text-xs text-slate-400">{fmtClock(ctx.span.start_time)}</span> : null;
+      return ctx.level === "S" ? <span className="font-mono text-xs text-slate-400">{fmtDateTime(ctx.span.start_time)}</span> : null;
     case "sdur":
       return ctx.level === "S" ? <span className="font-mono text-xs tabular-nums text-slate-400">{fmtMs(durationMs(ctx.span))}</span> : null;
     case "agent": {

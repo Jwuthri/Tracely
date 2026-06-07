@@ -45,7 +45,13 @@ export default async function TracePage({ params }: { params: Promise<{ traceId:
     tokens: totalTokens,
     cost: totalCost,
     first_ts: root?.start_time ?? "",
-    last_ts: root?.start_time ?? "",
+    // last_ts must be the trace's END (latest span end), not the root's start — otherwise the
+    // conversation row's duration (last_ts − first_ts) is always 0 and renders as "—".
+    last_ts:
+      spans.reduce((acc, s) => {
+        const e = s.end_time ?? s.start_time;
+        return new Date(e).getTime() > new Date(acc).getTime() ? e : acc;
+      }, root?.start_time ?? "") || (root?.start_time ?? ""),
     last_trace_id: traceId,
     failing: failing ? 1 : 0,
     turnsData: [turn],

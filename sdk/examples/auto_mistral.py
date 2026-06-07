@@ -36,7 +36,7 @@ def main() -> None:
 
     client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
     messages: list = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": QUESTION}]
-    with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
+    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
         for _ in range(5):
             resp = client.chat.complete(
                 model="mistral-large-latest", messages=messages, tools=OPENAI_TOOLS

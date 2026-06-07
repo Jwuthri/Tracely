@@ -7,6 +7,10 @@ summarizing. So each file shows a real tool-calling loop (plus thinking, in the 
 ones), not a toy single call. Each guards on its instrumentor + API key, printing setup hints instead
 of crashing when a dependency or key is missing.
 
+Every example also tags its run with its own filename via `tracely.trace(example=os.path.basename(__file__))`,
+so each span carries `tracely.metadata.example = <file>.py` — filter on it in the Tracely UI to find the
+traces a given example produced.
+
 ```bash
 pip install "tracely-sdk[<extra>]"     # the extra named in each file's header
 export TRACELY_API=http://localhost:8000           # your Tracely API (default shown)

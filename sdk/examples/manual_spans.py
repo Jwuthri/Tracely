@@ -24,10 +24,10 @@ tracely.init(endpoint=API, api_key=KEY, service_name="support-agent", env="prod"
 
 
 def main() -> None:
-    with tracely.agent(
+    with tracely.trace(example=os.path.basename(__file__)), tracely.agent(
         "support-agent",
         version="v3",
-        conversation="conv-1",
+        conversation=os.path.basename(__file__),
         turn=0,
         user="ada@example.com",
         trace_name="order + stock",

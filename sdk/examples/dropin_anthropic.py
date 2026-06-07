@@ -39,7 +39,7 @@ def main() -> None:
 
     client = Anthropic()
     messages: list = [{"role": "user", "content": QUESTION}]
-    with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
+    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
         for _ in range(5):
             resp = client.messages.create(
                 model="claude-3-5-sonnet-latest",

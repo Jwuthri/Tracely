@@ -8,11 +8,6 @@ dependencies = [
   "opentelemetry-exporter-otlp-proto-http>=1.25",
 ]
 
-# Auto-instrumentation extras (PRD 12 §9). `tracely.init("auto")` activates whichever instrumentor
-# is importable; each provider extra pulls the OpenInference (Arize) package by default. The
-# OpenLLMetry (Traceloop) instrumentors are an equivalent alternative — `init("auto")` detects them
-# too — install them via the `openllmetry` extra or directly. Pin/version-tracking policy is owned
-# per PRD §13 (conventions drift); floors below are conservative, not exhaustively pinned.
 [project.optional-dependencies]
 # frontier providers
 openai = ["openinference-instrumentation-openai>=0.1.0"]

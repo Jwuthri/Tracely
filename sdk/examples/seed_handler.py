@@ -16,7 +16,7 @@ KEY = os.environ.get("TRACELY_KEY", "tracely_dev_key")
 
 tracely.init(endpoint=API, api_key=KEY, service_name="handler", env="prod")
 
-with tracely.agent("handler") as a:
+with tracely.trace(example=os.path.basename(__file__)), tracely.agent("handler") as a:
     tracely.set_io(a, input="what's the weather in SF?", output="<crashed: unhandled tool error>")
     with tracely.llm("gpt-4o") as g:
         tracely.set_io(g, input="what's the weather in SF?", output="(calls get_weather)")

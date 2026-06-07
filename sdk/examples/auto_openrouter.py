@@ -60,7 +60,7 @@ def main() -> None:
     agent = create_agent(
         ChatOpenRouter(model=MODEL), tools=[get_order_status, check_inventory], system_prompt=SYSTEM
     )
-    with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
+    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
         result = agent.invoke({"messages": [{"role": "user", "content": QUESTION}]})
         print("agent:", result["messages"][-1].content)
 

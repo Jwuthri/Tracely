@@ -65,7 +65,7 @@ def main() -> None:
     graph.add_edge("tools", "model")
     app = graph.compile()
 
-    with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
+    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
         out = app.invoke({"messages": [{"role": "user", "content": QUESTION}]})
         print("agent:", out["messages"][-1].content)
 

@@ -37,7 +37,7 @@ def main() -> None:
     from google.genai import types
 
     client = genai.Client()
-    with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
+    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
         resp = client.models.generate_content(
             model="gemini-2.0-flash",
             contents=QUESTION,

@@ -43,6 +43,7 @@ async def run() -> None:
     from google.adk.runners import InMemoryRunner
     from google.genai import types
 
+    conv = os.path.basename(__file__)
     agent = Agent(
         name="support_agent",
         model="gemini-2.0-flash",
@@ -52,12 +53,12 @@ async def run() -> None:
     )
     runner = InMemoryRunner(agent=agent, app_name="store")
     await runner.session_service.create_session(
-        app_name="store", user_id="ada", session_id="conv-1"
+        app_name="store", user_id="ada", session_id=conv
     )
-    with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
+    with tracely.trace(agent="support-agent", conversation=conv, user="ada@example.com", example=conv):
         async for event in runner.run_async(
             user_id="ada",
-            session_id="conv-1",
+            session_id=conv,
             new_message=types.Content(role="user", parts=[types.Part(text=QUESTION)]),
         ):
             if event.is_final_response():

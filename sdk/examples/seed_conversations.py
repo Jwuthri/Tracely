@@ -781,17 +781,20 @@ def seed_faq():
 
 
 if __name__ == "__main__":
-    seed_rag()
-    seed_laptop()
-    seed_order_issue()
-    seed_multimodal()
-    seed_attachments()
-    seed_research()
-    seed_guardrail_block()
-    seed_tool_recovery()
-    seed_hallucination()
-    seed_missing_tool()
-    seed_faq()
+    # tag every seeded span with this file's name (tracely.metadata.example) so the demo
+    # conversations are filterable by their source in the UI
+    with tracely.trace(example=os.path.basename(__file__)):
+        seed_rag()
+        seed_laptop()
+        seed_order_issue()
+        seed_multimodal()
+        seed_attachments()
+        seed_research()
+        seed_guardrail_block()
+        seed_tool_recovery()
+        seed_hallucination()
+        seed_missing_tool()
+        seed_faq()
     tracely.flush()
     print(f"seeded {len(seeded)} conversations:")
     for line in seeded:

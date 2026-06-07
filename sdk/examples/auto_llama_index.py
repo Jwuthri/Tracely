@@ -42,7 +42,7 @@ def main() -> None:
     ]
     agent = ReActAgent.from_tools(tools, llm=LlamaOpenAI(model="gpt-4o-mini"), verbose=False)
 
-    with tracely.trace(agent="support-agent", conversation="conv-1", user="ada@example.com"):
+    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
         resp = agent.chat(QUESTION)
         print("agent:", resp)
 
