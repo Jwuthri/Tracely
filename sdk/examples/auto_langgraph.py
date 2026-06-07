@@ -41,6 +41,10 @@ def main() -> None:
     from langgraph.graph import START, MessagesState, StateGraph
     from langgraph.prebuilt import ToolNode, tools_condition
 
+    # LangGraph's ToolNode opens an OpenInference TOOL span via its callback handler — the
+    # instrumentor only captures the first positional arg as `input.value`, and the callback
+    # context isn't exposed to user code (so we can't stamp tracely.* attributes on it). Live
+    # with the partial capture here; for full tool I/O fidelity, see auto_openai_agents.py.
     @tool
     def get_order_status(order_id: str) -> dict:
         """Look up an order's delivery status and ETA by its order id."""

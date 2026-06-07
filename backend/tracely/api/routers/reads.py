@@ -104,7 +104,13 @@ async def list_sessions(limit: int = 50, project_id: str = Depends(get_project_i
         FROM (
           SELECT trace_id,
             max(conversation_id)                                          AS conv,
-            argMinIf(input, start_time, input != '')                      AS t_input,
+            -- Prefer the EARLIEST GENERATION input (carries the actual user message in the chat
+            -- array), fall back to the earliest non-empty input from any other span — so the
+            -- conversation title isn't pinned to framework internals like CrewAI's agent-config
+            -- payload or LlamaIndex's workflow-start event.
+            if(argMinIf(input, start_time, input != '' AND type = 'GENERATION') != '',
+               argMinIf(input, start_time, input != '' AND type = 'GENERATION'),
+               argMinIf(input, start_time, input != ''))                    AS t_input,
             -- Pick the LATEST GENERATION output as the run's answer (skip TOOL results and
             -- framework CHAIN router signals like LangGraph's `__end__`). Fall back to root, then
             -- to any non-TOOL non-CHAIN span.
@@ -201,7 +207,11 @@ async def get_session(thread_id: str, project_id: str = Depends(get_project_id))
         SELECT trace_id, input, output, tokens, input_tokens, output_tokens, model, cost, latency_ms, ts, failing FROM (
           SELECT trace_id,
             max(conversation_id)                                          AS conv,
-            argMinIf(input, start_time, input != '')                      AS input,
+            -- Prefer the EARLIEST GENERATION input (the actual user message) over framework
+            -- internals (CrewAI agent-config payload, LlamaIndex workflow state, etc.).
+            if(argMinIf(input, start_time, input != '' AND type = 'GENERATION') != '',
+               argMinIf(input, start_time, input != '' AND type = 'GENERATION'),
+               argMinIf(input, start_time, input != ''))                    AS input,
             -- Prefer the latest GENERATION output (skip TOOL + CHAIN router signals like
             -- LangGraph's `__end__`); fall back to root output, then any non-TOOL/non-CHAIN.
             if(argMaxIf(output, start_time, output != '' AND type = 'GENERATION') != '',

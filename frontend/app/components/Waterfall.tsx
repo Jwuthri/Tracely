@@ -1,14 +1,15 @@
 "use client";
 
 import clsx from "clsx";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SpanOut } from "../lib/api";
 import { spanMeta } from "../lib/meta";
+import { useHiddenTypes } from "../lib/typePrefs";
 import { CopyId } from "./CopyId";
 import { IO } from "./IO";
-import { HighlightedJson, prettyJson } from "./JsonView";
+import { JsonPill } from "./JsonView";
 import { IconError } from "./icons";
-import { Badge, TypeChip } from "./ui";
+import { Badge, normalizeType, TypeChip } from "./ui";
 
 const BAR: Record<string, string> = {
   AGENT: "bg-t_agent",
@@ -118,16 +119,57 @@ export function Waterfall({
   sel?: string | null;
   onSel?: (id: string) => void;
 }) {
-  const [internalSel, setInternalSel] = useState<string | null>(spans[0]?.span_id ?? null);
+  // Defer the initial selection to after the visibility filter has run — otherwise the default
+  // would be the first raw span, which may be hidden.
+  const [internalSel, setInternalSel] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
+  // Type filter — shared with the trace table via localStorage so hiding CHAIN (or any other
+  // step type) in either view applies to both.
+  const { hidden: hiddenTypes } = useHiddenTypes();
+  const visibleSpans = useMemo(
+    () => spans.filter((s) => !hiddenTypes.has(normalizeType(s.type))),
+    [spans, hiddenTypes],
+  );
   const ordered = useMemo(
-    () => [...spans].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()),
-    [spans],
+    () => [...visibleSpans].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()),
+    [visibleSpans],
   );
   const byId = useMemo(() => new Map(ordered.map((s) => [s.span_id, s])), [ordered]);
   const tl = useMemo(() => buildTimeline(ordered), [ordered]);
 
-  const sel = controlledSel !== undefined ? controlledSel : internalSel;
+  // Resizable split between the timeline (left) and the dense span-detail panel (right). Defaults to
+  // 70/30; drag the divider to favour either pane. `leftPct` is the left pane's flex-basis on lg+.
+  const [leftPct, setLeftPct] = useState(70);
+  const splitRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const el = splitRef.current;
+      if (!draggingRef.current || !el) return;
+      const rect = el.getBoundingClientRect();
+      const pct = ((e.clientX - rect.left) / rect.width) * 100;
+      setLeftPct(Math.min(80, Math.max(30, pct)));
+    };
+    const onUp = () => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+  const startDrag = () => {
+    draggingRef.current = true;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  };
+
+  const sel = controlledSel !== undefined ? controlledSel : (internalSel ?? ordered[0]?.span_id ?? null);
   const setSel = onSel ?? setInternalSel;
   if (ordered.length === 0) {
     return <div className="card p-8 text-center text-[13px] text-fg-faint">No spans in this trace.</div>;
@@ -138,8 +180,8 @@ export function Waterfall({
   const clampZoom = (z: number) => Math.min(8, Math.max(0.1, z));
 
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_360px]">
-      <div className="card overflow-hidden">
+    <div ref={splitRef} className="flex flex-col gap-5 lg:flex-row lg:gap-0">
+      <div className="card min-w-0 shrink-0 overflow-hidden" style={{ flexBasis: `${leftPct}%` }}>
         {/* toolbar: active span of the timeline + collapsed-gap note + zoom */}
         <div className="flex items-center justify-between gap-3 border-b border-line px-3 py-1.5">
           <span className="truncate font-mono text-[10px] text-fg-faint">
@@ -262,7 +304,21 @@ export function Waterfall({
         </div>
       </div>
 
-      <SpanPanel span={selected} />
+      {/* draggable divider (large screens only) — double-click resets to the 70/30 default */}
+      <div
+        onMouseDown={startDrag}
+        onDoubleClick={() => setLeftPct(70)}
+        role="separator"
+        aria-orientation="vertical"
+        title="Drag to resize · double-click to reset"
+        className="group relative hidden w-3 shrink-0 cursor-col-resize select-none lg:flex lg:items-center lg:justify-center"
+      >
+        <div className="h-16 w-[3px] rounded-full bg-line transition-colors group-hover:bg-signal/70" />
+      </div>
+
+      <div className="min-w-0 lg:flex-1">
+        <SpanPanel span={selected} />
+      </div>
     </div>
   );
 }
@@ -342,17 +398,12 @@ function SpanPanel({ span }: { span: SpanOut | null }) {
   );
 }
 
-// A single attribute value: JSON (object/array) is pretty-printed + syntax-highlighted; everything
-// else renders as plain text.
+// A single attribute value: JSON (object/array) renders as a clickable pill that opens the shared
+// floating JSON viewer (Copy + syntax highlight); everything else renders as plain text.
 function AttrValue({ value }: { value: string }) {
   const t = value.trim();
-  const pretty = t.startsWith("{") || t.startsWith("[") ? prettyJson(value) : null;
-  if (pretty && pretty !== value) {
-    return (
-      <pre className="min-w-0 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-slate-300">
-        <HighlightedJson text={pretty} />
-      </pre>
-    );
+  if (t.startsWith("{") || t.startsWith("[")) {
+    return <JsonPill raw={value} />;
   }
   return <span className="min-w-0 break-words font-mono text-fg-muted">{value || "—"}</span>;
 }

@@ -66,7 +66,6 @@ const TYPE: Record<string, string> = {
   TOOL: "text-t_tool",
   RETRIEVER: "text-t_retriever",
   THINKING: "text-violet-300",
-  REASONING: "text-violet-300",
 };
 const TYPE_DOT: Record<string, string> = {
   AGENT: "bg-t_agent",
@@ -76,11 +75,18 @@ const TYPE_DOT: Record<string, string> = {
   TOOL: "bg-t_tool",
   RETRIEVER: "bg-t_retriever",
   THINKING: "bg-violet-300",
-  REASONING: "bg-violet-300",
 };
 
+// Canonicalize synonym types for display + filtering. Mirrors backend/tracely/otel/mapping.py:
+// _TYPE_ALIASES, so backfilled REASONING rows render & filter together with THINKING.
+const TYPE_ALIASES: Record<string, string> = { REASONING: "THINKING" };
+export function normalizeType(type: string | null | undefined): string {
+  const up = (type || "STEP").toUpperCase();
+  return TYPE_ALIASES[up] ?? up;
+}
+
 export function TypeChip({ type, className }: { type: string; className?: string }) {
-  const t = (type || "STEP").toUpperCase();
+  const t = normalizeType(type);
   return (
     <span
       className={clsx(

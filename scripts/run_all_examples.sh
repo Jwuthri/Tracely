@@ -85,14 +85,24 @@ for f in "${EXAMPLES[@]}"; do
   rc=$?
   set -e
   elapsed=$(( $(date +%s) - start ))
-  if [[ $rc -ne 0 ]]; then
-    echo "${C_ERR}  ✗ failed (exit $rc, ${elapsed}s)${C_OFF}"
-    echo "$out" | tail -8 | sed 's/^/    /'
-    failed=$(( failed + 1 ))
-  elif echo "$out" | tail -3 | grep -qiE "Set .*_API_KEY|pip install|not active|needs"; then
+  # Detect a missing/expired credential or dep BEFORE the exit-code check, so a crashed example
+  # whose root cause is just "no creds" is counted as a skip instead of a real failure.
+  cred_skip=0
+  if echo "$out" | grep -qiE "UnauthorizedSSOTokenError|NoCredentialsError|ExpiredToken|aws sso login|InvalidApiKey|AuthenticationError|401 Unauthorized|ModuleNotFoundError"; then
+    cred_skip=1
+  fi
+  if echo "$out" | tail -3 | grep -qiE "Set .*_API_KEY|pip install|not active|needs"; then
     echo "${C_WARN}  ↷ skipped — ${elapsed}s${C_OFF}"
     echo "$out" | tail -2 | sed 's/^/    /'
     skipped=$(( skipped + 1 ))
+  elif [[ $cred_skip -eq 1 ]]; then
+    echo "${C_WARN}  ↷ skipped (creds/dep missing) — ${elapsed}s${C_OFF}"
+    echo "$out" | grep -iE "UnauthorizedSSOToken|NoCredentialsError|ExpiredToken|aws sso login|InvalidApiKey|AuthenticationError|401|ModuleNotFoundError" | head -1 | sed 's/^/    /'
+    skipped=$(( skipped + 1 ))
+  elif [[ $rc -ne 0 ]]; then
+    echo "${C_ERR}  ✗ failed (exit $rc, ${elapsed}s)${C_OFF}"
+    echo "$out" | tail -8 | sed 's/^/    /'
+    failed=$(( failed + 1 ))
   else
     echo "${C_OK}  ✓ ${elapsed}s${C_OFF}"
     echo "$out" | tail -1 | sed 's/^/    /'

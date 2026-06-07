@@ -13,8 +13,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import tracely_sdk as tracely
-
 # ── the "database" ───────────────────────────────────────────────────────────
 ORDERS: dict[str, dict[str, Any]] = {
     "ORD-4471": {
@@ -108,16 +106,6 @@ QUESTION = "Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-
 
 
 def run_tool(name: str, args: dict) -> dict:
-    """Dispatch a model-requested tool call to the fake DB — wraps each dispatch in a TOOL span so
-    provider-SDK examples (OpenAI/Anthropic/Mistral/Bedrock/LiteLLM) get a real TOOL in their trace
-    without per-example boilerplate. Framework examples (LangChain/LlamaIndex/CrewAI/agent-SDKs)
-    bypass this and use raw `get_order_status`/`check_inventory` directly, so the framework's own
-    tool-tracing isn't double-wrapped."""
+    """Dispatch a model-requested tool call to the fake DB."""
     fn = TOOL_IMPLS.get(name)
-    if not fn:
-        return {"error": f"unknown tool {name}"}
-    with tracely.tool(name) as span:
-        tracely.set_io(span, input=args)
-        result = fn(**args)
-        tracely.set_io(span, output=result)
-        return result
+    return fn(**args) if fn else {"error": f"unknown tool {name}"}

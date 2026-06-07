@@ -48,9 +48,6 @@ def main() -> None:
     from crewai import Agent, Crew, Task
     from crewai.tools import tool
 
-    # CrewAI's instrumentor doesn't emit per-tool spans, so we wrap with @observe(as_type="tool")
-    # to get TOOL spans (one per dispatch) into the trace tree. Function name == tool name so the
-    # tool_consistency eval matches the "requested" tools against the "executed" span names.
     @tool("get_order_status")
     @tracely.observe(as_type="tool")
     def get_order_status(order_id: str) -> str:
