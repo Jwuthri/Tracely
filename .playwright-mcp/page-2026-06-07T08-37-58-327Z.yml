@@ -1,0 +1,1339 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4]:
+      - img [ref=e6]
+      - generic [ref=e9]:
+        - generic [ref=e10]: Tracely
+        - generic [ref=e11]: trace-native ci/cd
+    - navigation [ref=e12]:
+      - generic [ref=e13]:
+        - generic [ref=e14]: Observe
+        - generic [ref=e15]:
+          - link "Dashboard" [ref=e16] [cursor=pointer]:
+            - /url: /
+            - img [ref=e17]
+            - text: Dashboard
+          - link "Traces" [ref=e22] [cursor=pointer]:
+            - /url: /traces
+            - img [ref=e24]
+            - text: Traces
+          - link "Trends" [ref=e26] [cursor=pointer]:
+            - /url: /trends
+            - img [ref=e27]
+            - text: Trends
+      - generic [ref=e30]:
+        - generic [ref=e31]: Triage
+        - link "Failure clusters" [ref=e33] [cursor=pointer]:
+          - /url: /clusters
+          - img [ref=e34]
+          - text: Failure clusters
+      - generic [ref=e37]:
+        - generic [ref=e38]: Test
+        - link "Regression cases" [ref=e40] [cursor=pointer]:
+          - /url: /cases
+          - img [ref=e41]
+          - text: Regression cases
+      - generic [ref=e44]:
+        - generic [ref=e45]: Ship
+        - link "CI gates" [ref=e47] [cursor=pointer]:
+          - /url: /gates
+          - img [ref=e48]
+          - text: CI gates
+    - generic [ref=e51]:
+      - generic [ref=e52]:
+        - generic [ref=e53]:
+          - generic [ref=e54]: default
+          - generic [ref=e55]: project
+        - generic [ref=e56]: prod
+      - generic [ref=e58]: v0.1.0 · MVP
+  - generic [ref=e59]:
+    - banner [ref=e60]:
+      - navigation [ref=e61]:
+        - link "Traces" [ref=e62] [cursor=pointer]:
+          - /url: /traces
+        - img [ref=e63]
+        - link "bcf0c7a8a930…" [ref=e65] [cursor=pointer]:
+          - /url: /traces/bcf0c7a8a930dc64f7face86299fddf4
+      - button "Search… ⌘K" [ref=e67] [cursor=pointer]:
+        - img [ref=e68]
+        - generic [ref=e71]: Search…
+        - generic [ref=e72]: ⌘K
+    - main [ref=e73]:
+      - generic [ref=e74]:
+        - generic [ref=e75]:
+          - link "Traces" [ref=e76] [cursor=pointer]:
+            - /url: /traces
+            - img [ref=e77]
+            - text: Traces
+          - generic [ref=e79]:
+            - generic [ref=e80]:
+              - generic [ref=e81]:
+                - heading "ReActAgent.run" [level=1] [ref=e82]
+                - generic [ref=e83]: failing
+              - generic [ref=e85]:
+                - button "…99fddf4" [ref=e86] [cursor=pointer]:
+                  - generic [ref=e87]: …99fddf4
+                  - img [ref=e88]
+                - generic [ref=e91]: 23 spans
+                - generic [ref=e92]: 4.14s
+                - generic [ref=e93]: 2,226 in
+                - generic [ref=e94]: 195 out
+                - generic [ref=e95]: 2,421 tokens
+                - generic [ref=e96]: $0.000450
+            - button "Promote to regression test" [ref=e97] [cursor=pointer]:
+              - img [ref=e98]
+              - text: Promote to regression test
+        - generic [ref=e100]:
+          - generic [ref=e101]:
+            - generic [ref=e102]:
+              - button "Table" [ref=e103] [cursor=pointer]: Table
+              - button "Timeline 23" [ref=e105] [cursor=pointer]:
+                - text: Timeline
+                - generic [ref=e106]: "23"
+              - button "Evaluations FAIL" [ref=e107] [cursor=pointer]:
+                - text: Evaluations
+                - generic [ref=e108]: FAIL
+            - button "Enlarge" [ref=e109] [cursor=pointer]:
+              - img [ref=e110]
+              - generic [ref=e115]: Enlarge
+          - generic [ref=e117]:
+            - generic [ref=e118]:
+              - button "Collapse All" [ref=e119] [cursor=pointer]:
+                - img [ref=e120]
+                - generic [ref=e123]: Collapse All
+              - button "Columns" [ref=e126] [cursor=pointer]:
+                - img [ref=e127]
+                - generic [ref=e130]: Columns
+            - table [ref=e132]:
+              - rowgroup [ref=e133]:
+                - 'row "Conversation C Datetime C Duration C Summary C Metadata C Usage C Role M # M Datetime M Duration M Content M Usage M # S Type S Datetime S Duration S Agent S Model S Name S Input S Output S Usage S" [ref=e134]':
+                  - columnheader [ref=e135]
+                  - columnheader [ref=e136]
+                  - columnheader [ref=e137]
+                  - columnheader "Conversation C" [ref=e138]:
+                    - generic [ref=e139]:
+                      - generic [ref=e140]: Conversation
+                      - generic [ref=e141]: C
+                  - columnheader "Datetime C" [ref=e142]:
+                    - generic [ref=e143]:
+                      - generic [ref=e144]: Datetime
+                      - generic [ref=e145]: C
+                  - columnheader "Duration C" [ref=e146]:
+                    - generic [ref=e147]:
+                      - generic [ref=e148]: Duration
+                      - generic [ref=e149]: C
+                  - columnheader "Summary C" [ref=e150]:
+                    - generic [ref=e151]:
+                      - generic [ref=e152]: Summary
+                      - generic [ref=e153]: C
+                  - columnheader "Metadata C" [ref=e154]:
+                    - generic [ref=e155]:
+                      - generic [ref=e156]: Metadata
+                      - generic [ref=e157]: C
+                  - columnheader "Usage C" [ref=e158]:
+                    - generic [ref=e159]:
+                      - generic [ref=e160]: Usage
+                      - generic [ref=e161]: C
+                  - columnheader "Role M" [ref=e162]:
+                    - generic [ref=e163]:
+                      - generic [ref=e164]: Role
+                      - generic [ref=e165]: M
+                  - columnheader "# M" [ref=e166]:
+                    - generic [ref=e167]:
+                      - generic [ref=e168]: "#"
+                      - generic [ref=e169]: M
+                  - columnheader "Datetime M" [ref=e170]:
+                    - generic [ref=e171]:
+                      - generic [ref=e172]: Datetime
+                      - generic [ref=e173]: M
+                  - columnheader "Duration M" [ref=e174]:
+                    - generic [ref=e175]:
+                      - generic [ref=e176]: Duration
+                      - generic [ref=e177]: M
+                  - columnheader "Content M" [ref=e178]:
+                    - generic [ref=e179]:
+                      - generic [ref=e180]: Content
+                      - generic [ref=e181]: M
+                  - columnheader "Usage M" [ref=e182]:
+                    - generic [ref=e183]:
+                      - generic [ref=e184]: Usage
+                      - generic [ref=e185]: M
+                  - columnheader "# S" [ref=e186]:
+                    - generic [ref=e187]:
+                      - generic [ref=e188]: "#"
+                      - generic [ref=e189]: S
+                  - columnheader "Type S" [ref=e190]:
+                    - generic [ref=e191]:
+                      - generic [ref=e192]: Type
+                      - generic [ref=e193]: S
+                  - columnheader "Datetime S" [ref=e194]:
+                    - generic [ref=e195]:
+                      - generic [ref=e196]: Datetime
+                      - generic [ref=e197]: S
+                  - columnheader "Duration S" [ref=e198]:
+                    - generic [ref=e199]:
+                      - generic [ref=e200]: Duration
+                      - generic [ref=e201]: S
+                  - columnheader "Agent S" [ref=e202]:
+                    - generic [ref=e203]:
+                      - generic [ref=e204]: Agent
+                      - generic [ref=e205]: S
+                  - columnheader "Model S" [ref=e206]:
+                    - generic [ref=e207]:
+                      - generic [ref=e208]: Model
+                      - generic [ref=e209]: S
+                  - columnheader "Name S" [ref=e210]:
+                    - generic [ref=e211]:
+                      - generic [ref=e212]: Name
+                      - generic [ref=e213]: S
+                  - columnheader "Input S" [ref=e214]:
+                    - generic [ref=e215]:
+                      - generic [ref=e216]: Input
+                      - generic [ref=e217]: S
+                  - columnheader "Output S" [ref=e218]:
+                    - generic [ref=e219]:
+                      - generic [ref=e220]: Output
+                      - generic [ref=e221]: S
+                  - columnheader "Usage S" [ref=e222]:
+                    - generic [ref=e223]:
+                      - generic [ref=e224]: Usage
+                      - generic [ref=e225]: S
+              - rowgroup [ref=e226]:
+                - 'row "Collapse AgentWorkflowStartEvent() 2026-06-07 08:35:07 4.14s assistant Thought: I can answer without using any mo… 2 { } example: \"auto_llama_index…\" 1 Σ 2,421 tok · $0.000450" [ref=e227] [cursor=pointer]':
+                  - cell "Collapse" [ref=e228]:
+                    - button "Collapse" [ref=e229]:
+                      - img [ref=e230]
+                  - cell [ref=e232]:
+                    - button "Run evaluations for this row" [ref=e233]:
+                      - img [ref=e234]
+                  - cell [ref=e236]:
+                    - button "View 1 agent" [ref=e237]:
+                      - img [ref=e238]
+                  - cell "AgentWorkflowStartEvent()" [ref=e241]:
+                    - link "AgentWorkflowStartEvent()" [ref=e242]:
+                      - /url: /traces/bcf0c7a8a930dc64f7face86299fddf4
+                      - generic [ref=e244]: AgentWorkflowStartEvent()
+                  - cell "2026-06-07 08:35:07" [ref=e245]
+                  - cell "4.14s" [ref=e246]
+                  - 'cell "assistant Thought: I can answer without using any mo… 2" [ref=e247]':
+                    - 'button "assistant Thought: I can answer without using any mo… 2" [ref=e248]':
+                      - img [ref=e250]
+                      - generic [ref=e253]:
+                        - generic [ref=e254]: assistant
+                        - generic [ref=e255]: "Thought: I can answer without using any mo…"
+                      - generic [ref=e256]: "2"
+                      - img [ref=e258]
+                  - 'cell "{ } example: \"auto_llama_index…\" 1" [ref=e260]':
+                    - 'button "{ } example: \"auto_llama_index…\" 1" [ref=e261]':
+                      - generic [ref=e263]: "{ }"
+                      - generic [ref=e265]:
+                        - generic [ref=e266]: "example:"
+                        - generic [ref=e267]: "\"auto_llama_index…\""
+                      - generic [ref=e268]: "1"
+                      - img [ref=e270]
+                  - cell "Σ 2,421 tok · $0.000450" [ref=e272]:
+                    - button "Σ 2,421 tok · $0.000450" [ref=e273]:
+                      - generic [ref=e275]: Σ
+                      - generic [ref=e276]: 2,421 tok · $0.000450
+                      - img [ref=e278]
+                  - cell [ref=e280]
+                  - cell [ref=e281]
+                  - cell [ref=e282]
+                  - cell [ref=e283]
+                  - cell [ref=e284]
+                  - cell [ref=e285]
+                  - cell [ref=e286]
+                  - cell [ref=e287]
+                  - cell [ref=e288]
+                  - cell [ref=e289]
+                  - cell [ref=e290]
+                  - cell [ref=e291]
+                  - cell [ref=e292]
+                  - cell [ref=e293]
+                  - cell [ref=e294]
+                  - cell [ref=e295]
+                - row "user 1 2026-06-07 08:35:07 user 1" [ref=e296] [cursor=pointer]:
+                  - cell [ref=e297]
+                  - cell [ref=e298]:
+                    - button "Run evaluations for this row" [ref=e299]:
+                      - img [ref=e300]
+                  - cell [ref=e302]
+                  - cell [ref=e303]
+                  - cell [ref=e304]
+                  - cell [ref=e305]
+                  - cell [ref=e306]
+                  - cell [ref=e307]
+                  - cell [ref=e308]
+                  - cell "user" [ref=e309]:
+                    - generic [ref=e311]: user
+                  - cell "1" [ref=e313]
+                  - cell "2026-06-07 08:35:07" [ref=e314]
+                  - cell [ref=e315]
+                  - cell "user 1" [ref=e316]:
+                    - button "user 1" [ref=e317]:
+                      - img [ref=e319]
+                      - generic [ref=e323]: user
+                      - generic [ref=e324]: "1"
+                      - img [ref=e326]
+                  - cell [ref=e328]
+                  - cell [ref=e329]
+                  - cell [ref=e330]
+                  - cell [ref=e331]
+                  - cell [ref=e332]
+                  - cell [ref=e333]
+                  - cell [ref=e334]
+                  - cell [ref=e335]
+                  - cell [ref=e336]
+                  - cell [ref=e337]
+                  - cell [ref=e338]
+                - 'row "Collapse failing assistant 2 2026-06-07 08:35:07 4.14s assistant Thought: I can answer without using any mo… 1 Σ 2,421 tok · $0.000450" [ref=e339] [cursor=pointer]':
+                  - cell "Collapse" [ref=e340]:
+                    - button "Collapse" [ref=e341]:
+                      - img [ref=e342]
+                  - cell [ref=e344]:
+                    - button "Run evaluations for this row" [ref=e345]:
+                      - img [ref=e346]
+                  - cell [ref=e348]
+                  - cell [ref=e349]
+                  - cell [ref=e350]
+                  - cell [ref=e351]
+                  - cell [ref=e352]
+                  - cell [ref=e353]
+                  - cell [ref=e354]
+                  - cell "failing assistant" [ref=e355]:
+                    - generic [ref=e356]:
+                      - generic "failing" [ref=e357]
+                      - generic [ref=e358]: assistant
+                  - cell "2" [ref=e360]
+                  - cell "2026-06-07 08:35:07" [ref=e361]
+                  - cell "4.14s" [ref=e362]
+                  - 'cell "assistant Thought: I can answer without using any mo… 1" [ref=e363]':
+                    - 'button "assistant Thought: I can answer without using any mo… 1" [ref=e364]':
+                      - img [ref=e366]
+                      - generic [ref=e369]:
+                        - generic [ref=e370]: assistant
+                        - generic [ref=e371]: "Thought: I can answer without using any mo…"
+                      - generic [ref=e372]: "1"
+                      - img [ref=e374]
+                  - cell "Σ 2,421 tok · $0.000450" [ref=e376]:
+                    - button "Σ 2,421 tok · $0.000450" [ref=e377]:
+                      - generic [ref=e379]: Σ
+                      - generic [ref=e380]: 2,421 tok · $0.000450
+                      - img [ref=e382]
+                  - cell [ref=e384]
+                  - cell [ref=e385]
+                  - cell [ref=e386]
+                  - cell [ref=e387]
+                  - cell [ref=e388]
+                  - cell [ref=e389]
+                  - cell [ref=e390]
+                  - cell [ref=e391]
+                  - cell [ref=e392]
+                  - cell [ref=e393]
+                - 'row "1 CHAIN 2026-06-07 08:35:07 4.14s support-agent ReActAgent.run { } init_state: \"{\"is_running\":fa…\" +2 3 StopEvent(result=AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Your order ORD-4471 is out for delivery... —" [ref=e394]':
+                  - cell [ref=e395]
+                  - cell [ref=e396]:
+                    - button "Run evaluations for this row" [ref=e397] [cursor=pointer]:
+                      - img [ref=e398]
+                  - cell [ref=e400]
+                  - cell [ref=e401]
+                  - cell [ref=e402]
+                  - cell [ref=e403]
+                  - cell [ref=e404]
+                  - cell [ref=e405]
+                  - cell [ref=e406]
+                  - cell [ref=e407]
+                  - cell [ref=e408]
+                  - cell [ref=e409]
+                  - cell [ref=e410]
+                  - cell [ref=e411]
+                  - cell [ref=e412]
+                  - cell "1" [ref=e413]
+                  - cell "CHAIN" [ref=e414]:
+                    - generic [ref=e415]: CHAIN
+                  - cell "2026-06-07 08:35:07" [ref=e417]
+                  - cell "4.14s" [ref=e418]
+                  - cell "support-agent" [ref=e419]:
+                    - generic "support-agent" [ref=e420]
+                  - cell [ref=e421]
+                  - cell "ReActAgent.run" [ref=e422]:
+                    - generic "ReActAgent.run" [ref=e423]
+                  - 'cell "{ } init_state: \"{\"is_running\":fa…\" +2 3" [ref=e424]':
+                    - 'button "{ } init_state: \"{\"is_running\":fa…\" +2 3" [ref=e425] [cursor=pointer]':
+                      - generic [ref=e427]: "{ }"
+                      - generic [ref=e429]:
+                        - generic [ref=e430]: "init_state:"
+                        - generic [ref=e431]: "\"{\"is_running\":fa…\""
+                        - generic [ref=e432]: "+2"
+                      - generic [ref=e433]: "3"
+                      - img [ref=e435]
+                  - 'cell "StopEvent(result=AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Your order ORD-4471 is out for delivery..." [ref=e437]':
+                    - 'button "StopEvent(result=AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Your order ORD-4471 is out for delivery..." [ref=e438] [cursor=pointer]':
+                      - img [ref=e439]
+                      - generic [ref=e441]: "StopEvent(result=AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: 'assistant'>, additional_kwargs={}, blocks=[TextBlock(block_type='text', text='Your order ORD-4471 is out for delivery..."
+                  - cell "—" [ref=e442]
+                - 'row "2 CHAIN 2026-06-07 08:35:07 116ms support-agent BaseWorkflowAgent.init_run { } ctx: \"<workflows.conte…\" +1 2 AgentInput(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0... —" [ref=e443]':
+                  - cell [ref=e444]
+                  - cell [ref=e445]:
+                    - button "Run evaluations for this row" [ref=e446] [cursor=pointer]:
+                      - img [ref=e447]
+                  - cell [ref=e449]
+                  - cell [ref=e450]
+                  - cell [ref=e451]
+                  - cell [ref=e452]
+                  - cell [ref=e453]
+                  - cell [ref=e454]
+                  - cell [ref=e455]
+                  - cell [ref=e456]
+                  - cell [ref=e457]
+                  - cell [ref=e458]
+                  - cell [ref=e459]
+                  - cell [ref=e460]
+                  - cell [ref=e461]
+                  - cell "2" [ref=e462]
+                  - cell "CHAIN" [ref=e463]:
+                    - generic [ref=e464]: CHAIN
+                  - cell "2026-06-07 08:35:07" [ref=e466]
+                  - cell "116ms" [ref=e467]
+                  - cell "support-agent" [ref=e468]:
+                    - generic "support-agent" [ref=e469]
+                  - cell [ref=e470]
+                  - cell "BaseWorkflowAgent.init_run" [ref=e471]:
+                    - generic "BaseWorkflowAgent.init_run" [ref=e472]
+                  - 'cell "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e473]':
+                    - 'button "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e474] [cursor=pointer]':
+                      - generic [ref=e476]: "{ }"
+                      - generic [ref=e478]:
+                        - generic [ref=e479]: "ctx:"
+                        - generic [ref=e480]: "\"<workflows.conte…\""
+                        - generic [ref=e481]: "+1"
+                      - generic [ref=e482]: "2"
+                      - img [ref=e484]
+                  - 'cell "AgentInput(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..." [ref=e486]':
+                    - 'button "AgentInput(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..." [ref=e487] [cursor=pointer]':
+                      - img [ref=e488]
+                      - generic [ref=e490]: "AgentInput(input=[ChatMessage(role=<MessageRole.USER: 'user'>, additional_kwargs={}, blocks=[TextBlock(block_type='text', text='Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..."
+                  - cell "—" [ref=e491]
+                - 'row "3 CHAIN 2026-06-07 08:35:07 0.36ms support-agent BaseWorkflowAgent.setup_agent { } ctx: \"<workflows.conte…\" +1 2 AgentSetup(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0... —" [ref=e492]':
+                  - cell [ref=e493]
+                  - cell [ref=e494]:
+                    - button "Run evaluations for this row" [ref=e495] [cursor=pointer]:
+                      - img [ref=e496]
+                  - cell [ref=e498]
+                  - cell [ref=e499]
+                  - cell [ref=e500]
+                  - cell [ref=e501]
+                  - cell [ref=e502]
+                  - cell [ref=e503]
+                  - cell [ref=e504]
+                  - cell [ref=e505]
+                  - cell [ref=e506]
+                  - cell [ref=e507]
+                  - cell [ref=e508]
+                  - cell [ref=e509]
+                  - cell [ref=e510]
+                  - cell "3" [ref=e511]
+                  - cell "CHAIN" [ref=e512]:
+                    - generic [ref=e513]: CHAIN
+                  - cell "2026-06-07 08:35:07" [ref=e515]
+                  - cell "0.36ms" [ref=e516]
+                  - cell "support-agent" [ref=e517]:
+                    - generic "support-agent" [ref=e518]
+                  - cell [ref=e519]
+                  - cell "BaseWorkflowAgent.setup_agent" [ref=e520]:
+                    - generic "BaseWorkflowAgent.setup_agent" [ref=e521]
+                  - 'cell "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e522]':
+                    - 'button "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e523] [cursor=pointer]':
+                      - generic [ref=e525]: "{ }"
+                      - generic [ref=e527]:
+                        - generic [ref=e528]: "ctx:"
+                        - generic [ref=e529]: "\"<workflows.conte…\""
+                        - generic [ref=e530]: "+1"
+                      - generic [ref=e531]: "2"
+                      - img [ref=e533]
+                  - 'cell "AgentSetup(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..." [ref=e535]':
+                    - 'button "AgentSetup(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..." [ref=e536] [cursor=pointer]':
+                      - img [ref=e537]
+                      - generic [ref=e539]: "AgentSetup(input=[ChatMessage(role=<MessageRole.USER: 'user'>, additional_kwargs={}, blocks=[TextBlock(block_type='text', text='Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..."
+                  - cell "—" [ref=e540]
+                - 'row "4 CHAIN 2026-06-07 08:35:07 1.39s support-agent BaseWorkflowAgent.run_agent_step { } ctx: \"<workflows.conte…\" +1 2 AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Thought: The current language of the user is: English. I... —" [ref=e541]':
+                  - cell [ref=e542]
+                  - cell [ref=e543]:
+                    - button "Run evaluations for this row" [ref=e544] [cursor=pointer]:
+                      - img [ref=e545]
+                  - cell [ref=e547]
+                  - cell [ref=e548]
+                  - cell [ref=e549]
+                  - cell [ref=e550]
+                  - cell [ref=e551]
+                  - cell [ref=e552]
+                  - cell [ref=e553]
+                  - cell [ref=e554]
+                  - cell [ref=e555]
+                  - cell [ref=e556]
+                  - cell [ref=e557]
+                  - cell [ref=e558]
+                  - cell [ref=e559]
+                  - cell "4" [ref=e560]
+                  - cell "CHAIN" [ref=e561]:
+                    - generic [ref=e562]: CHAIN
+                  - cell "2026-06-07 08:35:07" [ref=e564]
+                  - cell "1.39s" [ref=e565]
+                  - cell "support-agent" [ref=e566]:
+                    - generic "support-agent" [ref=e567]
+                  - cell [ref=e568]
+                  - cell "BaseWorkflowAgent.run_agent_step" [ref=e569]:
+                    - generic "BaseWorkflowAgent.run_agent_step" [ref=e570]
+                  - 'cell "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e571]':
+                    - 'button "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e572] [cursor=pointer]':
+                      - generic [ref=e574]: "{ }"
+                      - generic [ref=e576]:
+                        - generic [ref=e577]: "ctx:"
+                        - generic [ref=e578]: "\"<workflows.conte…\""
+                        - generic [ref=e579]: "+1"
+                      - generic [ref=e580]: "2"
+                      - img [ref=e582]
+                  - 'cell "AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Thought: The current language of the user is: English. I..." [ref=e584]':
+                    - 'button "AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Thought: The current language of the user is: English. I..." [ref=e585] [cursor=pointer]':
+                      - img [ref=e586]
+                      - generic [ref=e588]: "AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: 'assistant'>, additional_kwargs={}, blocks=[TextBlock(block_type='text', text='Thought: The current language of the user is: English. I..."
+                  - cell "—" [ref=e589]
+                - 'row "5 GENERATION 2026-06-07 08:35:07 1.38s support-agent gpt-4o-mini OpenAI.achat user Where is my order ORD-4471, and is the Alp… 2 assistant Thought: The current language of the user… 1 Σ 688 tok · $0.000125" [ref=e590]':
+                  - cell [ref=e591]
+                  - cell [ref=e592]:
+                    - button "Run evaluations for this row" [ref=e593] [cursor=pointer]:
+                      - img [ref=e594]
+                  - cell [ref=e596]
+                  - cell [ref=e597]
+                  - cell [ref=e598]
+                  - cell [ref=e599]
+                  - cell [ref=e600]
+                  - cell [ref=e601]
+                  - cell [ref=e602]
+                  - cell [ref=e603]
+                  - cell [ref=e604]
+                  - cell [ref=e605]
+                  - cell [ref=e606]
+                  - cell [ref=e607]
+                  - cell [ref=e608]
+                  - cell "5" [ref=e609]
+                  - cell "GENERATION" [ref=e610]:
+                    - generic [ref=e611]: GENERATION
+                  - cell "2026-06-07 08:35:07" [ref=e613]
+                  - cell "1.38s" [ref=e614]
+                  - cell "support-agent" [ref=e615]:
+                    - generic "support-agent" [ref=e616]
+                  - cell "gpt-4o-mini" [ref=e617]:
+                    - generic "gpt-4o-mini" [ref=e618]
+                  - cell "OpenAI.achat" [ref=e619]:
+                    - generic "OpenAI.achat" [ref=e620]
+                  - cell "user Where is my order ORD-4471, and is the Alp… 2" [ref=e621]:
+                    - button "user Where is my order ORD-4471, and is the Alp… 2" [ref=e622] [cursor=pointer]:
+                      - img [ref=e624]
+                      - generic [ref=e627]:
+                        - generic [ref=e628]: user
+                        - generic [ref=e629]: Where is my order ORD-4471, and is the Alp…
+                      - generic [ref=e630]: "2"
+                      - img [ref=e632]
+                  - 'cell "assistant Thought: The current language of the user… 1" [ref=e634]':
+                    - 'button "assistant Thought: The current language of the user… 1" [ref=e635] [cursor=pointer]':
+                      - img [ref=e637]
+                      - generic [ref=e640]:
+                        - generic [ref=e641]: assistant
+                        - generic [ref=e642]: "Thought: The current language of the user…"
+                      - generic [ref=e643]: "1"
+                      - img [ref=e645]
+                  - cell "Σ 688 tok · $0.000125" [ref=e647]:
+                    - button "Σ 688 tok · $0.000125" [ref=e648] [cursor=pointer]:
+                      - generic [ref=e650]: Σ
+                      - generic [ref=e651]: 688 tok · $0.000125
+                      - img [ref=e653]
+                - 'row "6 CHAIN 2026-06-07 08:35:08 4ms support-agent ReActOutputParser.parse { } output: \"Thought: The cur…\" +1 2 { } thought: \"The current lang…\" +2 3 —" [ref=e655]':
+                  - cell [ref=e656]
+                  - cell [ref=e657]:
+                    - button "Run evaluations for this row" [ref=e658] [cursor=pointer]:
+                      - img [ref=e659]
+                  - cell [ref=e661]
+                  - cell [ref=e662]
+                  - cell [ref=e663]
+                  - cell [ref=e664]
+                  - cell [ref=e665]
+                  - cell [ref=e666]
+                  - cell [ref=e667]
+                  - cell [ref=e668]
+                  - cell [ref=e669]
+                  - cell [ref=e670]
+                  - cell [ref=e671]
+                  - cell [ref=e672]
+                  - cell [ref=e673]
+                  - cell "6" [ref=e674]
+                  - cell "CHAIN" [ref=e675]:
+                    - generic [ref=e676]: CHAIN
+                  - cell "2026-06-07 08:35:08" [ref=e678]
+                  - cell "4ms" [ref=e679]
+                  - cell "support-agent" [ref=e680]:
+                    - generic "support-agent" [ref=e681]
+                  - cell [ref=e682]
+                  - cell "ReActOutputParser.parse" [ref=e683]:
+                    - generic "ReActOutputParser.parse" [ref=e684]
+                  - 'cell "{ } output: \"Thought: The cur…\" +1 2" [ref=e685]':
+                    - 'button "{ } output: \"Thought: The cur…\" +1 2" [ref=e686] [cursor=pointer]':
+                      - generic [ref=e688]: "{ }"
+                      - generic [ref=e690]:
+                        - generic [ref=e691]: "output:"
+                        - generic [ref=e692]: "\"Thought: The cur…\""
+                        - generic [ref=e693]: "+1"
+                      - generic [ref=e694]: "2"
+                      - img [ref=e696]
+                  - 'cell "{ } thought: \"The current lang…\" +2 3" [ref=e698]':
+                    - 'button "{ } thought: \"The current lang…\" +2 3" [ref=e699] [cursor=pointer]':
+                      - generic [ref=e701]: "{ }"
+                      - generic [ref=e703]:
+                        - generic [ref=e704]: "thought:"
+                        - generic [ref=e705]: "\"The current lang…\""
+                        - generic [ref=e706]: "+2"
+                      - generic [ref=e707]: "3"
+                      - img [ref=e709]
+                  - cell "—" [ref=e711]
+                - 'row "7 CHAIN 2026-06-07 08:35:08 0.35ms support-agent BaseWorkflowAgent.parse_agent_output { } ctx: \"<workflows.conte…\" +1 2 — —" [ref=e712]':
+                  - cell [ref=e713]
+                  - cell [ref=e714]:
+                    - button "Run evaluations for this row" [ref=e715] [cursor=pointer]:
+                      - img [ref=e716]
+                  - cell [ref=e718]
+                  - cell [ref=e719]
+                  - cell [ref=e720]
+                  - cell [ref=e721]
+                  - cell [ref=e722]
+                  - cell [ref=e723]
+                  - cell [ref=e724]
+                  - cell [ref=e725]
+                  - cell [ref=e726]
+                  - cell [ref=e727]
+                  - cell [ref=e728]
+                  - cell [ref=e729]
+                  - cell [ref=e730]
+                  - cell "7" [ref=e731]
+                  - cell "CHAIN" [ref=e732]:
+                    - generic [ref=e733]: CHAIN
+                  - cell "2026-06-07 08:35:08" [ref=e735]
+                  - cell "0.35ms" [ref=e736]
+                  - cell "support-agent" [ref=e737]:
+                    - generic "support-agent" [ref=e738]
+                  - cell [ref=e739]
+                  - cell "BaseWorkflowAgent.parse_agent_output" [ref=e740]:
+                    - generic "BaseWorkflowAgent.parse_agent_output" [ref=e741]
+                  - 'cell "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e742]':
+                    - 'button "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e743] [cursor=pointer]':
+                      - generic [ref=e745]: "{ }"
+                      - generic [ref=e747]:
+                        - generic [ref=e748]: "ctx:"
+                        - generic [ref=e749]: "\"<workflows.conte…\""
+                        - generic [ref=e750]: "+1"
+                      - generic [ref=e751]: "2"
+                      - img [ref=e753]
+                  - cell "—" [ref=e755]
+                  - cell "—" [ref=e756]
+                - 'row "8 CHAIN 2026-06-07 08:35:08 2ms support-agent BaseWorkflowAgent.call_tool { } ctx: \"<workflows.conte…\" +1 2 ToolCallResult(tool_name=''get_order_status'', tool_kwargs={''order_id'': ''ORD-4471''}, tool_id=''5ac88989-ea66-435d-9a46-ac2d6179b7db'', tool_output=ToolOutput(blocks=[TextBlock(block_type=''text'', text=\"... —" [ref=e757]':
+                  - cell [ref=e758]
+                  - cell [ref=e759]:
+                    - button "Run evaluations for this row" [ref=e760] [cursor=pointer]:
+                      - img [ref=e761]
+                  - cell [ref=e763]
+                  - cell [ref=e764]
+                  - cell [ref=e765]
+                  - cell [ref=e766]
+                  - cell [ref=e767]
+                  - cell [ref=e768]
+                  - cell [ref=e769]
+                  - cell [ref=e770]
+                  - cell [ref=e771]
+                  - cell [ref=e772]
+                  - cell [ref=e773]
+                  - cell [ref=e774]
+                  - cell [ref=e775]
+                  - cell "8" [ref=e776]
+                  - cell "CHAIN" [ref=e777]:
+                    - generic [ref=e778]: CHAIN
+                  - cell "2026-06-07 08:35:08" [ref=e780]
+                  - cell "2ms" [ref=e781]
+                  - cell "support-agent" [ref=e782]:
+                    - generic "support-agent" [ref=e783]
+                  - cell [ref=e784]
+                  - cell "BaseWorkflowAgent.call_tool" [ref=e785]:
+                    - generic "BaseWorkflowAgent.call_tool" [ref=e786]
+                  - 'cell "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e787]':
+                    - 'button "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e788] [cursor=pointer]':
+                      - generic [ref=e790]: "{ }"
+                      - generic [ref=e792]:
+                        - generic [ref=e793]: "ctx:"
+                        - generic [ref=e794]: "\"<workflows.conte…\""
+                        - generic [ref=e795]: "+1"
+                      - generic [ref=e796]: "2"
+                      - img [ref=e798]
+                  - 'cell "ToolCallResult(tool_name=''get_order_status'', tool_kwargs={''order_id'': ''ORD-4471''}, tool_id=''5ac88989-ea66-435d-9a46-ac2d6179b7db'', tool_output=ToolOutput(blocks=[TextBlock(block_type=''text'', text=\"..." [ref=e800]':
+                    - 'button "ToolCallResult(tool_name=''get_order_status'', tool_kwargs={''order_id'': ''ORD-4471''}, tool_id=''5ac88989-ea66-435d-9a46-ac2d6179b7db'', tool_output=ToolOutput(blocks=[TextBlock(block_type=''text'', text=\"..." [ref=e801] [cursor=pointer]':
+                      - img [ref=e802]
+                      - generic [ref=e804]: "ToolCallResult(tool_name='get_order_status', tool_kwargs={'order_id': 'ORD-4471'}, tool_id='5ac88989-ea66-435d-9a46-ac2d6179b7db', tool_output=ToolOutput(blocks=[TextBlock(block_type='text', text=\"..."
+                  - cell "—" [ref=e805]
+                - 'row "9 TOOL 2026-06-07 08:35:08 1ms support-agent get_order_status { } kwargs: \"{\"order_id\":\"ORD…\" 1 { } blocks: \"[{\"text\":\"{''stat…\" +4 5 —" [ref=e806]':
+                  - cell [ref=e807]
+                  - cell [ref=e808]:
+                    - button "Run evaluations for this row" [ref=e809] [cursor=pointer]:
+                      - img [ref=e810]
+                  - cell [ref=e812]
+                  - cell [ref=e813]
+                  - cell [ref=e814]
+                  - cell [ref=e815]
+                  - cell [ref=e816]
+                  - cell [ref=e817]
+                  - cell [ref=e818]
+                  - cell [ref=e819]
+                  - cell [ref=e820]
+                  - cell [ref=e821]
+                  - cell [ref=e822]
+                  - cell [ref=e823]
+                  - cell [ref=e824]
+                  - cell "9" [ref=e825]
+                  - cell "TOOL" [ref=e826]:
+                    - generic [ref=e827]: TOOL
+                  - cell "2026-06-07 08:35:08" [ref=e829]
+                  - cell "1ms" [ref=e830]
+                  - cell "support-agent" [ref=e831]:
+                    - generic "support-agent" [ref=e832]
+                  - cell [ref=e833]
+                  - cell "get_order_status" [ref=e834]:
+                    - generic "get_order_status" [ref=e835]
+                  - 'cell "{ } kwargs: \"{\"order_id\":\"ORD…\" 1" [ref=e836]':
+                    - 'button "{ } kwargs: \"{\"order_id\":\"ORD…\" 1" [ref=e837] [cursor=pointer]':
+                      - generic [ref=e839]: "{ }"
+                      - generic [ref=e841]:
+                        - generic [ref=e842]: "kwargs:"
+                        - generic [ref=e843]: "\"{\"order_id\":\"ORD…\""
+                      - generic [ref=e844]: "1"
+                      - img [ref=e846]
+                  - 'cell "{ } blocks: \"[{\"text\":\"{''stat…\" +4 5" [ref=e848]':
+                    - 'button "{ } blocks: \"[{\"text\":\"{''stat…\" +4 5" [ref=e849] [cursor=pointer]':
+                      - generic [ref=e851]: "{ }"
+                      - generic [ref=e853]:
+                        - generic [ref=e854]: "blocks:"
+                        - generic [ref=e855]: "\"[{\"text\":\"{'stat…\""
+                        - generic [ref=e856]: "+4"
+                      - generic [ref=e857]: "5"
+                      - img [ref=e859]
+                  - cell "—" [ref=e861]
+                - 'row "10 CHAIN 2026-06-07 08:35:09 0.58ms support-agent BaseWorkflowAgent.aggregate_tool_results { } ctx: \"<workflows.conte…\" +1 2 AgentInput(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0... —" [ref=e862]':
+                  - cell [ref=e863]
+                  - cell [ref=e864]:
+                    - button "Run evaluations for this row" [ref=e865] [cursor=pointer]:
+                      - img [ref=e866]
+                  - cell [ref=e868]
+                  - cell [ref=e869]
+                  - cell [ref=e870]
+                  - cell [ref=e871]
+                  - cell [ref=e872]
+                  - cell [ref=e873]
+                  - cell [ref=e874]
+                  - cell [ref=e875]
+                  - cell [ref=e876]
+                  - cell [ref=e877]
+                  - cell [ref=e878]
+                  - cell [ref=e879]
+                  - cell [ref=e880]
+                  - cell "10" [ref=e881]
+                  - cell "CHAIN" [ref=e882]:
+                    - generic [ref=e883]: CHAIN
+                  - cell "2026-06-07 08:35:09" [ref=e885]
+                  - cell "0.58ms" [ref=e886]
+                  - cell "support-agent" [ref=e887]:
+                    - generic "support-agent" [ref=e888]
+                  - cell [ref=e889]
+                  - cell "BaseWorkflowAgent.aggregate_tool_results" [ref=e890]:
+                    - generic "BaseWorkflowAgent.aggregate_tool_results" [ref=e891]
+                  - 'cell "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e892]':
+                    - 'button "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e893] [cursor=pointer]':
+                      - generic [ref=e895]: "{ }"
+                      - generic [ref=e897]:
+                        - generic [ref=e898]: "ctx:"
+                        - generic [ref=e899]: "\"<workflows.conte…\""
+                        - generic [ref=e900]: "+1"
+                      - generic [ref=e901]: "2"
+                      - img [ref=e903]
+                  - 'cell "AgentInput(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..." [ref=e905]':
+                    - 'button "AgentInput(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..." [ref=e906] [cursor=pointer]':
+                      - img [ref=e907]
+                      - generic [ref=e909]: "AgentInput(input=[ChatMessage(role=<MessageRole.USER: 'user'>, additional_kwargs={}, blocks=[TextBlock(block_type='text', text='Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..."
+                  - cell "—" [ref=e910]
+                - 'row "11 CHAIN 2026-06-07 08:35:09 0.24ms support-agent BaseWorkflowAgent.setup_agent { } ctx: \"<workflows.conte…\" +1 2 AgentSetup(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0... —" [ref=e911]':
+                  - cell [ref=e912]
+                  - cell [ref=e913]:
+                    - button "Run evaluations for this row" [ref=e914] [cursor=pointer]:
+                      - img [ref=e915]
+                  - cell [ref=e917]
+                  - cell [ref=e918]
+                  - cell [ref=e919]
+                  - cell [ref=e920]
+                  - cell [ref=e921]
+                  - cell [ref=e922]
+                  - cell [ref=e923]
+                  - cell [ref=e924]
+                  - cell [ref=e925]
+                  - cell [ref=e926]
+                  - cell [ref=e927]
+                  - cell [ref=e928]
+                  - cell [ref=e929]
+                  - cell "11" [ref=e930]
+                  - cell "CHAIN" [ref=e931]:
+                    - generic [ref=e932]: CHAIN
+                  - cell "2026-06-07 08:35:09" [ref=e934]
+                  - cell "0.24ms" [ref=e935]
+                  - cell "support-agent" [ref=e936]:
+                    - generic "support-agent" [ref=e937]
+                  - cell [ref=e938]
+                  - cell "BaseWorkflowAgent.setup_agent" [ref=e939]:
+                    - generic "BaseWorkflowAgent.setup_agent" [ref=e940]
+                  - 'cell "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e941]':
+                    - 'button "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e942] [cursor=pointer]':
+                      - generic [ref=e944]: "{ }"
+                      - generic [ref=e946]:
+                        - generic [ref=e947]: "ctx:"
+                        - generic [ref=e948]: "\"<workflows.conte…\""
+                        - generic [ref=e949]: "+1"
+                      - generic [ref=e950]: "2"
+                      - img [ref=e952]
+                  - 'cell "AgentSetup(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..." [ref=e954]':
+                    - 'button "AgentSetup(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..." [ref=e955] [cursor=pointer]':
+                      - img [ref=e956]
+                      - generic [ref=e958]: "AgentSetup(input=[ChatMessage(role=<MessageRole.USER: 'user'>, additional_kwargs={}, blocks=[TextBlock(block_type='text', text='Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..."
+                  - cell "—" [ref=e959]
+                - 'row "12 CHAIN 2026-06-07 08:35:09 1.37s support-agent BaseWorkflowAgent.run_agent_step { } ctx: \"<workflows.conte…\" +1 2 AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=\"Thought: I have the order status information. The order ... —" [ref=e960]':
+                  - cell [ref=e961]
+                  - cell [ref=e962]:
+                    - button "Run evaluations for this row" [ref=e963] [cursor=pointer]:
+                      - img [ref=e964]
+                  - cell [ref=e966]
+                  - cell [ref=e967]
+                  - cell [ref=e968]
+                  - cell [ref=e969]
+                  - cell [ref=e970]
+                  - cell [ref=e971]
+                  - cell [ref=e972]
+                  - cell [ref=e973]
+                  - cell [ref=e974]
+                  - cell [ref=e975]
+                  - cell [ref=e976]
+                  - cell [ref=e977]
+                  - cell [ref=e978]
+                  - cell "12" [ref=e979]
+                  - cell "CHAIN" [ref=e980]:
+                    - generic [ref=e981]: CHAIN
+                  - cell "2026-06-07 08:35:09" [ref=e983]
+                  - cell "1.37s" [ref=e984]
+                  - cell "support-agent" [ref=e985]:
+                    - generic "support-agent" [ref=e986]
+                  - cell [ref=e987]
+                  - cell "BaseWorkflowAgent.run_agent_step" [ref=e988]:
+                    - generic "BaseWorkflowAgent.run_agent_step" [ref=e989]
+                  - 'cell "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e990]':
+                    - 'button "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e991] [cursor=pointer]':
+                      - generic [ref=e993]: "{ }"
+                      - generic [ref=e995]:
+                        - generic [ref=e996]: "ctx:"
+                        - generic [ref=e997]: "\"<workflows.conte…\""
+                        - generic [ref=e998]: "+1"
+                      - generic [ref=e999]: "2"
+                      - img [ref=e1001]
+                  - 'cell "AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=\"Thought: I have the order status information. The order ..." [ref=e1003]':
+                    - 'button "AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=\"Thought: I have the order status information. The order ..." [ref=e1004] [cursor=pointer]':
+                      - img [ref=e1005]
+                      - generic [ref=e1007]: "AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: 'assistant'>, additional_kwargs={}, blocks=[TextBlock(block_type='text', text=\"Thought: I have the order status information. The order ..."
+                  - cell "—" [ref=e1008]
+                - 'row "13 GENERATION 2026-06-07 08:35:09 1.37s support-agent gpt-4o-mini OpenAI.achat user Observation: {''status'': ''out_for_delivery''… 4 assistant Thought: I have the order status informati… 1 Σ 814 tok · $0.000157" [ref=e1009]':
+                  - cell [ref=e1010]
+                  - cell [ref=e1011]:
+                    - button "Run evaluations for this row" [ref=e1012] [cursor=pointer]:
+                      - img [ref=e1013]
+                  - cell [ref=e1015]
+                  - cell [ref=e1016]
+                  - cell [ref=e1017]
+                  - cell [ref=e1018]
+                  - cell [ref=e1019]
+                  - cell [ref=e1020]
+                  - cell [ref=e1021]
+                  - cell [ref=e1022]
+                  - cell [ref=e1023]
+                  - cell [ref=e1024]
+                  - cell [ref=e1025]
+                  - cell [ref=e1026]
+                  - cell [ref=e1027]
+                  - cell "13" [ref=e1028]
+                  - cell "GENERATION" [ref=e1029]:
+                    - generic [ref=e1030]: GENERATION
+                  - cell "2026-06-07 08:35:09" [ref=e1032]
+                  - cell "1.37s" [ref=e1033]
+                  - cell "support-agent" [ref=e1034]:
+                    - generic "support-agent" [ref=e1035]
+                  - cell "gpt-4o-mini" [ref=e1036]:
+                    - generic "gpt-4o-mini" [ref=e1037]
+                  - cell "OpenAI.achat" [ref=e1038]:
+                    - generic "OpenAI.achat" [ref=e1039]
+                  - 'cell "user Observation: {''status'': ''out_for_delivery''… 4" [ref=e1040]':
+                    - 'button "user Observation: {''status'': ''out_for_delivery''… 4" [ref=e1041] [cursor=pointer]':
+                      - img [ref=e1043]
+                      - generic [ref=e1046]:
+                        - generic [ref=e1047]: user
+                        - generic [ref=e1048]: "Observation: {'status': 'out_for_delivery'…"
+                      - generic [ref=e1049]: "4"
+                      - img [ref=e1051]
+                  - 'cell "assistant Thought: I have the order status informati… 1" [ref=e1053]':
+                    - 'button "assistant Thought: I have the order status informati… 1" [ref=e1054] [cursor=pointer]':
+                      - img [ref=e1056]
+                      - generic [ref=e1059]:
+                        - generic [ref=e1060]: assistant
+                        - generic [ref=e1061]: "Thought: I have the order status informati…"
+                      - generic [ref=e1062]: "1"
+                      - img [ref=e1064]
+                  - cell "Σ 814 tok · $0.000157" [ref=e1066]:
+                    - button "Σ 814 tok · $0.000157" [ref=e1067] [cursor=pointer]:
+                      - generic [ref=e1069]: Σ
+                      - generic [ref=e1070]: 814 tok · $0.000157
+                      - img [ref=e1072]
+                - 'row "14 CHAIN 2026-06-07 08:35:10 0.28ms support-agent ReActOutputParser.parse { } output: \"Thought: I have …\" +1 2 { } thought: \"I have the order…\" +2 3 —" [ref=e1074]':
+                  - cell [ref=e1075]
+                  - cell [ref=e1076]:
+                    - button "Run evaluations for this row" [ref=e1077] [cursor=pointer]:
+                      - img [ref=e1078]
+                  - cell [ref=e1080]
+                  - cell [ref=e1081]
+                  - cell [ref=e1082]
+                  - cell [ref=e1083]
+                  - cell [ref=e1084]
+                  - cell [ref=e1085]
+                  - cell [ref=e1086]
+                  - cell [ref=e1087]
+                  - cell [ref=e1088]
+                  - cell [ref=e1089]
+                  - cell [ref=e1090]
+                  - cell [ref=e1091]
+                  - cell [ref=e1092]
+                  - cell "14" [ref=e1093]
+                  - cell "CHAIN" [ref=e1094]:
+                    - generic [ref=e1095]: CHAIN
+                  - cell "2026-06-07 08:35:10" [ref=e1097]
+                  - cell "0.28ms" [ref=e1098]
+                  - cell "support-agent" [ref=e1099]:
+                    - generic "support-agent" [ref=e1100]
+                  - cell [ref=e1101]
+                  - cell "ReActOutputParser.parse" [ref=e1102]:
+                    - generic "ReActOutputParser.parse" [ref=e1103]
+                  - 'cell "{ } output: \"Thought: I have …\" +1 2" [ref=e1104]':
+                    - 'button "{ } output: \"Thought: I have …\" +1 2" [ref=e1105] [cursor=pointer]':
+                      - generic [ref=e1107]: "{ }"
+                      - generic [ref=e1109]:
+                        - generic [ref=e1110]: "output:"
+                        - generic [ref=e1111]: "\"Thought: I have …\""
+                        - generic [ref=e1112]: "+1"
+                      - generic [ref=e1113]: "2"
+                      - img [ref=e1115]
+                  - 'cell "{ } thought: \"I have the order…\" +2 3" [ref=e1117]':
+                    - 'button "{ } thought: \"I have the order…\" +2 3" [ref=e1118] [cursor=pointer]':
+                      - generic [ref=e1120]: "{ }"
+                      - generic [ref=e1122]:
+                        - generic [ref=e1123]: "thought:"
+                        - generic [ref=e1124]: "\"I have the order…\""
+                        - generic [ref=e1125]: "+2"
+                      - generic [ref=e1126]: "3"
+                      - img [ref=e1128]
+                  - cell "—" [ref=e1130]
+                - 'row "15 CHAIN 2026-06-07 08:35:10 0.32ms support-agent BaseWorkflowAgent.parse_agent_output { } ctx: \"<workflows.conte…\" +1 2 — —" [ref=e1131]':
+                  - cell [ref=e1132]
+                  - cell [ref=e1133]:
+                    - button "Run evaluations for this row" [ref=e1134] [cursor=pointer]:
+                      - img [ref=e1135]
+                  - cell [ref=e1137]
+                  - cell [ref=e1138]
+                  - cell [ref=e1139]
+                  - cell [ref=e1140]
+                  - cell [ref=e1141]
+                  - cell [ref=e1142]
+                  - cell [ref=e1143]
+                  - cell [ref=e1144]
+                  - cell [ref=e1145]
+                  - cell [ref=e1146]
+                  - cell [ref=e1147]
+                  - cell [ref=e1148]
+                  - cell [ref=e1149]
+                  - cell "15" [ref=e1150]
+                  - cell "CHAIN" [ref=e1151]:
+                    - generic [ref=e1152]: CHAIN
+                  - cell "2026-06-07 08:35:10" [ref=e1154]
+                  - cell "0.32ms" [ref=e1155]
+                  - cell "support-agent" [ref=e1156]:
+                    - generic "support-agent" [ref=e1157]
+                  - cell [ref=e1158]
+                  - cell "BaseWorkflowAgent.parse_agent_output" [ref=e1159]:
+                    - generic "BaseWorkflowAgent.parse_agent_output" [ref=e1160]
+                  - 'cell "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e1161]':
+                    - 'button "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e1162] [cursor=pointer]':
+                      - generic [ref=e1164]: "{ }"
+                      - generic [ref=e1166]:
+                        - generic [ref=e1167]: "ctx:"
+                        - generic [ref=e1168]: "\"<workflows.conte…\""
+                        - generic [ref=e1169]: "+1"
+                      - generic [ref=e1170]: "2"
+                      - img [ref=e1172]
+                  - cell "—" [ref=e1174]
+                  - cell "—" [ref=e1175]
+                - 'row "16 CHAIN 2026-06-07 08:35:10 2ms support-agent BaseWorkflowAgent.call_tool { } ctx: \"<workflows.conte…\" +1 2 ToolCallResult(tool_name=''check_inventory'', tool_kwargs={''sku'': ''SKU-COAT-01''}, tool_id=''cf97fd35-c861-4293-b1ac-50c8fb17827b'', tool_output=ToolOutput(blocks=[TextBlock(block_type=''text'', text=\"{''n... —" [ref=e1176]':
+                  - cell [ref=e1177]
+                  - cell [ref=e1178]:
+                    - button "Run evaluations for this row" [ref=e1179] [cursor=pointer]:
+                      - img [ref=e1180]
+                  - cell [ref=e1182]
+                  - cell [ref=e1183]
+                  - cell [ref=e1184]
+                  - cell [ref=e1185]
+                  - cell [ref=e1186]
+                  - cell [ref=e1187]
+                  - cell [ref=e1188]
+                  - cell [ref=e1189]
+                  - cell [ref=e1190]
+                  - cell [ref=e1191]
+                  - cell [ref=e1192]
+                  - cell [ref=e1193]
+                  - cell [ref=e1194]
+                  - cell "16" [ref=e1195]
+                  - cell "CHAIN" [ref=e1196]:
+                    - generic [ref=e1197]: CHAIN
+                  - cell "2026-06-07 08:35:10" [ref=e1199]
+                  - cell "2ms" [ref=e1200]
+                  - cell "support-agent" [ref=e1201]:
+                    - generic "support-agent" [ref=e1202]
+                  - cell [ref=e1203]
+                  - cell "BaseWorkflowAgent.call_tool" [ref=e1204]:
+                    - generic "BaseWorkflowAgent.call_tool" [ref=e1205]
+                  - 'cell "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e1206]':
+                    - 'button "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e1207] [cursor=pointer]':
+                      - generic [ref=e1209]: "{ }"
+                      - generic [ref=e1211]:
+                        - generic [ref=e1212]: "ctx:"
+                        - generic [ref=e1213]: "\"<workflows.conte…\""
+                        - generic [ref=e1214]: "+1"
+                      - generic [ref=e1215]: "2"
+                      - img [ref=e1217]
+                  - 'cell "ToolCallResult(tool_name=''check_inventory'', tool_kwargs={''sku'': ''SKU-COAT-01''}, tool_id=''cf97fd35-c861-4293-b1ac-50c8fb17827b'', tool_output=ToolOutput(blocks=[TextBlock(block_type=''text'', text=\"{''n..." [ref=e1219]':
+                    - 'button "ToolCallResult(tool_name=''check_inventory'', tool_kwargs={''sku'': ''SKU-COAT-01''}, tool_id=''cf97fd35-c861-4293-b1ac-50c8fb17827b'', tool_output=ToolOutput(blocks=[TextBlock(block_type=''text'', text=\"{''n..." [ref=e1220] [cursor=pointer]':
+                      - img [ref=e1221]
+                      - generic [ref=e1223]: "ToolCallResult(tool_name='check_inventory', tool_kwargs={'sku': 'SKU-COAT-01'}, tool_id='cf97fd35-c861-4293-b1ac-50c8fb17827b', tool_output=ToolOutput(blocks=[TextBlock(block_type='text', text=\"{'n..."
+                  - cell "—" [ref=e1224]
+                - 'row "17 TOOL 2026-06-07 08:35:10 1ms support-agent check_inventory { } kwargs: \"{\"sku\":\"SKU-COAT…\" 1 { } blocks: \"[{\"text\":\"{''name…\" +4 5 —" [ref=e1225]':
+                  - cell [ref=e1226]
+                  - cell [ref=e1227]:
+                    - button "Run evaluations for this row" [ref=e1228] [cursor=pointer]:
+                      - img [ref=e1229]
+                  - cell [ref=e1231]
+                  - cell [ref=e1232]
+                  - cell [ref=e1233]
+                  - cell [ref=e1234]
+                  - cell [ref=e1235]
+                  - cell [ref=e1236]
+                  - cell [ref=e1237]
+                  - cell [ref=e1238]
+                  - cell [ref=e1239]
+                  - cell [ref=e1240]
+                  - cell [ref=e1241]
+                  - cell [ref=e1242]
+                  - cell [ref=e1243]
+                  - cell "17" [ref=e1244]
+                  - cell "TOOL" [ref=e1245]:
+                    - generic [ref=e1246]: TOOL
+                  - cell "2026-06-07 08:35:10" [ref=e1248]
+                  - cell "1ms" [ref=e1249]
+                  - cell "support-agent" [ref=e1250]:
+                    - generic "support-agent" [ref=e1251]
+                  - cell [ref=e1252]
+                  - cell "check_inventory" [ref=e1253]:
+                    - generic "check_inventory" [ref=e1254]
+                  - 'cell "{ } kwargs: \"{\"sku\":\"SKU-COAT…\" 1" [ref=e1255]':
+                    - 'button "{ } kwargs: \"{\"sku\":\"SKU-COAT…\" 1" [ref=e1256] [cursor=pointer]':
+                      - generic [ref=e1258]: "{ }"
+                      - generic [ref=e1260]:
+                        - generic [ref=e1261]: "kwargs:"
+                        - generic [ref=e1262]: "\"{\"sku\":\"SKU-COAT…\""
+                      - generic [ref=e1263]: "1"
+                      - img [ref=e1265]
+                  - 'cell "{ } blocks: \"[{\"text\":\"{''name…\" +4 5" [ref=e1267]':
+                    - 'button "{ } blocks: \"[{\"text\":\"{''name…\" +4 5" [ref=e1268] [cursor=pointer]':
+                      - generic [ref=e1270]: "{ }"
+                      - generic [ref=e1272]:
+                        - generic [ref=e1273]: "blocks:"
+                        - generic [ref=e1274]: "\"[{\"text\":\"{'name…\""
+                        - generic [ref=e1275]: "+4"
+                      - generic [ref=e1276]: "5"
+                      - img [ref=e1278]
+                  - cell "—" [ref=e1280]
+                - 'row "18 CHAIN 2026-06-07 08:35:10 0.54ms support-agent BaseWorkflowAgent.aggregate_tool_results { } ctx: \"<workflows.conte…\" +1 2 AgentInput(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0... —" [ref=e1281]':
+                  - cell [ref=e1282]
+                  - cell [ref=e1283]:
+                    - button "Run evaluations for this row" [ref=e1284] [cursor=pointer]:
+                      - img [ref=e1285]
+                  - cell [ref=e1287]
+                  - cell [ref=e1288]
+                  - cell [ref=e1289]
+                  - cell [ref=e1290]
+                  - cell [ref=e1291]
+                  - cell [ref=e1292]
+                  - cell [ref=e1293]
+                  - cell [ref=e1294]
+                  - cell [ref=e1295]
+                  - cell [ref=e1296]
+                  - cell [ref=e1297]
+                  - cell [ref=e1298]
+                  - cell [ref=e1299]
+                  - cell "18" [ref=e1300]
+                  - cell "CHAIN" [ref=e1301]:
+                    - generic [ref=e1302]: CHAIN
+                  - cell "2026-06-07 08:35:10" [ref=e1304]
+                  - cell "0.54ms" [ref=e1305]
+                  - cell "support-agent" [ref=e1306]:
+                    - generic "support-agent" [ref=e1307]
+                  - cell [ref=e1308]
+                  - cell "BaseWorkflowAgent.aggregate_tool_results" [ref=e1309]:
+                    - generic "BaseWorkflowAgent.aggregate_tool_results" [ref=e1310]
+                  - 'cell "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e1311]':
+                    - 'button "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e1312] [cursor=pointer]':
+                      - generic [ref=e1314]: "{ }"
+                      - generic [ref=e1316]:
+                        - generic [ref=e1317]: "ctx:"
+                        - generic [ref=e1318]: "\"<workflows.conte…\""
+                        - generic [ref=e1319]: "+1"
+                      - generic [ref=e1320]: "2"
+                      - img [ref=e1322]
+                  - 'cell "AgentInput(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..." [ref=e1324]':
+                    - 'button "AgentInput(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..." [ref=e1325] [cursor=pointer]':
+                      - img [ref=e1326]
+                      - generic [ref=e1328]: "AgentInput(input=[ChatMessage(role=<MessageRole.USER: 'user'>, additional_kwargs={}, blocks=[TextBlock(block_type='text', text='Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..."
+                  - cell "—" [ref=e1329]
+                - 'row "19 CHAIN 2026-06-07 08:35:10 0.26ms support-agent BaseWorkflowAgent.setup_agent { } ctx: \"<workflows.conte…\" +1 2 AgentSetup(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0... —" [ref=e1330]':
+                  - cell [ref=e1331]
+                  - cell [ref=e1332]:
+                    - button "Run evaluations for this row" [ref=e1333] [cursor=pointer]:
+                      - img [ref=e1334]
+                  - cell [ref=e1336]
+                  - cell [ref=e1337]
+                  - cell [ref=e1338]
+                  - cell [ref=e1339]
+                  - cell [ref=e1340]
+                  - cell [ref=e1341]
+                  - cell [ref=e1342]
+                  - cell [ref=e1343]
+                  - cell [ref=e1344]
+                  - cell [ref=e1345]
+                  - cell [ref=e1346]
+                  - cell [ref=e1347]
+                  - cell [ref=e1348]
+                  - cell "19" [ref=e1349]
+                  - cell "CHAIN" [ref=e1350]:
+                    - generic [ref=e1351]: CHAIN
+                  - cell "2026-06-07 08:35:10" [ref=e1353]
+                  - cell "0.26ms" [ref=e1354]
+                  - cell "support-agent" [ref=e1355]:
+                    - generic "support-agent" [ref=e1356]
+                  - cell [ref=e1357]
+                  - cell "BaseWorkflowAgent.setup_agent" [ref=e1358]:
+                    - generic "BaseWorkflowAgent.setup_agent" [ref=e1359]
+                  - 'cell "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e1360]':
+                    - 'button "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e1361] [cursor=pointer]':
+                      - generic [ref=e1363]: "{ }"
+                      - generic [ref=e1365]:
+                        - generic [ref=e1366]: "ctx:"
+                        - generic [ref=e1367]: "\"<workflows.conte…\""
+                        - generic [ref=e1368]: "+1"
+                      - generic [ref=e1369]: "2"
+                      - img [ref=e1371]
+                  - 'cell "AgentSetup(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..." [ref=e1373]':
+                    - 'button "AgentSetup(input=[ChatMessage(role=<MessageRole.USER: ''user''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..." [ref=e1374] [cursor=pointer]':
+                      - img [ref=e1375]
+                      - generic [ref=e1377]: "AgentSetup(input=[ChatMessage(role=<MessageRole.USER: 'user'>, additional_kwargs={}, blocks=[TextBlock(block_type='text', text='Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-0..."
+                  - cell "—" [ref=e1378]
+                - 'row "20 CHAIN 2026-06-07 08:35:10 1.24s support-agent BaseWorkflowAgent.run_agent_step { } ctx: \"<workflows.conte…\" +1 2 AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=\"Thought: I can answer without using any more tools. I''ll... —" [ref=e1379]':
+                  - cell [ref=e1380]
+                  - cell [ref=e1381]:
+                    - button "Run evaluations for this row" [ref=e1382] [cursor=pointer]:
+                      - img [ref=e1383]
+                  - cell [ref=e1385]
+                  - cell [ref=e1386]
+                  - cell [ref=e1387]
+                  - cell [ref=e1388]
+                  - cell [ref=e1389]
+                  - cell [ref=e1390]
+                  - cell [ref=e1391]
+                  - cell [ref=e1392]
+                  - cell [ref=e1393]
+                  - cell [ref=e1394]
+                  - cell [ref=e1395]
+                  - cell [ref=e1396]
+                  - cell [ref=e1397]
+                  - cell "20" [ref=e1398]
+                  - cell "CHAIN" [ref=e1399]:
+                    - generic [ref=e1400]: CHAIN
+                  - cell "2026-06-07 08:35:10" [ref=e1402]
+                  - cell "1.24s" [ref=e1403]
+                  - cell "support-agent" [ref=e1404]:
+                    - generic "support-agent" [ref=e1405]
+                  - cell [ref=e1406]
+                  - cell "BaseWorkflowAgent.run_agent_step" [ref=e1407]:
+                    - generic "BaseWorkflowAgent.run_agent_step" [ref=e1408]
+                  - 'cell "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e1409]':
+                    - 'button "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e1410] [cursor=pointer]':
+                      - generic [ref=e1412]: "{ }"
+                      - generic [ref=e1414]:
+                        - generic [ref=e1415]: "ctx:"
+                        - generic [ref=e1416]: "\"<workflows.conte…\""
+                        - generic [ref=e1417]: "+1"
+                      - generic [ref=e1418]: "2"
+                      - img [ref=e1420]
+                  - 'cell "AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=\"Thought: I can answer without using any more tools. I''ll..." [ref=e1422]':
+                    - 'button "AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=\"Thought: I can answer without using any more tools. I''ll..." [ref=e1423] [cursor=pointer]':
+                      - img [ref=e1424]
+                      - generic [ref=e1426]: "AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: 'assistant'>, additional_kwargs={}, blocks=[TextBlock(block_type='text', text=\"Thought: I can answer without using any more tools. I'll..."
+                  - cell "—" [ref=e1427]
+                - 'row "21 GENERATION 2026-06-07 08:35:10 1.24s support-agent gpt-4o-mini OpenAI.achat user Observation: {''name'': ''Alpine Winter Coat''… 6 assistant Thought: I can answer without using any mo… 1 Σ 919 tok · $0.000168" [ref=e1428]':
+                  - cell [ref=e1429]
+                  - cell [ref=e1430]:
+                    - button "Run evaluations for this row" [ref=e1431] [cursor=pointer]:
+                      - img [ref=e1432]
+                  - cell [ref=e1434]
+                  - cell [ref=e1435]
+                  - cell [ref=e1436]
+                  - cell [ref=e1437]
+                  - cell [ref=e1438]
+                  - cell [ref=e1439]
+                  - cell [ref=e1440]
+                  - cell [ref=e1441]
+                  - cell [ref=e1442]
+                  - cell [ref=e1443]
+                  - cell [ref=e1444]
+                  - cell [ref=e1445]
+                  - cell [ref=e1446]
+                  - cell "21" [ref=e1447]
+                  - cell "GENERATION" [ref=e1448]:
+                    - generic [ref=e1449]: GENERATION
+                  - cell "2026-06-07 08:35:10" [ref=e1451]
+                  - cell "1.24s" [ref=e1452]
+                  - cell "support-agent" [ref=e1453]:
+                    - generic "support-agent" [ref=e1454]
+                  - cell "gpt-4o-mini" [ref=e1455]:
+                    - generic "gpt-4o-mini" [ref=e1456]
+                  - cell "OpenAI.achat" [ref=e1457]:
+                    - generic "OpenAI.achat" [ref=e1458]
+                  - 'cell "user Observation: {''name'': ''Alpine Winter Coat''… 6" [ref=e1459]':
+                    - 'button "user Observation: {''name'': ''Alpine Winter Coat''… 6" [ref=e1460] [cursor=pointer]':
+                      - img [ref=e1462]
+                      - generic [ref=e1465]:
+                        - generic [ref=e1466]: user
+                        - generic [ref=e1467]: "Observation: {'name': 'Alpine Winter Coat'…"
+                      - generic [ref=e1468]: "6"
+                      - img [ref=e1470]
+                  - 'cell "assistant Thought: I can answer without using any mo… 1" [ref=e1472]':
+                    - 'button "assistant Thought: I can answer without using any mo… 1" [ref=e1473] [cursor=pointer]':
+                      - img [ref=e1475]
+                      - generic [ref=e1478]:
+                        - generic [ref=e1479]: assistant
+                        - generic [ref=e1480]: "Thought: I can answer without using any mo…"
+                      - generic [ref=e1481]: "1"
+                      - img [ref=e1483]
+                  - cell "Σ 919 tok · $0.000168" [ref=e1485]:
+                    - button "Σ 919 tok · $0.000168" [ref=e1486] [cursor=pointer]:
+                      - generic [ref=e1488]: Σ
+                      - generic [ref=e1489]: 919 tok · $0.000168
+                      - img [ref=e1491]
+                - 'row "22 CHAIN 2026-06-07 08:35:11 0.34ms support-agent ReActOutputParser.parse { } output: \"Thought: I can a…\" +1 2 { } thought: \"I can answer wit…\" +2 3 —" [ref=e1493]':
+                  - cell [ref=e1494]
+                  - cell [ref=e1495]:
+                    - button "Run evaluations for this row" [ref=e1496] [cursor=pointer]:
+                      - img [ref=e1497]
+                  - cell [ref=e1499]
+                  - cell [ref=e1500]
+                  - cell [ref=e1501]
+                  - cell [ref=e1502]
+                  - cell [ref=e1503]
+                  - cell [ref=e1504]
+                  - cell [ref=e1505]
+                  - cell [ref=e1506]
+                  - cell [ref=e1507]
+                  - cell [ref=e1508]
+                  - cell [ref=e1509]
+                  - cell [ref=e1510]
+                  - cell [ref=e1511]
+                  - cell "22" [ref=e1512]
+                  - cell "CHAIN" [ref=e1513]:
+                    - generic [ref=e1514]: CHAIN
+                  - cell "2026-06-07 08:35:11" [ref=e1516]
+                  - cell "0.34ms" [ref=e1517]
+                  - cell "support-agent" [ref=e1518]:
+                    - generic "support-agent" [ref=e1519]
+                  - cell [ref=e1520]
+                  - cell "ReActOutputParser.parse" [ref=e1521]:
+                    - generic "ReActOutputParser.parse" [ref=e1522]
+                  - 'cell "{ } output: \"Thought: I can a…\" +1 2" [ref=e1523]':
+                    - 'button "{ } output: \"Thought: I can a…\" +1 2" [ref=e1524] [cursor=pointer]':
+                      - generic [ref=e1526]: "{ }"
+                      - generic [ref=e1528]:
+                        - generic [ref=e1529]: "output:"
+                        - generic [ref=e1530]: "\"Thought: I can a…\""
+                        - generic [ref=e1531]: "+1"
+                      - generic [ref=e1532]: "2"
+                      - img [ref=e1534]
+                  - 'cell "{ } thought: \"I can answer wit…\" +2 3" [ref=e1536]':
+                    - 'button "{ } thought: \"I can answer wit…\" +2 3" [ref=e1537] [cursor=pointer]':
+                      - generic [ref=e1539]: "{ }"
+                      - generic [ref=e1541]:
+                        - generic [ref=e1542]: "thought:"
+                        - generic [ref=e1543]: "\"I can answer wit…\""
+                        - generic [ref=e1544]: "+2"
+                      - generic [ref=e1545]: "3"
+                      - img [ref=e1547]
+                  - cell "—" [ref=e1549]
+                - 'row "23 CHAIN 2026-06-07 08:35:11 1ms support-agent BaseWorkflowAgent.parse_agent_output { } ctx: \"<workflows.conte…\" +1 2 StopEvent(result=AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Your order ORD-4471 is out for delivery... —" [ref=e1550]':
+                  - cell [ref=e1551]
+                  - cell [ref=e1552]:
+                    - button "Run evaluations for this row" [ref=e1553] [cursor=pointer]:
+                      - img [ref=e1554]
+                  - cell [ref=e1556]
+                  - cell [ref=e1557]
+                  - cell [ref=e1558]
+                  - cell [ref=e1559]
+                  - cell [ref=e1560]
+                  - cell [ref=e1561]
+                  - cell [ref=e1562]
+                  - cell [ref=e1563]
+                  - cell [ref=e1564]
+                  - cell [ref=e1565]
+                  - cell [ref=e1566]
+                  - cell [ref=e1567]
+                  - cell [ref=e1568]
+                  - cell "23" [ref=e1569]
+                  - cell "CHAIN" [ref=e1570]:
+                    - generic [ref=e1571]: CHAIN
+                  - cell "2026-06-07 08:35:11" [ref=e1573]
+                  - cell "1ms" [ref=e1574]
+                  - cell "support-agent" [ref=e1575]:
+                    - generic "support-agent" [ref=e1576]
+                  - cell [ref=e1577]
+                  - cell "BaseWorkflowAgent.parse_agent_output" [ref=e1578]:
+                    - generic "BaseWorkflowAgent.parse_agent_output" [ref=e1579]
+                  - 'cell "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e1580]':
+                    - 'button "{ } ctx: \"<workflows.conte…\" +1 2" [ref=e1581] [cursor=pointer]':
+                      - generic [ref=e1583]: "{ }"
+                      - generic [ref=e1585]:
+                        - generic [ref=e1586]: "ctx:"
+                        - generic [ref=e1587]: "\"<workflows.conte…\""
+                        - generic [ref=e1588]: "+1"
+                      - generic [ref=e1589]: "2"
+                      - img [ref=e1591]
+                  - 'cell "StopEvent(result=AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Your order ORD-4471 is out for delivery..." [ref=e1593]':
+                    - 'button "StopEvent(result=AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: ''assistant''>, additional_kwargs={}, blocks=[TextBlock(block_type=''text'', text=''Your order ORD-4471 is out for delivery..." [ref=e1594] [cursor=pointer]':
+                      - img [ref=e1595]
+                      - generic [ref=e1597]: "StopEvent(result=AgentOutput(response=ChatMessage(role=<MessageRole.ASSISTANT: 'assistant'>, additional_kwargs={}, blocks=[TextBlock(block_type='text', text='Your order ORD-4471 is out for delivery..."
+                  - cell "—" [ref=e1598]

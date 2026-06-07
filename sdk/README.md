@@ -2,13 +2,14 @@
 
 Two things in one small package:
 
-1. an **instrumentation SDK** — a thin wrapper over the OpenTelemetry SDK that emits standard `gen_ai.*` / OpenInference attributes **plus** Tracely's first-class `tracely.*` hints, so the backend can populate its agent-semantic columns; and
+1. an **instrumentation SDK** — `tracely.init()` activates the OpenAI/Anthropic/LangChain/LiteLLM auto-instrumentors so your existing code is traced with **zero span code** (the default path); a custom `SpanProcessor` stamps the active `tracely.trace()` run context onto every span — including the zero-touch provider spans. Manual context managers remain the escape hatch. Everything emits standard `gen_ai.*` / OpenInference attributes **plus** Tracely's first-class `tracely.*` hints, so the backend can populate its agent-semantic columns; and
 2. the **`tracely` CLI** — `tracely gate` and `tracely replay`, which run an agent's promoted regression suite in CI and gate the PR (exit 0/1 + GitHub status/comment).
 
-Dependencies are just `opentelemetry-sdk` + the OTLP HTTP exporter. Python ≥ 3.10.
+The core depends only on `opentelemetry-sdk` + the OTLP HTTP exporter (Python ≥ 3.10); a provider extra adds that provider's auto-instrumentor.
 
 ```bash
-pip install ./sdk          # or: uv pip install -e sdk
+pip install "./sdk[openai]"        # provider extras: [openai] [anthropic] [langchain] [litellm] [all]
+# or: uv pip install -e sdk        # core only (manual API + CLI)
 # CLI becomes available as `tracely` (entry point tracely_sdk.cli:main)
 ```
 
@@ -17,6 +18,40 @@ pip install ./sdk          # or: uv pip install -e sdk
 ---
 
 ## 1. Instrument an agent
+
+### Automatic (the default — zero span code)
+
+`init()` activates the auto-instrumentors; `trace()` attaches the run context; `@observe` adds
+function-level spans. No manual span code.
+
+```python
+import tracely_sdk as tracely
+from openai import OpenAI
+
+tracely.init(endpoint="http://localhost:8000", api_key="tracely_dev_key",
+             service_name="support-agent", env="prod", instrument="auto")
+
+with tracely.trace(agent="support-agent", conversation="conv-1", user="u_42"):
+    OpenAI().chat.completions.create(model="gpt-4o", messages=[...])   # GENERATION span, captured
+
+@tracely.observe(as_type="agent")            # args→input, return→output, auto-nested
+def plan(goal): ...
+```
+
+`instrument` is `"auto"` (every importable provider SDK), an explicit list (`["openai",
+"anthropic"]`), or `False`. The `tracely.trace()` hints flow onto **every** span inside it — including
+the provider spans the instrumentor creates — via a custom `SpanProcessor`. Streaming token usage
+needs `stream_options={"include_usage": True}`.
+
+**Also covered:** LangChain/LangGraph (`[langchain]` — graphs nest, node names become steps), LiteLLM
+(`instrument=["litellm"]` — 100+ providers via one callback), and a non-patching drop-in
+(`from tracely_sdk.openai import OpenAI` / `wrap_openai`). Under `"auto"`, when the LangChain
+instrumentor is present it owns LLM spans and the provider instrumentors are skipped to avoid
+duplicate spans (override with an explicit list). Full guide: the docs [Automatic instrumentation](../docs/pages/automatic.mdx) page.
+
+### Manual / custom spans (the escape hatch)
+
+For anything the auto path doesn't cover. Each `with` block is a span; nesting builds the tree.
 
 ```python
 import tracely_sdk as tracely
@@ -102,9 +137,21 @@ Both **exit 0 (PASS) / 1 (FAIL)** and, inside GitHub Actions (or with `--github`
 
 ## Examples (`sdk/examples/` + `sdk/example.py`)
 
+[`examples/README.md`](examples/README.md) is the full index — **one runnable file per way of
+tracing**, all the same fake-DB tool-calling support agent: each frontier provider (OpenAI, Anthropic,
+Gemini, Mistral, Bedrock) + OpenRouter, each harness (LangChain `create_agent`, LangGraph, LiteLLM,
+LlamaIndex, CrewAI), each first-party agent SDK (OpenAI Agents, Claude Agent SDK, Google ADK), and
+each approach (`@observe`+`trace`, the `wrap_openai`/`wrap_anthropic` drop-ins, manual spans). Highlights:
+
 | File | Shows |
 |---|---|
 | `../example.py` | the minimal demo trace (agent → llm → failing tool). `make sdk-example`. |
+| `examples/auto_openai.py` · `auto_anthropic.py` · `auto_gemini.py` · … | **automatic** provider tracing — zero span code (one file per frontier provider + OpenRouter). |
+| `examples/auto_langchain.py` (`create_agent`) · `auto_langgraph.py` · `auto_litellm.py` · … | **automatic** harness tracing (one file per framework, current APIs). |
+| `examples/auto_openai_agents.py` · `auto_claude_agent.py` · `auto_google_adk.py` | **automatic** first-party agent-SDK tracing (OpenAI Agents / Claude Agent SDK / Google ADK). |
+| `examples/auto_agent.py` | **automatic** `@observe` + `trace()` agent → thinking/gen/tool tree. `make auto-agent`. |
+| `examples/dropin_openai.py` · `dropin_anthropic.py` | non-patching `wrap_openai` / `wrap_anthropic` drop-ins. |
+| `examples/manual_spans.py` | the manual escape-hatch API as a full agent (no provider/key needed). |
 | `examples/weather_agent.py` / `weather_agent_cli.py` | a real agent wired with `call_tool`/`call_llm` for `tracely replay --entrypoint` / `--cmd`. |
 | `examples/seed_conversations.py` | rich demo data using **every** SDK helper — single/multi-turn, multi-agent + handoffs, RAG (guardrail→embed→retrieve→chain), thinking, multimodal, structured output, multi-model. `make seed-demo`. |
 | `examples/seed_regression.py` | promote a failing trace → run red→green CI gates (fills Cases + Gates). `make seed-regression`. |

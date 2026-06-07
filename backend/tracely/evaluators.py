@@ -20,6 +20,8 @@ log = structlog.get_logger()
 
 RUN = "AGENT_RUN"
 TOOL = "TOOL"
+GENERATION = "GENERATION"
+CHAIN = "CHAIN"
 
 
 @dataclass
@@ -72,6 +74,45 @@ def check_tool_consistency(ctx: RunContext, params: dict) -> list[EvalResult]:
     if not requested:
         return []
     executed = {s.get("name") for s in ctx.spans if s.get("type") == TOOL}
+    # Tools may be dispatched in user code without a TOOL span (e.g. plain run_tool() loops with no
+    # tracely.tool() context manager). When that's the case the model's next turn carries the tool
+    # results as `{role:"tool", tool_call_id, content}` messages in its input, and the *previous*
+    # assistant message has `tool_calls[].id` ↔ `tool_calls[].function.name`. Resolve names via that
+    # map so we don't FAIL when the loop ran fine but just wasn't span-wrapped.
+    call_id_to_name: dict[str, str] = {}
+    tool_msg_ids: set[str] = set()
+    for s in ctx.spans:
+        if s.get("type") != GENERATION:
+            continue
+        for field_key in ("input", "output"):
+            try:
+                parsed = json.loads(s.get(field_key) or "")
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(parsed, list):
+                continue
+            for m in parsed:
+                if not isinstance(m, dict):
+                    continue
+                role = str(m.get("role") or "").lower()
+                if role == "tool":
+                    cid = m.get("tool_call_id") or m.get("id")
+                    if cid:
+                        tool_msg_ids.add(str(cid))
+                    if m.get("name"):
+                        executed.add(str(m["name"]))
+                elif role == "assistant":
+                    for tc in m.get("tool_calls") or []:
+                        if not isinstance(tc, dict):
+                            continue
+                        cid = tc.get("id")
+                        fn = tc.get("function") or {}
+                        name = fn.get("name") if isinstance(fn, dict) else tc.get("name")
+                        if cid and name:
+                            call_id_to_name[str(cid)] = str(name)
+    for cid in tool_msg_ids:
+        if cid in call_id_to_name:
+            executed.add(call_id_to_name[cid])
     missing = sorted(requested - executed)
     ok = not missing
     return [EvalResult("", RUN, "PASS" if ok else "FAIL", value=1.0 if ok else 0.0,
@@ -165,8 +206,14 @@ def _first_io(spans: list[dict], key: str) -> str:
 def _answer(ctx: RunContext) -> str:
     if ctx.root.get("output"):
         return _content_text(ctx.root["output"])
+    # Prefer the LAST GENERATION span — that's the model's final reply. Skipping CHAIN/AGENT
+    # outputs avoids picking up framework routing signals (LangGraph's `tools_condition` outputs
+    # `"__end__"`, etc.) and presenting them to the judge as the agent's answer.
     for s in reversed(ctx.spans):
-        if s.get("output") and s.get("type") != TOOL:
+        if s.get("type") == GENERATION and s.get("output"):
+            return _content_text(s["output"])
+    for s in reversed(ctx.spans):
+        if s.get("output") and s.get("type") not in (TOOL, CHAIN):
             return _content_text(s["output"])
     return _first_io(ctx.spans, "output")
 

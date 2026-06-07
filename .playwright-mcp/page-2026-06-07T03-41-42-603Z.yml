@@ -1,0 +1,537 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4]:
+      - img [ref=e6]
+      - generic [ref=e9]:
+        - generic [ref=e10]: Tracely
+        - generic [ref=e11]: trace-native ci/cd
+    - navigation [ref=e12]:
+      - generic [ref=e13]:
+        - generic [ref=e14]: Observe
+        - generic [ref=e15]:
+          - link "Dashboard" [ref=e16] [cursor=pointer]:
+            - /url: /
+            - img [ref=e17]
+            - text: Dashboard
+          - link "Traces" [ref=e22] [cursor=pointer]:
+            - /url: /traces
+            - img [ref=e24]
+            - text: Traces
+          - link "Trends" [ref=e26] [cursor=pointer]:
+            - /url: /trends
+            - img [ref=e27]
+            - text: Trends
+      - generic [ref=e30]:
+        - generic [ref=e31]: Triage
+        - link "Failure clusters" [ref=e33] [cursor=pointer]:
+          - /url: /clusters
+          - img [ref=e34]
+          - text: Failure clusters
+      - generic [ref=e37]:
+        - generic [ref=e38]: Test
+        - link "Regression cases" [ref=e40] [cursor=pointer]:
+          - /url: /cases
+          - img [ref=e41]
+          - text: Regression cases
+      - generic [ref=e44]:
+        - generic [ref=e45]: Ship
+        - link "CI gates" [ref=e47] [cursor=pointer]:
+          - /url: /gates
+          - img [ref=e48]
+          - text: CI gates
+    - generic [ref=e51]:
+      - generic [ref=e52]:
+        - generic [ref=e53]:
+          - generic [ref=e54]: default
+          - generic [ref=e55]: project
+        - generic [ref=e56]: prod
+      - generic [ref=e58]: v0.1.0 · MVP
+  - generic [ref=e59]:
+    - banner [ref=e60]:
+      - navigation [ref=e61]:
+        - link "Traces" [ref=e62] [cursor=pointer]:
+          - /url: /traces
+        - img [ref=e63]
+        - link "da46033dd40d…" [ref=e65] [cursor=pointer]:
+          - /url: /traces/da46033dd40d7d95ab285343cb2724c3
+      - button "Search… ⌘K" [ref=e67] [cursor=pointer]:
+        - img [ref=e68]
+        - generic [ref=e71]: Search…
+        - generic [ref=e72]: ⌘K
+    - main [ref=e73]:
+      - generic [ref=e74]:
+        - generic [ref=e75]:
+          - link "Traces" [ref=e76] [cursor=pointer]:
+            - /url: /traces
+            - img [ref=e77]
+            - text: Traces
+          - generic [ref=e80]:
+            - generic [ref=e81]:
+              - heading "support_agent" [level=1] [ref=e82]
+              - generic [ref=e83]: ok
+            - generic [ref=e85]:
+              - button "…b2724c3" [ref=e86] [cursor=pointer]:
+                - generic [ref=e87]: …b2724c3
+                - img [ref=e88]
+              - generic [ref=e91]: 5 spans
+              - generic [ref=e92]: 2.49s
+              - generic [ref=e93]: 420 in
+              - generic [ref=e94]: 116 out
+              - generic [ref=e95]: 536 tokens
+              - generic [ref=e96]: $0.000132
+        - generic [ref=e97]:
+          - generic [ref=e98]:
+            - generic [ref=e99]:
+              - button "Table" [ref=e100] [cursor=pointer]: Table
+              - button "Timeline 5" [ref=e102] [cursor=pointer]:
+                - text: Timeline
+                - generic [ref=e103]: "5"
+              - button "Evaluations PASS" [ref=e104] [cursor=pointer]:
+                - text: Evaluations
+                - generic [ref=e105]: PASS
+            - button "Enlarge" [ref=e106] [cursor=pointer]:
+              - img [ref=e107]
+              - generic [ref=e112]: Enlarge
+          - generic [ref=e114]:
+            - generic [ref=e115]:
+              - button "Collapse All" [ref=e116] [cursor=pointer]:
+                - img [ref=e117]
+                - generic [ref=e120]: Collapse All
+              - button "Columns" [ref=e123] [cursor=pointer]:
+                - img [ref=e124]
+                - generic [ref=e127]: Columns
+            - table [ref=e129]:
+              - rowgroup [ref=e130]:
+                - 'row "Conversation C Datetime C Duration C Summary C Metadata C Usage C Role M # M Datetime M Duration M Content M Usage M # S Type S Datetime S Duration S Agent S Model S Name S Input S Output S Usage S" [ref=e131]':
+                  - columnheader [ref=e132]
+                  - columnheader [ref=e133]
+                  - columnheader [ref=e134]
+                  - columnheader "Conversation C" [ref=e135]:
+                    - generic [ref=e136]:
+                      - generic [ref=e137]: Conversation
+                      - generic [ref=e138]: C
+                  - columnheader "Datetime C" [ref=e139]:
+                    - generic [ref=e140]:
+                      - generic [ref=e141]: Datetime
+                      - generic [ref=e142]: C
+                  - columnheader "Duration C" [ref=e143]:
+                    - generic [ref=e144]:
+                      - generic [ref=e145]: Duration
+                      - generic [ref=e146]: C
+                  - columnheader "Summary C" [ref=e147]:
+                    - generic [ref=e148]:
+                      - generic [ref=e149]: Summary
+                      - generic [ref=e150]: C
+                  - columnheader "Metadata C" [ref=e151]:
+                    - generic [ref=e152]:
+                      - generic [ref=e153]: Metadata
+                      - generic [ref=e154]: C
+                  - columnheader "Usage C" [ref=e155]:
+                    - generic [ref=e156]:
+                      - generic [ref=e157]: Usage
+                      - generic [ref=e158]: C
+                  - columnheader "Role M" [ref=e159]:
+                    - generic [ref=e160]:
+                      - generic [ref=e161]: Role
+                      - generic [ref=e162]: M
+                  - columnheader "# M" [ref=e163]:
+                    - generic [ref=e164]:
+                      - generic [ref=e165]: "#"
+                      - generic [ref=e166]: M
+                  - columnheader "Datetime M" [ref=e167]:
+                    - generic [ref=e168]:
+                      - generic [ref=e169]: Datetime
+                      - generic [ref=e170]: M
+                  - columnheader "Duration M" [ref=e171]:
+                    - generic [ref=e172]:
+                      - generic [ref=e173]: Duration
+                      - generic [ref=e174]: M
+                  - columnheader "Content M" [ref=e175]:
+                    - generic [ref=e176]:
+                      - generic [ref=e177]: Content
+                      - generic [ref=e178]: M
+                  - columnheader "Usage M" [ref=e179]:
+                    - generic [ref=e180]:
+                      - generic [ref=e181]: Usage
+                      - generic [ref=e182]: M
+                  - columnheader "# S" [ref=e183]:
+                    - generic [ref=e184]:
+                      - generic [ref=e185]: "#"
+                      - generic [ref=e186]: S
+                  - columnheader "Type S" [ref=e187]:
+                    - generic [ref=e188]:
+                      - generic [ref=e189]: Type
+                      - generic [ref=e190]: S
+                  - columnheader "Datetime S" [ref=e191]:
+                    - generic [ref=e192]:
+                      - generic [ref=e193]: Datetime
+                      - generic [ref=e194]: S
+                  - columnheader "Duration S" [ref=e195]:
+                    - generic [ref=e196]:
+                      - generic [ref=e197]: Duration
+                      - generic [ref=e198]: S
+                  - columnheader "Agent S" [ref=e199]:
+                    - generic [ref=e200]:
+                      - generic [ref=e201]: Agent
+                      - generic [ref=e202]: S
+                  - columnheader "Model S" [ref=e203]:
+                    - generic [ref=e204]:
+                      - generic [ref=e205]: Model
+                      - generic [ref=e206]: S
+                  - columnheader "Name S" [ref=e207]:
+                    - generic [ref=e208]:
+                      - generic [ref=e209]: Name
+                      - generic [ref=e210]: S
+                  - columnheader "Input S" [ref=e211]:
+                    - generic [ref=e212]:
+                      - generic [ref=e213]: Input
+                      - generic [ref=e214]: S
+                  - columnheader "Output S" [ref=e215]:
+                    - generic [ref=e216]:
+                      - generic [ref=e217]: Output
+                      - generic [ref=e218]: S
+                  - columnheader "Usage S" [ref=e219]:
+                    - generic [ref=e220]:
+                      - generic [ref=e221]: Usage
+                      - generic [ref=e222]: S
+              - rowgroup [ref=e223]:
+                - 'row "Collapse Where is my order ORD-4471, and is… 2026-06-07 03:39:44 2.49s assistant Your order **ORD-4471** is currently **out… 2 { } example: \"auto_openai.py\" 1 Σ 536 tok · $0.000132" [ref=e224] [cursor=pointer]':
+                  - cell "Collapse" [ref=e225]:
+                    - button "Collapse" [ref=e226]:
+                      - img [ref=e227]
+                  - cell [ref=e229]:
+                    - button "Run evaluations for this row" [ref=e230]:
+                      - img [ref=e231]
+                  - cell [ref=e233]:
+                    - button "View 1 agent" [ref=e234]:
+                      - img [ref=e235]
+                  - cell "Where is my order ORD-4471, and is…" [ref=e238]:
+                    - link "Where is my order ORD-4471, and is…" [ref=e239]:
+                      - /url: /traces/da46033dd40d7d95ab285343cb2724c3
+                      - generic [ref=e241]: Where is my order ORD-4471, and is…
+                  - cell "2026-06-07 03:39:44" [ref=e242]
+                  - cell "2.49s" [ref=e243]
+                  - cell "assistant Your order **ORD-4471** is currently **out… 2" [ref=e244]:
+                    - button "assistant Your order **ORD-4471** is currently **out… 2" [ref=e245]:
+                      - img [ref=e247]
+                      - generic [ref=e250]:
+                        - generic [ref=e251]: assistant
+                        - generic [ref=e252]: Your order **ORD-4471** is currently **out…
+                      - generic [ref=e253]: "2"
+                      - img [ref=e255]
+                  - 'cell "{ } example: \"auto_openai.py\" 1" [ref=e257]':
+                    - 'button "{ } example: \"auto_openai.py\" 1" [ref=e258]':
+                      - generic [ref=e260]: "{ }"
+                      - generic [ref=e262]:
+                        - generic [ref=e263]: "example:"
+                        - generic [ref=e264]: "\"auto_openai.py\""
+                      - generic [ref=e265]: "1"
+                      - img [ref=e267]
+                  - cell "Σ 536 tok · $0.000132" [ref=e269]:
+                    - button "Σ 536 tok · $0.000132" [ref=e270]:
+                      - generic [ref=e272]: Σ
+                      - generic [ref=e273]: 536 tok · $0.000132
+                      - img [ref=e275]
+                  - cell [ref=e277]
+                  - cell [ref=e278]
+                  - cell [ref=e279]
+                  - cell [ref=e280]
+                  - cell [ref=e281]
+                  - cell [ref=e282]
+                  - cell [ref=e283]
+                  - cell [ref=e284]
+                  - cell [ref=e285]
+                  - cell [ref=e286]
+                  - cell [ref=e287]
+                  - cell [ref=e288]
+                  - cell [ref=e289]
+                  - cell [ref=e290]
+                  - cell [ref=e291]
+                  - cell [ref=e292]
+                - row "user 1 2026-06-07 03:39:44 Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-01) back in stock?" [ref=e293] [cursor=pointer]:
+                  - cell [ref=e294]
+                  - cell [ref=e295]:
+                    - button "Run evaluations for this row" [ref=e296]:
+                      - img [ref=e297]
+                  - cell [ref=e299]
+                  - cell [ref=e300]
+                  - cell [ref=e301]
+                  - cell [ref=e302]
+                  - cell [ref=e303]
+                  - cell [ref=e304]
+                  - cell [ref=e305]
+                  - cell "user" [ref=e306]:
+                    - generic [ref=e308]: user
+                  - cell "1" [ref=e310]
+                  - cell "2026-06-07 03:39:44" [ref=e311]
+                  - cell [ref=e312]
+                  - cell "Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-01) back in stock?" [ref=e313]:
+                    - button "Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-01) back in stock?" [ref=e314]:
+                      - img [ref=e315]
+                      - generic [ref=e317]: Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-01) back in stock?
+                  - cell [ref=e318]
+                  - cell [ref=e319]
+                  - cell [ref=e320]
+                  - cell [ref=e321]
+                  - cell [ref=e322]
+                  - cell [ref=e323]
+                  - cell [ref=e324]
+                  - cell [ref=e325]
+                  - cell [ref=e326]
+                  - cell [ref=e327]
+                  - cell [ref=e328]
+                - row "Collapse assistant 2 2026-06-07 03:39:44 2.49s Your order **ORD-4471** is currently **out for delivery** and is expected to arrive **today by 6 PM**. The **Alpine Winter Coat (SKU-COAT-01)** is back in stock with **3 units available**, priced at **$129.00**. Σ 536 tok · $0.000132" [ref=e329] [cursor=pointer]:
+                  - cell "Collapse" [ref=e330]:
+                    - button "Collapse" [ref=e331]:
+                      - img [ref=e332]
+                  - cell [ref=e334]:
+                    - button "Run evaluations for this row" [ref=e335]:
+                      - img [ref=e336]
+                  - cell [ref=e338]
+                  - cell [ref=e339]
+                  - cell [ref=e340]
+                  - cell [ref=e341]
+                  - cell [ref=e342]
+                  - cell [ref=e343]
+                  - cell [ref=e344]
+                  - cell "assistant" [ref=e345]:
+                    - generic [ref=e347]: assistant
+                  - cell "2" [ref=e349]
+                  - cell "2026-06-07 03:39:44" [ref=e350]
+                  - cell "2.49s" [ref=e351]
+                  - cell "Your order **ORD-4471** is currently **out for delivery** and is expected to arrive **today by 6 PM**. The **Alpine Winter Coat (SKU-COAT-01)** is back in stock with **3 units available**, priced at **$129.00**." [ref=e352]:
+                    - button "Your order **ORD-4471** is currently **out for delivery** and is expected to arrive **today by 6 PM**. The **Alpine Winter Coat (SKU-COAT-01)** is back in stock with **3 units available**, priced at **$129.00**." [ref=e353]:
+                      - img [ref=e354]
+                      - generic [ref=e356]: Your order **ORD-4471** is currently **out for delivery** and is expected to arrive **today by 6 PM**. The **Alpine Winter Coat (SKU-COAT-01)** is back in stock with **3 units available**, priced at **$129.00**.
+                  - cell "Σ 536 tok · $0.000132" [ref=e357]:
+                    - button "Σ 536 tok · $0.000132" [ref=e358]:
+                      - generic [ref=e360]: Σ
+                      - generic [ref=e361]: 536 tok · $0.000132
+                      - img [ref=e363]
+                  - cell [ref=e365]
+                  - cell [ref=e366]
+                  - cell [ref=e367]
+                  - cell [ref=e368]
+                  - cell [ref=e369]
+                  - cell [ref=e370]
+                  - cell [ref=e371]
+                  - cell [ref=e372]
+                  - cell [ref=e373]
+                  - cell [ref=e374]
+                - row "1 AGENT 2026-06-07 03:39:44 2.49s support-agent support_agent Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-01) back in stock? Your order **ORD-4471** is currently **out for delivery** and is expected to arrive **today by 6 PM**. The **Alpine Winter Coat (SKU-COAT-01)** is back in stock with **3 units available**, priced at **$129.00**. —" [ref=e375]:
+                  - cell [ref=e376]
+                  - cell [ref=e377]:
+                    - button "Run evaluations for this row" [ref=e378] [cursor=pointer]:
+                      - img [ref=e379]
+                  - cell [ref=e381]
+                  - cell [ref=e382]
+                  - cell [ref=e383]
+                  - cell [ref=e384]
+                  - cell [ref=e385]
+                  - cell [ref=e386]
+                  - cell [ref=e387]
+                  - cell [ref=e388]
+                  - cell [ref=e389]
+                  - cell [ref=e390]
+                  - cell [ref=e391]
+                  - cell [ref=e392]
+                  - cell [ref=e393]
+                  - cell "1" [ref=e394]
+                  - cell "AGENT" [ref=e395]:
+                    - generic [ref=e396]: AGENT
+                  - cell "2026-06-07 03:39:44" [ref=e398]
+                  - cell "2.49s" [ref=e399]
+                  - cell "support-agent" [ref=e400]:
+                    - generic "support-agent" [ref=e401]
+                  - cell [ref=e402]
+                  - cell "support_agent" [ref=e403]:
+                    - generic "support_agent" [ref=e404]
+                  - cell "Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-01) back in stock?" [ref=e405]:
+                    - button "Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-01) back in stock?" [ref=e406] [cursor=pointer]:
+                      - img [ref=e407]
+                      - generic [ref=e409]: Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-01) back in stock?
+                  - cell "Your order **ORD-4471** is currently **out for delivery** and is expected to arrive **today by 6 PM**. The **Alpine Winter Coat (SKU-COAT-01)** is back in stock with **3 units available**, priced at **$129.00**." [ref=e410]:
+                    - button "Your order **ORD-4471** is currently **out for delivery** and is expected to arrive **today by 6 PM**. The **Alpine Winter Coat (SKU-COAT-01)** is back in stock with **3 units available**, priced at **$129.00**." [ref=e411] [cursor=pointer]:
+                      - img [ref=e412]
+                      - generic [ref=e414]: Your order **ORD-4471** is currently **out for delivery** and is expected to arrive **today by 6 PM**. The **Alpine Winter Coat (SKU-COAT-01)** is back in stock with **3 units available**, priced at **$129.00**.
+                  - cell "—" [ref=e415]
+                - row "2 GENERATION 2026-06-07 03:39:44 1.17s support-agent gpt-4o-mini-2024-07-18 ChatCompletion user Where is my order ORD-4471, and is the Alp… 2 assistant → get_order_status, check_inventory 1 Σ 200 tok · $0.000054" [ref=e416]:
+                  - cell [ref=e417]
+                  - cell [ref=e418]:
+                    - button "Run evaluations for this row" [ref=e419] [cursor=pointer]:
+                      - img [ref=e420]
+                  - cell [ref=e422]
+                  - cell [ref=e423]
+                  - cell [ref=e424]
+                  - cell [ref=e425]
+                  - cell [ref=e426]
+                  - cell [ref=e427]
+                  - cell [ref=e428]
+                  - cell [ref=e429]
+                  - cell [ref=e430]
+                  - cell [ref=e431]
+                  - cell [ref=e432]
+                  - cell [ref=e433]
+                  - cell [ref=e434]
+                  - cell "2" [ref=e435]
+                  - cell "GENERATION" [ref=e436]:
+                    - generic [ref=e437]: GENERATION
+                  - cell "2026-06-07 03:39:44" [ref=e439]
+                  - cell "1.17s" [ref=e440]
+                  - cell "support-agent" [ref=e441]:
+                    - generic "support-agent" [ref=e442]
+                  - cell "gpt-4o-mini-2024-07-18" [ref=e443]:
+                    - generic "gpt-4o-mini-2024-07-18" [ref=e444]
+                  - cell "ChatCompletion" [ref=e445]:
+                    - generic "ChatCompletion" [ref=e446]
+                  - cell "user Where is my order ORD-4471, and is the Alp… 2" [ref=e447]:
+                    - button "user Where is my order ORD-4471, and is the Alp… 2" [ref=e448] [cursor=pointer]:
+                      - img [ref=e450]
+                      - generic [ref=e453]:
+                        - generic [ref=e454]: user
+                        - generic [ref=e455]: Where is my order ORD-4471, and is the Alp…
+                      - generic [ref=e456]: "2"
+                      - img [ref=e458]
+                  - cell "assistant → get_order_status, check_inventory 1" [ref=e460]:
+                    - button "assistant → get_order_status, check_inventory 1" [ref=e461] [cursor=pointer]:
+                      - img [ref=e463]
+                      - generic [ref=e466]:
+                        - generic [ref=e467]: assistant
+                        - generic [ref=e468]: → get_order_status, check_inventory
+                      - generic [ref=e469]: "1"
+                      - img [ref=e471]
+                  - cell "Σ 200 tok · $0.000054" [ref=e473]:
+                    - button "Σ 200 tok · $0.000054" [ref=e474] [cursor=pointer]:
+                      - generic [ref=e476]: Σ
+                      - generic [ref=e477]: 200 tok · $0.000054
+                      - img [ref=e479]
+                - 'row "3 TOOL 2026-06-07 03:39:46 0.23ms support-agent get_order_status ORD-4471 { } status: \"out_for_delivery\" +3 4 —" [ref=e481]':
+                  - cell [ref=e482]
+                  - cell [ref=e483]:
+                    - button "Run evaluations for this row" [ref=e484] [cursor=pointer]:
+                      - img [ref=e485]
+                  - cell [ref=e487]
+                  - cell [ref=e488]
+                  - cell [ref=e489]
+                  - cell [ref=e490]
+                  - cell [ref=e491]
+                  - cell [ref=e492]
+                  - cell [ref=e493]
+                  - cell [ref=e494]
+                  - cell [ref=e495]
+                  - cell [ref=e496]
+                  - cell [ref=e497]
+                  - cell [ref=e498]
+                  - cell [ref=e499]
+                  - cell "3" [ref=e500]
+                  - cell "TOOL" [ref=e501]:
+                    - generic [ref=e502]: TOOL
+                  - cell "2026-06-07 03:39:46" [ref=e504]
+                  - cell "0.23ms" [ref=e505]
+                  - cell "support-agent" [ref=e506]:
+                    - generic "support-agent" [ref=e507]
+                  - cell [ref=e508]
+                  - cell "get_order_status" [ref=e509]:
+                    - generic "get_order_status" [ref=e510]
+                  - cell "ORD-4471" [ref=e511]:
+                    - generic "ORD-4471" [ref=e512]
+                  - 'cell "{ } status: \"out_for_delivery\" +3 4" [ref=e513]':
+                    - 'button "{ } status: \"out_for_delivery\" +3 4" [ref=e514] [cursor=pointer]':
+                      - generic [ref=e516]: "{ }"
+                      - generic [ref=e518]:
+                        - generic [ref=e519]: "status:"
+                        - generic [ref=e520]: "\"out_for_delivery\""
+                        - generic [ref=e521]: "+3"
+                      - generic [ref=e522]: "4"
+                      - img [ref=e524]
+                  - cell "—" [ref=e526]
+                - 'row "4 TOOL 2026-06-07 03:39:46 0.06ms support-agent check_inventory SKU-COAT-01 { } name: \"Alpine Winter Co…\" +2 3 —" [ref=e527]':
+                  - cell [ref=e528]
+                  - cell [ref=e529]:
+                    - button "Run evaluations for this row" [ref=e530] [cursor=pointer]:
+                      - img [ref=e531]
+                  - cell [ref=e533]
+                  - cell [ref=e534]
+                  - cell [ref=e535]
+                  - cell [ref=e536]
+                  - cell [ref=e537]
+                  - cell [ref=e538]
+                  - cell [ref=e539]
+                  - cell [ref=e540]
+                  - cell [ref=e541]
+                  - cell [ref=e542]
+                  - cell [ref=e543]
+                  - cell [ref=e544]
+                  - cell [ref=e545]
+                  - cell "4" [ref=e546]
+                  - cell "TOOL" [ref=e547]:
+                    - generic [ref=e548]: TOOL
+                  - cell "2026-06-07 03:39:46" [ref=e550]
+                  - cell "0.06ms" [ref=e551]
+                  - cell "support-agent" [ref=e552]:
+                    - generic "support-agent" [ref=e553]
+                  - cell [ref=e554]
+                  - cell "check_inventory" [ref=e555]:
+                    - generic "check_inventory" [ref=e556]
+                  - cell "SKU-COAT-01" [ref=e557]:
+                    - generic "SKU-COAT-01" [ref=e558]
+                  - 'cell "{ } name: \"Alpine Winter Co…\" +2 3" [ref=e559]':
+                    - 'button "{ } name: \"Alpine Winter Co…\" +2 3" [ref=e560] [cursor=pointer]':
+                      - generic [ref=e562]: "{ }"
+                      - generic [ref=e564]:
+                        - generic [ref=e565]: "name:"
+                        - generic [ref=e566]: "\"Alpine Winter Co…\""
+                        - generic [ref=e567]: "+2"
+                      - generic [ref=e568]: "3"
+                      - img [ref=e570]
+                  - cell "—" [ref=e572]
+                - 'row "5 GENERATION 2026-06-07 03:39:46 1.05s support-agent gpt-4o-mini-2024-07-18 ChatCompletion tool {\"name\": \"Alpine Winter Coat\", \"in_stock\":… 5 assistant Your order **ORD-4471** is currently **out… 1 Σ 336 tok · $0.000078" [ref=e573]':
+                  - cell [ref=e574]
+                  - cell [ref=e575]:
+                    - button "Run evaluations for this row" [ref=e576] [cursor=pointer]:
+                      - img [ref=e577]
+                  - cell [ref=e579]
+                  - cell [ref=e580]
+                  - cell [ref=e581]
+                  - cell [ref=e582]
+                  - cell [ref=e583]
+                  - cell [ref=e584]
+                  - cell [ref=e585]
+                  - cell [ref=e586]
+                  - cell [ref=e587]
+                  - cell [ref=e588]
+                  - cell [ref=e589]
+                  - cell [ref=e590]
+                  - cell [ref=e591]
+                  - cell "5" [ref=e592]
+                  - cell "GENERATION" [ref=e593]:
+                    - generic [ref=e594]: GENERATION
+                  - cell "2026-06-07 03:39:46" [ref=e596]
+                  - cell "1.05s" [ref=e597]
+                  - cell "support-agent" [ref=e598]:
+                    - generic "support-agent" [ref=e599]
+                  - cell "gpt-4o-mini-2024-07-18" [ref=e600]:
+                    - generic "gpt-4o-mini-2024-07-18" [ref=e601]
+                  - cell "ChatCompletion" [ref=e602]:
+                    - generic "ChatCompletion" [ref=e603]
+                  - 'cell "tool {\"name\": \"Alpine Winter Coat\", \"in_stock\":… 5" [ref=e604]':
+                    - 'button "tool {\"name\": \"Alpine Winter Coat\", \"in_stock\":… 5" [ref=e605] [cursor=pointer]':
+                      - img [ref=e607]
+                      - generic [ref=e610]:
+                        - generic [ref=e611]: tool
+                        - generic [ref=e612]: "{\"name\": \"Alpine Winter Coat\", \"in_stock\":…"
+                      - generic [ref=e613]: "5"
+                      - img [ref=e615]
+                  - cell "assistant Your order **ORD-4471** is currently **out… 1" [ref=e617]:
+                    - button "assistant Your order **ORD-4471** is currently **out… 1" [ref=e618] [cursor=pointer]:
+                      - img [ref=e620]
+                      - generic [ref=e623]:
+                        - generic [ref=e624]: assistant
+                        - generic [ref=e625]: Your order **ORD-4471** is currently **out…
+                      - generic [ref=e626]: "1"
+                      - img [ref=e628]
+                  - cell "Σ 336 tok · $0.000078" [ref=e630]:
+                    - button "Σ 336 tok · $0.000078" [ref=e631] [cursor=pointer]:
+                      - generic [ref=e633]: Σ
+                      - generic [ref=e634]: 336 tok · $0.000078
+                      - img [ref=e636]

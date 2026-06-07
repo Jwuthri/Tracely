@@ -1,0 +1,232 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - img [ref=e6]
+        - generic [ref=e9]:
+          - generic [ref=e10]: Tracely
+          - generic [ref=e11]: trace-native ci/cd
+      - navigation [ref=e12]:
+        - generic [ref=e13]:
+          - generic [ref=e14]: Observe
+          - generic [ref=e15]:
+            - link "Dashboard" [ref=e16] [cursor=pointer]:
+              - /url: /
+              - img [ref=e17]
+              - text: Dashboard
+            - link "Traces" [ref=e22] [cursor=pointer]:
+              - /url: /traces
+              - img [ref=e24]
+              - text: Traces
+            - link "Trends" [ref=e26] [cursor=pointer]:
+              - /url: /trends
+              - img [ref=e27]
+              - text: Trends
+        - generic [ref=e30]:
+          - generic [ref=e31]: Triage
+          - link "Failure clusters" [ref=e33] [cursor=pointer]:
+            - /url: /clusters
+            - img [ref=e34]
+            - text: Failure clusters
+        - generic [ref=e37]:
+          - generic [ref=e38]: Test
+          - link "Regression cases" [ref=e40] [cursor=pointer]:
+            - /url: /cases
+            - img [ref=e41]
+            - text: Regression cases
+        - generic [ref=e44]:
+          - generic [ref=e45]: Ship
+          - link "CI gates" [ref=e47] [cursor=pointer]:
+            - /url: /gates
+            - img [ref=e48]
+            - text: CI gates
+      - generic [ref=e51]:
+        - generic [ref=e52]:
+          - generic [ref=e53]:
+            - generic [ref=e54]: default
+            - generic [ref=e55]: project
+          - generic [ref=e56]: prod
+        - generic [ref=e58]: v0.1.0 · MVP
+    - generic [ref=e59]:
+      - banner [ref=e60]:
+        - navigation [ref=e61]:
+          - link "Traces" [ref=e62] [cursor=pointer]:
+            - /url: /traces
+          - img [ref=e63]
+          - link "d5d271685778…" [ref=e65] [cursor=pointer]:
+            - /url: /traces/d5d271685778cca5dfce3ff05f22b449
+        - button "Search… ⌘K" [ref=e67] [cursor=pointer]:
+          - img [ref=e68]
+          - generic [ref=e71]: Search…
+          - generic [ref=e72]: ⌘K
+      - main [ref=e73]:
+        - generic [ref=e74]:
+          - generic [ref=e75]:
+            - link "Traces" [ref=e76] [cursor=pointer]:
+              - /url: /traces
+              - img [ref=e77]
+              - text: Traces
+            - generic [ref=e79]:
+              - generic [ref=e80]:
+                - generic [ref=e81]:
+                  - heading "support-agent" [level=1] [ref=e82]
+                  - generic [ref=e83]: error
+                - generic [ref=e85]:
+                  - button "…f22b449" [ref=e86] [cursor=pointer]:
+                    - generic [ref=e87]: …f22b449
+                    - img [ref=e88]
+                  - generic [ref=e91]: 6 spans
+                  - generic [ref=e92]: 0ms
+                  - generic [ref=e93]: 390 in
+                  - generic [ref=e94]: 64 out
+                  - generic [ref=e95]: 454 tokens
+                  - generic [ref=e96]: $0.001615
+              - button "Promote to regression test" [ref=e97] [cursor=pointer]:
+                - img [ref=e98]
+                - text: Promote to regression test
+          - generic [ref=e100]:
+            - generic [ref=e101]:
+              - generic [ref=e102]:
+                - button "Table" [ref=e103] [cursor=pointer]
+                - button "Timeline 6" [ref=e105] [cursor=pointer]:
+                  - text: Timeline
+                  - generic [ref=e106]: "6"
+                - button "Evaluations FAIL" [ref=e107] [cursor=pointer]:
+                  - text: Evaluations
+                  - generic [ref=e108]: FAIL
+              - button "Concise" [ref=e726] [cursor=pointer]:
+                - img [ref=e110]
+                - generic [ref=e115]: Concise
+            - generic [ref=e738]:
+              - generic [ref=e739]:
+                - generic [ref=e740]:
+                  - generic [ref=e741]: active 0ms
+                  - generic [ref=e742]:
+                    - button "−" [ref=e743] [cursor=pointer]
+                    - button "fit" [ref=e744] [cursor=pointer]
+                    - button "+" [ref=e745] [cursor=pointer]
+                - generic [ref=e746]:
+                  - generic [ref=e747]:
+                    - button "AGENT support-agent" [ref=e749] [cursor=pointer]:
+                      - generic [ref=e750]: AGENT
+                      - generic [ref=e752]: support-agent
+                    - button "THINKING thinking" [ref=e753] [cursor=pointer]:
+                      - generic [ref=e754]: THINKING
+                      - generic [ref=e756]: thinking
+                    - button "GENERATION gpt-4o" [ref=e757] [cursor=pointer]:
+                      - generic [ref=e758]: GENERATION
+                      - generic [ref=e760]: gpt-4o
+                    - button "TOOL get_order_status" [ref=e761] [cursor=pointer]:
+                      - generic [ref=e762]: TOOL
+                      - generic [ref=e764]: get_order_status
+                    - button "TOOL check_inventory" [ref=e765] [cursor=pointer]:
+                      - generic [ref=e766]: TOOL
+                      - generic [ref=e768]: check_inventory
+                      - img [ref=e769]
+                    - button "GENERATION gpt-4o" [ref=e772] [cursor=pointer]:
+                      - generic [ref=e773]: GENERATION
+                      - generic [ref=e775]: gpt-4o
+                  - generic [ref=e777]:
+                    - generic [ref=e778]:
+                      - generic [ref=e779]: 0ms
+                      - generic [ref=e780]: 0ms
+                      - generic [ref=e781]: 1ms
+                      - generic [ref=e782]: 1ms
+                      - generic [ref=e783]: 1ms
+                    - button "<1ms" [ref=e784] [cursor=pointer]:
+                      - generic: <1ms
+                    - button "<1ms" [ref=e787] [cursor=pointer]:
+                      - generic: <1ms
+                    - button "<1ms" [ref=e790] [cursor=pointer]:
+                      - generic: <1ms
+                    - button "<1ms" [ref=e793] [cursor=pointer]:
+                      - generic: <1ms
+                    - button "<1ms" [ref=e796] [cursor=pointer]:
+                      - generic: <1ms
+                    - button "<1ms" [ref=e799] [cursor=pointer]:
+                      - generic: <1ms
+              - generic [ref=e802]:
+                - generic [ref=e803]:
+                  - generic [ref=e804]:
+                    - generic [ref=e805]: GENERATION
+                    - generic [ref=e807]: ok
+                  - generic [ref=e809]: gpt-4o
+                - generic [ref=e810]:
+                  - generic [ref=e811]:
+                    - term [ref=e812]: Duration
+                    - definition [ref=e813]: <1ms
+                  - generic [ref=e831]:
+                    - term [ref=e832]: Model
+                    - definition [ref=e833]: gpt-4o
+                  - generic [ref=e834]:
+                    - term [ref=e835]: Tokens
+                    - definition [ref=e836]: "204"
+                  - generic [ref=e814]:
+                    - term [ref=e815]: example
+                    - definition [ref=e816]: manual_spans.py
+                  - generic [ref=e837]:
+                    - term [ref=e838]: temperature
+                    - definition [ref=e839]: "0.2"
+                  - generic [ref=e817]:
+                    - term [ref=e818]: Span id
+                    - definition [ref=e819]:
+                      - button "…0ead72a" [ref=e840] [cursor=pointer]:
+                        - generic [ref=e821]: …0ead72a
+                        - img [ref=e822]
+                - generic [ref=e825]:
+                  - button "input" [ref=e826] [cursor=pointer]
+                  - button "output" [ref=e827] [cursor=pointer]
+                  - button "attributes (14)" [active] [ref=e841] [cursor=pointer]
+                - generic [ref=e846]:
+                  - generic [ref=e847]:
+                    - generic "gen_ai.operation.name" [ref=e848]
+                    - generic [ref=e849]: chat
+                  - generic [ref=e850]:
+                    - generic "gen_ai.request.model" [ref=e851]
+                    - generic [ref=e852]: gpt-4o
+                  - generic [ref=e853]:
+                    - generic "gen_ai.request.temperature" [ref=e854]
+                    - generic [ref=e855]: "0.2"
+                  - generic [ref=e856]:
+                    - generic "gen_ai.usage.input_tokens" [ref=e857]
+                    - generic [ref=e858]: "180"
+                  - generic [ref=e859]:
+                    - generic "gen_ai.usage.output_tokens" [ref=e860]
+                    - generic [ref=e861]: "24"
+                  - generic [ref=e862]:
+                    - generic "service.name" [ref=e863]
+                    - generic [ref=e864]: support-agent
+                  - generic [ref=e865]:
+                    - generic "telemetry.sdk.language" [ref=e866]
+                    - generic [ref=e867]: python
+                  - generic [ref=e868]:
+                    - generic "telemetry.sdk.name" [ref=e869]
+                    - generic [ref=e870]: opentelemetry
+                  - generic [ref=e871]:
+                    - generic "telemetry.sdk.version" [ref=e872]
+                    - generic [ref=e873]: 1.34.1
+                  - generic [ref=e874]:
+                    - generic "tracely.agent.id" [ref=e875]
+                    - generic [ref=e876]: support-agent
+                  - generic [ref=e877]:
+                    - generic "tracely.env" [ref=e878]
+                    - generic [ref=e879]: prod
+                  - generic [ref=e880]:
+                    - generic "tracely.metadata.example" [ref=e881]
+                    - generic [ref=e882]: manual_spans.py
+                  - generic [ref=e883]:
+                    - generic "tracely.otel.gen_ai_convention" [ref=e884]
+                    - generic [ref=e885]: gen_ai/other
+                  - generic [ref=e886]:
+                    - generic "tracely.tool_calls" [ref=e887]
+                    - button "[ ] [ 2 ] 2" [ref=e888] [cursor=pointer]:
+                      - generic [ref=e890]: "[ ]"
+                      - generic [ref=e892]:
+                        - generic [ref=e893]: "["
+                        - generic [ref=e894]: "2"
+                        - generic [ref=e895]: "]"
+                      - generic [ref=e896]: "2"
+                      - img [ref=e898]
+  - button "Open Next.js Dev Tools" [ref=e732] [cursor=pointer]:
+    - img [ref=e733]
+  - alert [ref=e736]

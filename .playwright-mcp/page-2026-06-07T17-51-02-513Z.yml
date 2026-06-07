@@ -1,0 +1,599 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4]:
+      - img [ref=e6]
+      - generic [ref=e9]:
+        - generic [ref=e10]: Tracely
+        - generic [ref=e11]: trace-native ci/cd
+    - navigation [ref=e12]:
+      - generic [ref=e13]:
+        - generic [ref=e14]: Observe
+        - generic [ref=e15]:
+          - link "Dashboard" [ref=e16] [cursor=pointer]:
+            - /url: /
+            - img [ref=e17]
+            - text: Dashboard
+          - link "Traces" [ref=e22] [cursor=pointer]:
+            - /url: /traces
+            - img [ref=e24]
+            - text: Traces
+          - link "Trends" [ref=e26] [cursor=pointer]:
+            - /url: /trends
+            - img [ref=e27]
+            - text: Trends
+      - generic [ref=e30]:
+        - generic [ref=e31]: Triage
+        - link "Failure clusters" [ref=e33] [cursor=pointer]:
+          - /url: /clusters
+          - img [ref=e34]
+          - text: Failure clusters
+      - generic [ref=e37]:
+        - generic [ref=e38]: Test
+        - link "Regression cases" [ref=e40] [cursor=pointer]:
+          - /url: /cases
+          - img [ref=e41]
+          - text: Regression cases
+      - generic [ref=e44]:
+        - generic [ref=e45]: Ship
+        - link "CI gates" [ref=e47] [cursor=pointer]:
+          - /url: /gates
+          - img [ref=e48]
+          - text: CI gates
+    - generic [ref=e51]:
+      - generic [ref=e52]:
+        - generic [ref=e53]:
+          - generic [ref=e54]: default
+          - generic [ref=e55]: project
+        - generic [ref=e56]: prod
+      - generic [ref=e58]: v0.1.0 · MVP
+  - generic [ref=e59]:
+    - banner [ref=e60]:
+      - navigation [ref=e61]:
+        - link "Traces" [ref=e62] [cursor=pointer]:
+          - /url: /traces
+        - img [ref=e63]
+        - link "d5d271685778…" [ref=e65] [cursor=pointer]:
+          - /url: /traces/d5d271685778cca5dfce3ff05f22b449
+      - button "Search… ⌘K" [ref=e67] [cursor=pointer]:
+        - img [ref=e68]
+        - generic [ref=e71]: Search…
+        - generic [ref=e72]: ⌘K
+    - main [ref=e73]:
+      - generic [ref=e74]:
+        - generic [ref=e75]:
+          - link "Traces" [ref=e76] [cursor=pointer]:
+            - /url: /traces
+            - img [ref=e77]
+            - text: Traces
+          - generic [ref=e79]:
+            - generic [ref=e80]:
+              - generic [ref=e81]:
+                - heading "support-agent" [level=1] [ref=e82]
+                - generic [ref=e83]: error
+              - generic [ref=e85]:
+                - button "…f22b449" [ref=e86] [cursor=pointer]:
+                  - generic [ref=e87]: …f22b449
+                  - img [ref=e88]
+                - generic [ref=e91]: 6 spans
+                - generic [ref=e92]: 0ms
+                - generic [ref=e93]: 390 in
+                - generic [ref=e94]: 64 out
+                - generic [ref=e95]: 454 tokens
+                - generic [ref=e96]: $0.001615
+            - button "Promote to regression test" [ref=e97] [cursor=pointer]:
+              - img [ref=e98]
+              - text: Promote to regression test
+        - generic [ref=e100]:
+          - generic [ref=e101]:
+            - generic [ref=e102]:
+              - button "Table" [ref=e103] [cursor=pointer]: Table
+              - button "Timeline 6" [ref=e105] [cursor=pointer]:
+                - text: Timeline
+                - generic [ref=e106]: "6"
+              - button "Evaluations FAIL" [ref=e107] [cursor=pointer]:
+                - text: Evaluations
+                - generic [ref=e108]: FAIL
+            - button "Enlarge" [ref=e109] [cursor=pointer]:
+              - img [ref=e110]
+              - generic [ref=e115]: Enlarge
+          - generic [ref=e117]:
+            - generic [ref=e118]:
+              - button "Collapse All" [ref=e119] [cursor=pointer]:
+                - img [ref=e120]
+                - generic [ref=e123]: Collapse All
+              - button "Columns" [ref=e126] [cursor=pointer]:
+                - img [ref=e127]
+                - generic [ref=e130]: Columns
+            - table [ref=e132]:
+              - rowgroup [ref=e133]:
+                - 'row "Conversation C Datetime C Duration C Summary C Metadata C Usage C Role M # M Datetime M Duration M Content M Usage M # S Type S Datetime S Duration S Agent S Model S Name S Input S Output S Usage S" [ref=e134]':
+                  - columnheader [ref=e135]
+                  - columnheader [ref=e136]
+                  - columnheader [ref=e137]
+                  - columnheader "Conversation C" [ref=e138]:
+                    - generic [ref=e139]:
+                      - generic [ref=e140]: Conversation
+                      - generic [ref=e141]: C
+                  - columnheader "Datetime C" [ref=e142]:
+                    - generic [ref=e143]:
+                      - generic [ref=e144]: Datetime
+                      - generic [ref=e145]: C
+                  - columnheader "Duration C" [ref=e146]:
+                    - generic [ref=e147]:
+                      - generic [ref=e148]: Duration
+                      - generic [ref=e149]: C
+                  - columnheader "Summary C" [ref=e150]:
+                    - generic [ref=e151]:
+                      - generic [ref=e152]: Summary
+                      - generic [ref=e153]: C
+                  - columnheader "Metadata C" [ref=e154]:
+                    - generic [ref=e155]:
+                      - generic [ref=e156]: Metadata
+                      - generic [ref=e157]: C
+                  - columnheader "Usage C" [ref=e158]:
+                    - generic [ref=e159]:
+                      - generic [ref=e160]: Usage
+                      - generic [ref=e161]: C
+                  - columnheader "Role M" [ref=e162]:
+                    - generic [ref=e163]:
+                      - generic [ref=e164]: Role
+                      - generic [ref=e165]: M
+                  - columnheader "# M" [ref=e166]:
+                    - generic [ref=e167]:
+                      - generic [ref=e168]: "#"
+                      - generic [ref=e169]: M
+                  - columnheader "Datetime M" [ref=e170]:
+                    - generic [ref=e171]:
+                      - generic [ref=e172]: Datetime
+                      - generic [ref=e173]: M
+                  - columnheader "Duration M" [ref=e174]:
+                    - generic [ref=e175]:
+                      - generic [ref=e176]: Duration
+                      - generic [ref=e177]: M
+                  - columnheader "Content M" [ref=e178]:
+                    - generic [ref=e179]:
+                      - generic [ref=e180]: Content
+                      - generic [ref=e181]: M
+                  - columnheader "Usage M" [ref=e182]:
+                    - generic [ref=e183]:
+                      - generic [ref=e184]: Usage
+                      - generic [ref=e185]: M
+                  - columnheader "# S" [ref=e186]:
+                    - generic [ref=e187]:
+                      - generic [ref=e188]: "#"
+                      - generic [ref=e189]: S
+                  - columnheader "Type S" [ref=e190]:
+                    - generic [ref=e191]:
+                      - generic [ref=e192]: Type
+                      - generic [ref=e193]: S
+                  - columnheader "Datetime S" [ref=e194]:
+                    - generic [ref=e195]:
+                      - generic [ref=e196]: Datetime
+                      - generic [ref=e197]: S
+                  - columnheader "Duration S" [ref=e198]:
+                    - generic [ref=e199]:
+                      - generic [ref=e200]: Duration
+                      - generic [ref=e201]: S
+                  - columnheader "Agent S" [ref=e202]:
+                    - generic [ref=e203]:
+                      - generic [ref=e204]: Agent
+                      - generic [ref=e205]: S
+                  - columnheader "Model S" [ref=e206]:
+                    - generic [ref=e207]:
+                      - generic [ref=e208]: Model
+                      - generic [ref=e209]: S
+                  - columnheader "Name S" [ref=e210]:
+                    - generic [ref=e211]:
+                      - generic [ref=e212]: Name
+                      - generic [ref=e213]: S
+                  - columnheader "Input S" [ref=e214]:
+                    - generic [ref=e215]:
+                      - generic [ref=e216]: Input
+                      - generic [ref=e217]: S
+                  - columnheader "Output S" [ref=e218]:
+                    - generic [ref=e219]:
+                      - generic [ref=e220]: Output
+                      - generic [ref=e221]: S
+                  - columnheader "Usage S" [ref=e222]:
+                    - generic [ref=e223]:
+                      - generic [ref=e224]: Usage
+                      - generic [ref=e225]: S
+              - rowgroup [ref=e226]:
+                - 'row "Collapse Where is my order ORD-4471, and is… 2026-06-07 08:35:28 <1ms assistant Order ORD-4471 is out for delivery (today… 2 { } example: \"manual_spans.py\" 1 Σ 454 tok · $0.001615" [ref=e227] [cursor=pointer]':
+                  - cell "Collapse" [ref=e228]:
+                    - button "Collapse" [ref=e229]:
+                      - img [ref=e230]
+                  - cell [ref=e232]:
+                    - button "Run evaluations for this row" [ref=e233]:
+                      - img [ref=e234]
+                  - cell [ref=e236]:
+                    - button "View 1 agent" [ref=e237]:
+                      - img [ref=e238]
+                  - cell "Where is my order ORD-4471, and is…" [ref=e241]:
+                    - link "Where is my order ORD-4471, and is…" [ref=e242]:
+                      - /url: /traces/d5d271685778cca5dfce3ff05f22b449
+                      - generic [ref=e244]: Where is my order ORD-4471, and is…
+                  - cell "2026-06-07 08:35:28" [ref=e245]
+                  - cell "<1ms" [ref=e246]
+                  - cell "assistant Order ORD-4471 is out for delivery (today… 2" [ref=e247]:
+                    - button "assistant Order ORD-4471 is out for delivery (today… 2" [ref=e248]:
+                      - img [ref=e250]
+                      - generic [ref=e253]:
+                        - generic [ref=e254]: assistant
+                        - generic [ref=e255]: Order ORD-4471 is out for delivery (today…
+                      - generic [ref=e256]: "2"
+                      - img [ref=e258]
+                  - 'cell "{ } example: \"manual_spans.py\" 1" [ref=e260]':
+                    - 'button "{ } example: \"manual_spans.py\" 1" [ref=e261]':
+                      - generic [ref=e263]: "{ }"
+                      - generic [ref=e265]:
+                        - generic [ref=e266]: "example:"
+                        - generic [ref=e267]: "\"manual_spans.py\""
+                      - generic [ref=e268]: "1"
+                      - img [ref=e270]
+                  - cell "Σ 454 tok · $0.001615" [ref=e272]:
+                    - button "Σ 454 tok · $0.001615" [ref=e273]:
+                      - generic [ref=e275]: Σ
+                      - generic [ref=e276]: 454 tok · $0.001615
+                      - img [ref=e278]
+                  - cell [ref=e280]
+                  - cell [ref=e281]
+                  - cell [ref=e282]
+                  - cell [ref=e283]
+                  - cell [ref=e284]
+                  - cell [ref=e285]
+                  - cell [ref=e286]
+                  - cell [ref=e287]
+                  - cell [ref=e288]
+                  - cell [ref=e289]
+                  - cell [ref=e290]
+                  - cell [ref=e291]
+                  - cell [ref=e292]
+                  - cell [ref=e293]
+                  - cell [ref=e294]
+                  - cell [ref=e295]
+                - row "user 1 2026-06-07 08:35:28 user Where is my order ORD-4471, and is the Alp… 1" [ref=e296] [cursor=pointer]:
+                  - cell [ref=e297]
+                  - cell [ref=e298]:
+                    - button "Run evaluations for this row" [ref=e299]:
+                      - img [ref=e300]
+                  - cell [ref=e302]
+                  - cell [ref=e303]
+                  - cell [ref=e304]
+                  - cell [ref=e305]
+                  - cell [ref=e306]
+                  - cell [ref=e307]
+                  - cell [ref=e308]
+                  - cell "user" [ref=e309]:
+                    - generic [ref=e311]: user
+                  - cell "1" [ref=e313]
+                  - cell "2026-06-07 08:35:28" [ref=e314]
+                  - cell [ref=e315]
+                  - cell "user Where is my order ORD-4471, and is the Alp… 1" [ref=e316]:
+                    - button "user Where is my order ORD-4471, and is the Alp… 1" [ref=e317]:
+                      - img [ref=e319]
+                      - generic [ref=e322]:
+                        - generic [ref=e323]: user
+                        - generic [ref=e324]: Where is my order ORD-4471, and is the Alp…
+                      - generic [ref=e325]: "1"
+                      - img [ref=e327]
+                  - cell [ref=e329]
+                  - cell [ref=e330]
+                  - cell [ref=e331]
+                  - cell [ref=e332]
+                  - cell [ref=e333]
+                  - cell [ref=e334]
+                  - cell [ref=e335]
+                  - cell [ref=e336]
+                  - cell [ref=e337]
+                  - cell [ref=e338]
+                  - cell [ref=e339]
+                - row "Collapse failing assistant 2 2026-06-07 08:35:28 <1ms assistant Order ORD-4471 is out for delivery (today… 1 Σ 454 tok · $0.001615" [ref=e340] [cursor=pointer]:
+                  - cell "Collapse" [ref=e341]:
+                    - button "Collapse" [ref=e342]:
+                      - img [ref=e343]
+                  - cell [ref=e345]:
+                    - button "Run evaluations for this row" [ref=e346]:
+                      - img [ref=e347]
+                  - cell [ref=e349]
+                  - cell [ref=e350]
+                  - cell [ref=e351]
+                  - cell [ref=e352]
+                  - cell [ref=e353]
+                  - cell [ref=e354]
+                  - cell [ref=e355]
+                  - cell "failing assistant" [ref=e356]:
+                    - generic [ref=e357]:
+                      - generic "failing" [ref=e358]
+                      - generic [ref=e359]: assistant
+                  - cell "2" [ref=e361]
+                  - cell "2026-06-07 08:35:28" [ref=e362]
+                  - cell "<1ms" [ref=e363]
+                  - cell "assistant Order ORD-4471 is out for delivery (today… 1" [ref=e364]:
+                    - button "assistant Order ORD-4471 is out for delivery (today… 1" [ref=e365]:
+                      - img [ref=e367]
+                      - generic [ref=e370]:
+                        - generic [ref=e371]: assistant
+                        - generic [ref=e372]: Order ORD-4471 is out for delivery (today…
+                      - generic [ref=e373]: "1"
+                      - img [ref=e375]
+                  - cell "Σ 454 tok · $0.001615" [ref=e377]:
+                    - button "Σ 454 tok · $0.001615" [ref=e378]:
+                      - generic [ref=e380]: Σ
+                      - generic [ref=e381]: 454 tok · $0.001615
+                      - img [ref=e383]
+                  - cell [ref=e385]
+                  - cell [ref=e386]
+                  - cell [ref=e387]
+                  - cell [ref=e388]
+                  - cell [ref=e389]
+                  - cell [ref=e390]
+                  - cell [ref=e391]
+                  - cell [ref=e392]
+                  - cell [ref=e393]
+                  - cell [ref=e394]
+                - row "1 AGENT 2026-06-07 08:35:28 0.31ms support-agent support-agent user Where is my order ORD-4471, and is the Alp… 1 assistant Order ORD-4471 is out for delivery (today… 1 —" [ref=e395]:
+                  - cell [ref=e396]
+                  - cell [ref=e397]:
+                    - button "Run evaluations for this row" [ref=e398] [cursor=pointer]:
+                      - img [ref=e399]
+                  - cell [ref=e401]
+                  - cell [ref=e402]
+                  - cell [ref=e403]
+                  - cell [ref=e404]
+                  - cell [ref=e405]
+                  - cell [ref=e406]
+                  - cell [ref=e407]
+                  - cell [ref=e408]
+                  - cell [ref=e409]
+                  - cell [ref=e410]
+                  - cell [ref=e411]
+                  - cell [ref=e412]
+                  - cell [ref=e413]
+                  - cell "1" [ref=e414]
+                  - cell "AGENT" [ref=e415]:
+                    - generic [ref=e416]: AGENT
+                  - cell "2026-06-07 08:35:28" [ref=e418]
+                  - cell "0.31ms" [ref=e419]
+                  - cell "support-agent" [ref=e420]:
+                    - generic "support-agent" [ref=e421]
+                  - cell [ref=e422]
+                  - cell "support-agent" [ref=e423]:
+                    - generic "support-agent" [ref=e424]
+                  - cell "user Where is my order ORD-4471, and is the Alp… 1" [ref=e425]:
+                    - button "user Where is my order ORD-4471, and is the Alp… 1" [ref=e426] [cursor=pointer]:
+                      - img [ref=e428]
+                      - generic [ref=e431]:
+                        - generic [ref=e432]: user
+                        - generic [ref=e433]: Where is my order ORD-4471, and is the Alp…
+                      - generic [ref=e434]: "1"
+                      - img [ref=e436]
+                  - cell "assistant Order ORD-4471 is out for delivery (today… 1" [ref=e438]:
+                    - button "assistant Order ORD-4471 is out for delivery (today… 1" [ref=e439] [cursor=pointer]:
+                      - img [ref=e441]
+                      - generic [ref=e444]:
+                        - generic [ref=e445]: assistant
+                        - generic [ref=e446]: Order ORD-4471 is out for delivery (today…
+                      - generic [ref=e447]: "1"
+                      - img [ref=e449]
+                  - cell "—" [ref=e451]
+                - row "2 THINKING 2026-06-07 08:35:28 0.04ms support-agent thinking — thinking Need the order status, then coat inventory… 1 —" [ref=e452]:
+                  - cell [ref=e453]
+                  - cell [ref=e454]:
+                    - button "Run evaluations for this row" [ref=e455] [cursor=pointer]:
+                      - img [ref=e456]
+                  - cell [ref=e458]
+                  - cell [ref=e459]
+                  - cell [ref=e460]
+                  - cell [ref=e461]
+                  - cell [ref=e462]
+                  - cell [ref=e463]
+                  - cell [ref=e464]
+                  - cell [ref=e465]
+                  - cell [ref=e466]
+                  - cell [ref=e467]
+                  - cell [ref=e468]
+                  - cell [ref=e469]
+                  - cell [ref=e470]
+                  - cell "2" [ref=e471]
+                  - cell "THINKING" [ref=e472]:
+                    - generic [ref=e473]: THINKING
+                  - cell "2026-06-07 08:35:28" [ref=e475]
+                  - cell "0.04ms" [ref=e476]
+                  - cell "support-agent" [ref=e477]:
+                    - generic "support-agent" [ref=e478]
+                  - cell [ref=e479]
+                  - cell "thinking" [ref=e480]:
+                    - generic "thinking" [ref=e481]
+                  - cell "—" [ref=e482]
+                  - cell "thinking Need the order status, then coat inventory… 1" [ref=e483]:
+                    - button "thinking Need the order status, then coat inventory… 1" [ref=e484] [cursor=pointer]:
+                      - img [ref=e486]
+                      - generic [ref=e489]:
+                        - generic [ref=e490]: thinking
+                        - generic [ref=e491]: Need the order status, then coat inventory…
+                      - generic [ref=e492]: "1"
+                      - img [ref=e494]
+                  - cell "—" [ref=e496]
+                - row "3 GENERATION 2026-06-07 08:35:28 0.05ms support-agent gpt-4o gpt-4o user Where is my order ORD-4471, and is the Alp… 1 assistant 1 Σ 204 tok · $0.000690" [ref=e497]:
+                  - cell [ref=e498]
+                  - cell [ref=e499]:
+                    - button "Run evaluations for this row" [ref=e500] [cursor=pointer]:
+                      - img [ref=e501]
+                  - cell [ref=e503]
+                  - cell [ref=e504]
+                  - cell [ref=e505]
+                  - cell [ref=e506]
+                  - cell [ref=e507]
+                  - cell [ref=e508]
+                  - cell [ref=e509]
+                  - cell [ref=e510]
+                  - cell [ref=e511]
+                  - cell [ref=e512]
+                  - cell [ref=e513]
+                  - cell [ref=e514]
+                  - cell [ref=e515]
+                  - cell "3" [ref=e516]
+                  - cell "GENERATION" [ref=e517]:
+                    - generic [ref=e518]: GENERATION
+                  - cell "2026-06-07 08:35:28" [ref=e520]
+                  - cell "0.05ms" [ref=e521]
+                  - cell "support-agent" [ref=e522]:
+                    - generic "support-agent" [ref=e523]
+                  - cell "gpt-4o" [ref=e524]:
+                    - generic "gpt-4o" [ref=e525]
+                  - cell "gpt-4o" [ref=e526]:
+                    - generic "gpt-4o" [ref=e527]
+                  - cell "user Where is my order ORD-4471, and is the Alp… 1" [ref=e528]:
+                    - button "user Where is my order ORD-4471, and is the Alp… 1" [ref=e529] [cursor=pointer]:
+                      - img [ref=e531]
+                      - generic [ref=e534]:
+                        - generic [ref=e535]: user
+                        - generic [ref=e536]: Where is my order ORD-4471, and is the Alp…
+                      - generic [ref=e537]: "1"
+                      - img [ref=e539]
+                  - cell "assistant 1" [ref=e541]:
+                    - button "assistant 1" [ref=e542] [cursor=pointer]:
+                      - img [ref=e544]
+                      - generic [ref=e548]: assistant
+                      - generic [ref=e549]: "1"
+                      - img [ref=e551]
+                  - cell "Σ 204 tok · $0.000690" [ref=e553]:
+                    - button "Σ 204 tok · $0.000690" [ref=e554] [cursor=pointer]:
+                      - generic [ref=e556]: Σ
+                      - generic [ref=e557]: 204 tok · $0.000690
+                      - img [ref=e559]
+                - 'row "4 TOOL 2026-06-07 08:35:28 0.02ms support-agent get_order_status { } order_id: \"ORD-4471\" 1 { } status: \"out_for_delivery\" +3 4 —" [ref=e561]':
+                  - cell [ref=e562]
+                  - cell [ref=e563]:
+                    - button "Run evaluations for this row" [ref=e564] [cursor=pointer]:
+                      - img [ref=e565]
+                  - cell [ref=e567]
+                  - cell [ref=e568]
+                  - cell [ref=e569]
+                  - cell [ref=e570]
+                  - cell [ref=e571]
+                  - cell [ref=e572]
+                  - cell [ref=e573]
+                  - cell [ref=e574]
+                  - cell [ref=e575]
+                  - cell [ref=e576]
+                  - cell [ref=e577]
+                  - cell [ref=e578]
+                  - cell [ref=e579]
+                  - cell "4" [ref=e580]
+                  - cell "TOOL" [ref=e581]:
+                    - generic [ref=e582]: TOOL
+                  - cell "2026-06-07 08:35:28" [ref=e584]
+                  - cell "0.02ms" [ref=e585]
+                  - cell "support-agent" [ref=e586]:
+                    - generic "support-agent" [ref=e587]
+                  - cell [ref=e588]
+                  - cell "get_order_status" [ref=e589]:
+                    - generic "get_order_status" [ref=e590]
+                  - 'cell "{ } order_id: \"ORD-4471\" 1" [ref=e591]':
+                    - 'button "{ } order_id: \"ORD-4471\" 1" [ref=e592] [cursor=pointer]':
+                      - generic [ref=e594]: "{ }"
+                      - generic [ref=e596]:
+                        - generic [ref=e597]: "order_id:"
+                        - generic [ref=e598]: "\"ORD-4471\""
+                      - generic [ref=e599]: "1"
+                      - img [ref=e601]
+                  - 'cell "{ } status: \"out_for_delivery\" +3 4" [ref=e603]':
+                    - 'button "{ } status: \"out_for_delivery\" +3 4" [ref=e604] [cursor=pointer]':
+                      - generic [ref=e606]: "{ }"
+                      - generic [ref=e608]:
+                        - generic [ref=e609]: "status:"
+                        - generic [ref=e610]: "\"out_for_delivery\""
+                        - generic [ref=e611]: "+3"
+                      - generic [ref=e612]: "4"
+                      - img [ref=e614]
+                  - cell "—" [ref=e616]
+                - 'row "5 TOOL 2026-06-07 08:35:28 0.02ms support-agent check_inventory { } sku: \"SKU-COAT-01\" 1 — —" [ref=e617]':
+                  - cell [ref=e618]
+                  - cell [ref=e619]:
+                    - button "Run evaluations for this row" [ref=e620] [cursor=pointer]:
+                      - img [ref=e621]
+                  - cell [ref=e623]
+                  - cell [ref=e624]
+                  - cell [ref=e625]
+                  - cell [ref=e626]
+                  - cell [ref=e627]
+                  - cell [ref=e628]
+                  - cell [ref=e629]
+                  - cell [ref=e630]
+                  - cell [ref=e631]
+                  - cell [ref=e632]
+                  - cell [ref=e633]
+                  - cell [ref=e634]
+                  - cell [ref=e635]
+                  - cell "5" [ref=e636]
+                  - cell "TOOL" [ref=e637]:
+                    - generic [ref=e638]: TOOL
+                  - cell "2026-06-07 08:35:28" [ref=e640]
+                  - cell "0.02ms" [ref=e641]
+                  - cell "support-agent" [ref=e642]:
+                    - generic "support-agent" [ref=e643]
+                  - cell [ref=e644]
+                  - cell "check_inventory" [ref=e645]:
+                    - generic "check_inventory" [ref=e646]
+                  - 'cell "{ } sku: \"SKU-COAT-01\" 1" [ref=e647]':
+                    - 'button "{ } sku: \"SKU-COAT-01\" 1" [ref=e648] [cursor=pointer]':
+                      - generic [ref=e650]: "{ }"
+                      - generic [ref=e652]:
+                        - generic [ref=e653]: "sku:"
+                        - generic [ref=e654]: "\"SKU-COAT-01\""
+                      - generic [ref=e655]: "1"
+                      - img [ref=e657]
+                  - cell "—" [ref=e659]
+                  - cell "—" [ref=e660]
+                - row "6 GENERATION 2026-06-07 08:35:28 0.02ms support-agent gpt-4o gpt-4o user summarize for the customer 1 assistant Order ORD-4471 is out for delivery (today… 1 Σ 250 tok · $0.000925" [ref=e661]:
+                  - cell [ref=e662]
+                  - cell [ref=e663]:
+                    - button "Run evaluations for this row" [ref=e664] [cursor=pointer]:
+                      - img [ref=e665]
+                  - cell [ref=e667]
+                  - cell [ref=e668]
+                  - cell [ref=e669]
+                  - cell [ref=e670]
+                  - cell [ref=e671]
+                  - cell [ref=e672]
+                  - cell [ref=e673]
+                  - cell [ref=e674]
+                  - cell [ref=e675]
+                  - cell [ref=e676]
+                  - cell [ref=e677]
+                  - cell [ref=e678]
+                  - cell [ref=e679]
+                  - cell "6" [ref=e680]
+                  - cell "GENERATION" [ref=e681]:
+                    - generic [ref=e682]: GENERATION
+                  - cell "2026-06-07 08:35:28" [ref=e684]
+                  - cell "0.02ms" [ref=e685]
+                  - cell "support-agent" [ref=e686]:
+                    - generic "support-agent" [ref=e687]
+                  - cell "gpt-4o" [ref=e688]:
+                    - generic "gpt-4o" [ref=e689]
+                  - cell "gpt-4o" [ref=e690]:
+                    - generic "gpt-4o" [ref=e691]
+                  - cell "user summarize for the customer 1" [ref=e692]:
+                    - button "user summarize for the customer 1" [ref=e693] [cursor=pointer]:
+                      - img [ref=e695]
+                      - generic [ref=e698]:
+                        - generic [ref=e699]: user
+                        - generic [ref=e700]: summarize for the customer
+                      - generic [ref=e701]: "1"
+                      - img [ref=e703]
+                  - cell "assistant Order ORD-4471 is out for delivery (today… 1" [ref=e705]:
+                    - button "assistant Order ORD-4471 is out for delivery (today… 1" [ref=e706] [cursor=pointer]:
+                      - img [ref=e708]
+                      - generic [ref=e711]:
+                        - generic [ref=e712]: assistant
+                        - generic [ref=e713]: Order ORD-4471 is out for delivery (today…
+                      - generic [ref=e714]: "1"
+                      - img [ref=e716]
+                  - cell "Σ 250 tok · $0.000925" [ref=e718]:
+                    - button "Σ 250 tok · $0.000925" [ref=e719] [cursor=pointer]:
+                      - generic [ref=e721]: Σ
+                      - generic [ref=e722]: 250 tok · $0.000925
+                      - img [ref=e724]

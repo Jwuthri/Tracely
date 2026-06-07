@@ -7,12 +7,13 @@ Instrument an agent and see the trace in Tracely in about five minutes.
 ## Install
 
 ```bash
-pip install tracely-sdk
+pip install "tracely-sdk[openai]"        # add the provider you use: [anthropic], [langchain], [all]
 # or, from this repo:  uv pip install -e sdk   /   pip install ./sdk
 ```
 
-Requires Python ≥ 3.10. Dependencies are just `opentelemetry-sdk` + the OTLP/HTTP exporter. The
-install also adds the `tracely` CLI (entry point `tracely_sdk.cli:main`).
+Requires Python ≥ 3.10. The core depends only on `opentelemetry-sdk` + the OTLP/HTTP exporter; a
+provider extra adds that provider's auto-instrumentor. The install also adds the `tracely` CLI
+(entry point `tracely_sdk.cli:main`).
 
 <Callout type="info">
   You need a running Tracely backend. From the repo root: `docker compose up -d --build --wait`,
@@ -33,29 +34,29 @@ tracely.init(
     api_key="tracely_dev_key",          # an ingest key
     service_name="support-agent",
     env="prod",                         # prod | staging | ci | dev  — the gating axis
+    instrument="auto",                  # activate every importable provider instrumentor
 )
 ```
 
-### Describe a run with context managers
+### Call your model — no span code
 
-Each `with` block is a span; nesting builds the trace tree.
+Your normal OpenAI/Anthropic/… calls are captured automatically. Wrap a run in `tracely.trace(...)`
+to attach the agent / conversation / user to every span.
 
 ```python
-with tracely.agent("support-agent", version="v3",
-                   conversation="conv-1", turn=0,
-                   user="u_42", trace_name="order status") as a:
-    tracely.set_io(a, input="Where is order ORD-4471?", output="It's out for delivery, ETA today.")
+from openai import OpenAI
+client = OpenAI()
 
-    with tracely.llm("gpt-4o", agent="support-agent", temperature=0.2) as g:
-        tracely.set_io(g, input=[{"role": "user", "content": "Where is order ORD-4471?"}],
-                          output={"role": "assistant", "content": "calling track_order…",
-                                  "finish_reason": "tool_calls"})
-        tracely.set_usage(g, input_tokens=180, output_tokens=24)
-
-    with tracely.tool("track_order", agent="support-agent") as t:
-        tracely.set_io(t, input={"order_id": "ORD-4471"},
-                          output={"status": "out_for_delivery", "eta": "today"})
+with tracely.trace(agent="support-agent", conversation="conv-1", user="u_42"):
+    client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "Where is order ORD-4471?"}],
+    )
 ```
+
+That produces a **GENERATION** span with model, messages, tokens, latency, tool calls, and cost —
+with zero span code. See [Automatic instrumentation](/automatic) for `@observe`, streaming, threads,
+and LiteLLM. Need a span for your own logic? The manual API is at [Custom spans](/instrumentation).
 
 ### Flush before the process exits
 
@@ -77,5 +78,6 @@ conversation; expand it to see the agent → llm → tool tree, token usage, and
 
 ## What's next
 
+- [Automatic instrumentation](/automatic) — `instrument="auto"`, `@observe`, `trace()`, streaming, LiteLLM, threads.
 - [Core concepts](/concepts) — what the observation types mean and how runs thread into conversations.
-- [Instrumenting an agent](/instrumentation) — retrievers, embeddings, guardrails, thinking, handoffs, metadata.
+- [Custom spans](/instrumentation) — the manual API: retrievers, embeddings, guardrails, thinking, handoffs, metadata.

@@ -19,27 +19,38 @@ KEY = os.environ.get("TRACELY_KEY", "tracely_dev_key")
 
 tracely.init(endpoint=API, api_key=KEY, service_name="multiweather", env="prod")
 
-with tracely.agent("multiweather") as a:
+with tracely.trace(example=os.path.basename(__file__)), tracely.agent("multiweather") as a:
     # message-level I/O as structured message objects (role + typed content blocks)
     tracely.set_io(
         a,
         input={"role": "user", "content": [{"type": "text", "text": "weather in SF and NYC?"}]},
-        output={"role": "assistant", "content": [{"type": "text", "text": "Sorry, the NYC lookup failed."}]},
+        output={
+            "role": "assistant",
+            "content": [{"type": "text", "text": "Sorry, the NYC lookup failed."}],
+        },
     )
     with tracely.llm("gpt-4o") as g:
         tracely.set_io(
             g,
             input=[
                 {"role": "system", "content": "You are a helpful weather assistant."},
-                {"role": "user",   "content": "weather in SF and NYC?"},
+                {"role": "user", "content": "weather in SF and NYC?"},
             ],
             output={
                 "role": "assistant",
                 "content": None,
                 "finish_reason": "tool_calls",
                 "tool_calls": [
-                    {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": '{"city":"SF"}'}},
-                    {"id": "call_2", "type": "function", "function": {"name": "get_weather", "arguments": '{"city":"NYC"}'}},
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": '{"city":"SF"}'},
+                    },
+                    {
+                        "id": "call_2",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": '{"city":"NYC"}'},
+                    },
                 ],
             },
         )
