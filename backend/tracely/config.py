@@ -46,13 +46,13 @@ class Settings(BaseSettings):
     # optional LLM-as-judge (auto quality eval); skipped if no key is set
     llm_judge_api_key: str = ""
     llm_judge_base_url: str = "https://api.openai.com/v1"
-    llm_judge_model: str = "gpt-4o-mini"
+    llm_judge_model: str = "gpt-5.4-nano"
 
     # failure intelligence (embeddings + LangGraph agents) — needs an OpenAI key
     openai_api_key: str = ""
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1024
-    agent_model: str = "gpt-4o-mini"
+    agent_model: str = "gpt-5.4-mini"
     # cluster directly on cosine distance below this many failures; UMAP-denoise at/above it
     # (UMAP needs a large, diverse set — on few/near-duplicate points it invents structure).
     fi_umap_min_n: int = 50

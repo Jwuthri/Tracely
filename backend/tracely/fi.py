@@ -182,8 +182,6 @@ def rebuild_clusters(project_id: str) -> dict:
     from tracely.db import SyncSessionLocal
 
     client = clickhouse.get_client()
-    # the failing evaluator verdicts ARE the ground truth for why each run failed — pull their
-    # reasons so the analysis is grounded in the same signals the eval engine emitted.
     rows = client.query(
         "SELECT trace_id, name, comment FROM scores FINAL WHERE project_id = {p:String} "
         "AND source = 'EVAL' AND verdict = 'FAIL' AND evaluation_case_id = '' LIMIT 5000",
