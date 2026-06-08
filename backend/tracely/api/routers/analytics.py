@@ -8,10 +8,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from starlette.concurrency import run_in_threadpool
 
-from tracely import clickhouse
 from tracely.api.auth import get_project_id
-from tracely.db import SyncSessionLocal
-from tracely.models import EvaluationCase, FailureCluster, GateRun
+from tracely.infrastructure.clickhouse import client as clickhouse
+from tracely.infrastructure.db.engine import SyncSessionLocal
+from tracely.infrastructure.db.models import EvaluationCase, FailureCluster, GateRun
 
 router = APIRouter(prefix="/api")
 

@@ -262,7 +262,7 @@ def test_dropin_openai_no_global_patch(exporter: InMemorySpanExporter) -> None:
     httpx = pytest.importorskip("httpx")
     from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 
-    from tracely.otel.mapping import events_from_request
+    from tracely.otel import events_from_request
     from tracely_sdk.openai import OpenAI, wrap_openai
 
     resp = {
@@ -315,7 +315,7 @@ def test_dropin_anthropic_no_global_patch(exporter: InMemorySpanExporter) -> Non
     httpx = pytest.importorskip("httpx")
     from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 
-    from tracely.otel.mapping import events_from_request
+    from tracely.otel import events_from_request
     from tracely_sdk.anthropic import Anthropic, wrap_anthropic
 
     resp = {
@@ -392,10 +392,10 @@ def test_openai_instrumentor_through_backend_mapping(exporter: InMemorySpanExpor
     pytest.importorskip("openinference.instrumentation.openai")
     openai = pytest.importorskip("openai")
     httpx = pytest.importorskip("httpx")
-    pytest.importorskip("tracely.otel.mapping")
+    pytest.importorskip("tracely.otel")
     from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 
-    from tracely.otel.mapping import events_from_request
+    from tracely.otel import events_from_request
 
     tracely.init(env="prod", instrument=["openai"])
     assert "openai" in tracely._instrumented

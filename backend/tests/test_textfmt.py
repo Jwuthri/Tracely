@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tracely.textfmt import extract_text, message_text
+from tracely.infrastructure.text import extract_text, message_text
 
 
 def test_chat_message_object():

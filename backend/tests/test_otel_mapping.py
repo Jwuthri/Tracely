@@ -9,8 +9,10 @@ from opentelemetry.proto.common.v1.common_pb2 import AnyValue, InstrumentationSc
 from opentelemetry.proto.resource.v1.resource_pb2 import Resource
 from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Span
 
-from tracely.events import EVENT_COLUMNS, to_rows
-from tracely.otel.mapping import _convention, events_from_request, map_observation_type
+from tracely.infrastructure.clickhouse.events_schema import EVENT_COLUMNS, to_rows
+from tracely.otel import events_from_request
+from tracely.otel.convention import _convention
+from tracely.otel.types import map_observation_type
 
 
 def _kv(k: str, v) -> KeyValue:

@@ -1,4 +1,4 @@
-"""CI/CD gate endpoints: run a gate, list gates, gate detail."""
+"""CI/CD gate endpoints: run a gate, list gates, gate detail, fetch the replay suite."""
 
 from __future__ import annotations
 
@@ -8,15 +8,17 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import desc, select
 from starlette.concurrency import run_in_threadpool
 
-from tracely import gate as gatesvc
 from tracely.api.auth import get_project_id
-from tracely.db import SyncSessionLocal
-from tracely.models import Agent, EvaluationCase, GateCase, GateRun
+from tracely.infrastructure.db.engine import SyncSessionLocal
+from tracely.infrastructure.db.models import Agent, EvaluationCase, GateCase, GateRun
+from tracely.services.gate_service import GateService
 
 router = APIRouter(prefix="/api")
 
 
-def _gate_dict(g: GateRun, agent_slug: str | None = None, cases: list | None = None) -> dict[str, Any]:
+def _gate_dict(
+    g: GateRun, agent_slug: str | None = None, cases: list | None = None
+) -> dict[str, Any]:
     d = {
         "id": g.id,
         "agent_id": g.agent_id,
@@ -58,7 +60,9 @@ def _cases(session, gate_id: str) -> list[dict]:
 
 
 @router.post("/gate")
-async def run_gate(project_id: str = Depends(get_project_id), body: dict = Body(default={})) -> dict:
+async def run_gate(
+    project_id: str = Depends(get_project_id), body: dict = Body(default={})
+) -> dict:
     agent_ref = body.get("agent")
     env = body.get("env") or "ci"
     git_ref = body.get("git_ref") or ""
@@ -69,11 +73,13 @@ async def run_gate(project_id: str = Depends(get_project_id), body: dict = Body(
 
     def work():
         with SyncSessionLocal() as s:
-            aid = gatesvc.resolve_agent_id(s, project_id, agent_ref)
+            gate_svc = GateService(s)
+            aid = gate_svc.resolve_agent_id(project_id, agent_ref)
             if not aid:
                 return ("err", f"agent '{agent_ref}' not found")
-            g = gatesvc.run_gate(
-                s, project_id, aid, env=env, git_ref=git_ref, pr_number=pr_number, candidates=candidates
+            g = gate_svc.run_gate(
+                project_id, aid, env=env, git_ref=git_ref, pr_number=pr_number,
+                candidates=candidates,
             )
             agent = s.get(Agent, aid)
             return ("ok", _gate_dict(g, agent.slug if agent else None, _cases(s, g.id)))
@@ -86,13 +92,19 @@ async def run_gate(project_id: str = Depends(get_project_id), body: dict = Body(
 
 @router.get("/gate/suite")
 async def gate_suite(agent: str, project_id: str = Depends(get_project_id)) -> dict:
-    """The promoted regression suite (+ recorded inputs) for an agent — what `tracely replay` runs."""
+    """The promoted regression suite (+ recorded inputs) for an agent — what `tracely replay`
+    runs."""
     def work():
         with SyncSessionLocal() as s:
-            aid = gatesvc.resolve_agent_id(s, project_id, agent)
+            gate_svc = GateService(s)
+            aid = gate_svc.resolve_agent_id(project_id, agent)
             if not aid:
                 return None
-            return {"agent": agent, "agent_id": aid, "cases": gatesvc.replay_suite(s, project_id, aid)}
+            return {
+                "agent": agent,
+                "agent_id": aid,
+                "cases": gate_svc.replay_suite(project_id, aid),
+            }
 
     res = await run_in_threadpool(work)
     if res is None:

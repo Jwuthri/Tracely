@@ -1,4 +1,4 @@
-"""Regression: promote a trace, list/get cases, replay a case."""
+"""Regression: promote a trace, list/get cases, replay a case + the dashboard stats."""
 
 from __future__ import annotations
 
@@ -8,10 +8,16 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import desc, func, select
 from starlette.concurrency import run_in_threadpool
 
-from tracely import clickhouse, regression
 from tracely.api.auth import get_project_id
-from tracely.db import SyncSessionLocal
-from tracely.models import Agent, CaseReplay, EvaluationCase, FailureCluster
+from tracely.infrastructure.clickhouse import client as clickhouse
+from tracely.infrastructure.db.engine import SyncSessionLocal
+from tracely.infrastructure.db.models import (
+    Agent,
+    CaseReplay,
+    EvaluationCase,
+    FailureCluster,
+)
+from tracely.services.regression_service import NotFound, RegressionService
 
 router = APIRouter(prefix="/api")
 
@@ -48,9 +54,11 @@ async def stats(project_id: str = Depends(get_project_id)) -> dict:
                     FailureCluster.project_id == project_id, FailureCluster.status == "OPEN"
                 )
             ).scalar() or 0
-        return {"traces": traces, "spans": spans, "failing_traces": failing,
-                "auto_failures": auto_failures, "open_clusters": int(open_clusters),
-                "agents": int(agents), "cases": int(cases)}
+        return {
+            "traces": traces, "spans": spans, "failing_traces": failing,
+            "auto_failures": auto_failures, "open_clusters": int(open_clusters),
+            "agents": int(agents), "cases": int(cases),
+        }
 
     return await run_in_threadpool(work)
 
@@ -89,8 +97,8 @@ async def promote(trace_id: str, project_id: str = Depends(get_project_id)) -> d
     def work():
         with SyncSessionLocal() as s:
             try:
-                case = regression.promote_trace(s, project_id, trace_id)
-            except regression.NotFound as e:
+                case = RegressionService(s).promote_trace(project_id, trace_id)
+            except NotFound as e:
                 return ("err", str(e))
             return ("ok", _case_dict(case))
 
@@ -113,7 +121,6 @@ async def list_cases(project_id: str = Depends(get_project_id)) -> list[dict]:
                 .scalars()
                 .all()
             )
-            # attach the latest replay verdict for the list view
             out = []
             for c in rows:
                 last = (
@@ -173,8 +180,8 @@ async def replay(
                 return ("err", "case not found")
             tid = candidate or c.source_trace_id
             try:
-                r = regression.replay_case(s, project_id, case_id, tid)
-            except regression.NotFound as e:
+                r = RegressionService(s).replay_case(project_id, case_id, tid)
+            except NotFound as e:
                 return ("err", str(e))
             return ("ok", {"verdict": r.verdict, "candidate_trace_id": r.candidate_trace_id, "detail": r.detail})
 

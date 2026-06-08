@@ -1,17 +1,17 @@
-"""CI-gate verdict logic — evaluate_case (PASS/FAIL engine) and _delta_warnings (soft gate).
+"""CI-gate verdict logic — evaluate_case (PASS/FAIL engine) and delta_warnings (soft gate).
 
 Both are pure functions: evaluate_case scores a produced trajectory against a case's assertions;
-_delta_warnings flags a run that's materially slower / more expensive than the baseline green gate.
+delta_warnings flags a run that's materially slower / more expensive than the baseline green gate.
 No Postgres / ClickHouse — models are built in memory only for attribute access.
 """
 
 from __future__ import annotations
 
 from tracely.config import settings
-from tracely.gate import _delta_warnings
-from tracely.models import EvaluationCase, GateRun
-from tracely.regression import evaluate_case
-from tracely.trajectory import build_trajectory
+from tracely.domain.gate.warnings import delta_warnings
+from tracely.domain.regression.contract import evaluate_case
+from tracely.domain.trajectory import build_trajectory
+from tracely.infrastructure.db.models import EvaluationCase, GateRun
 
 
 def _span(span_id: str, type_: str, name: str, *, parent: str = "", level: str = "DEFAULT") -> dict:
@@ -65,19 +65,19 @@ def test_no_error_assertion_off_ignores_errors():
     assert verdict == "PASS"
 
 
-# ── _delta_warnings ──────────────────────────────────────────────────────────
+# ── delta_warnings ──────────────────────────────────────────────────────────
 def _baseline(latency_ms: float, tokens: int) -> GateRun:
     return GateRun(latency_ms=latency_ms, total_tokens=tokens, status="PASS")
 
 
 def test_no_baseline_no_warnings():
-    assert _delta_warnings(9999.0, 99999, None) == []
+    assert delta_warnings(9999.0, 99999, None) == []
 
 
 def test_latency_regression_warns():
     base = _baseline(200.0, 1000)
     over = 200.0 * (1 + (settings.gate_latency_warn_pct + 20) / 100)
-    warns = _delta_warnings(over, 1000, base)
+    warns = delta_warnings(over, 1000, base)
     assert any("latency" in w for w in warns)
     assert not any("tokens" in w for w in warns)
 
@@ -85,16 +85,16 @@ def test_latency_regression_warns():
 def test_token_regression_warns():
     base = _baseline(200.0, 1000)
     over = int(1000 * (1 + (settings.gate_tokens_warn_pct + 20) / 100))
-    warns = _delta_warnings(200.0, over, base)
+    warns = delta_warnings(200.0, over, base)
     assert any("tokens" in w for w in warns)
 
 
 def test_tiny_baseline_latency_is_floored():
     # baseline < 50ms (e.g. hermetic replay) -> latency noise never warns, even at +1000%
     base = _baseline(10.0, 0)
-    assert _delta_warnings(1000.0, 0, base) == []
+    assert delta_warnings(1000.0, 0, base) == []
 
 
 def test_within_threshold_no_warning():
     base = _baseline(200.0, 1000)
-    assert _delta_warnings(200.0, 1000, base) == []  # identical -> 0% delta
+    assert delta_warnings(200.0, 1000, base) == []  # identical -> 0% delta

@@ -6,8 +6,8 @@ from fastapi import Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tracely.db import get_session
-from tracely.models import IngestKey
+from tracely.infrastructure.db.models import IngestKey
+from tracely.infrastructure.db.session import get_session
 
 
 async def get_project_id(

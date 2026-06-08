@@ -9,7 +9,7 @@ fix that actually calls the tool PASSes. These tests drive the pure trajectory l
 
 from __future__ import annotations
 
-from tracely.trajectory import (
+from tracely.domain.trajectory import (
     build_trajectory,
     required_tools,
     requested_tools,

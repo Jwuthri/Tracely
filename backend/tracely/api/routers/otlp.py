@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 from tracely.api.auth import get_project_id
-from tracely.ingestion import ingest_otlp
+from tracely.services.ingestion_service import ingest_otlp
 
 router = APIRouter()
 

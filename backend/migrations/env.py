@@ -5,9 +5,9 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-import tracely.models  # noqa: F401  (register tables on Base.metadata)
+import tracely.infrastructure.db.models  # noqa: F401  (register tables on Base.metadata)
 from tracely.config import settings
-from tracely.db import Base
+from tracely.infrastructure.db.base import Base
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.alembic_database_url)

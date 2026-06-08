@@ -27,14 +27,14 @@ Where to set breakpoints
 This script calls into two real entry points:
 
   Structural (cheap, deterministic, no LLM):
-      backend/tracely/eval_runner.py:51      evaluate_run()
-      backend/tracely/cluster.py:57          cluster_failure()
-      backend/tracely/cluster.py:43          _signature()   <- masked sig before sha256
+      backend/tracely/services/evaluation_service.py            EvaluationService.evaluate_trace
+      backend/tracely/services/structural_clustering_service.py StructuralClusteringService.cluster_failure
+      backend/tracely/domain/failure/signature.py               FailureSignature.compute <- masked sig before sha256
 
   Semantic (HDBSCAN + LangGraph agent, needs OPENAI_API_KEY):
-      backend/tracely/fi.py:179              rebuild_clusters()
-      backend/tracely/fi.py:51               embedding_text()
-      backend/tracely/agents.py              analyze_cluster / consolidate
+      backend/tracely/services/failure_intel_service.py         FailureIntelService.rebuild_clusters
+      backend/tracely/domain/failure/text.py                    embedding_text()
+      backend/tracely/infrastructure/llm/analysis_agents.py     analyze_cluster / consolidate
 
 Drop a `breakpoint()` in any of those, then run this script. Or pass
 `--break-before` to drop into pdb here so you can `s`tep into the call.
@@ -48,10 +48,11 @@ from typing import Any
 
 from sqlalchemy import text
 
-from tracely import clickhouse
 from tracely.config import settings
-from tracely.db import SyncSessionLocal
-from tracely.regression import _root, read_trace_spans
+from tracely.domain.traces.spans import root_span
+from tracely.infrastructure.clickhouse import client as clickhouse
+from tracely.infrastructure.clickhouse.trace_reader import TraceReader
+from tracely.infrastructure.db.engine import SyncSessionLocal
 
 
 def resolve_project_id(explicit: str | None) -> str:
@@ -92,7 +93,7 @@ def list_failing_traces(project_id: str, limit: int = 20) -> None:
 
 def summarize_spans(spans: list[dict]) -> None:
     """One-line per span so you can eyeball the trace shape before stepping in."""
-    root = _root(spans)
+    root = root_span(spans)
     print(f"\ntrace root: agent_id={root.get('agent_id')!r}  agent_run_id={root.get('agent_run_id')!r}")
     print(f"  {len(spans)} spans, {sum(1 for s in spans if s.get('level') == 'ERROR')} errors")
     for s in spans[:15]:
@@ -105,21 +106,21 @@ def summarize_spans(spans: list[dict]) -> None:
 
 def run_structural(project_id: str, trace_id: str, break_before: bool) -> None:
     """Real path: re-run the project's evaluators, then cluster_failure() on any FAILs."""
-    from tracely.eval_runner import evaluate_run
+    from tracely.services.evaluation_service import EvaluationService
 
-    ch = clickhouse.get_client()
-    spans = read_trace_spans(ch, project_id, trace_id)
+    reader = TraceReader()
+    spans = reader.read_spans(project_id, trace_id)
     if not spans:
         sys.exit(f"trace {trace_id!r} has no spans in ClickHouse — wrong project? not ingested yet?")
     summarize_spans(spans)
 
-    print("\n>>> calling evaluate_run() — this re-runs evaluators and calls cluster_failure()")
-    print("    set breakpoint() in backend/tracely/cluster.py:_signature or :cluster_failure")
+    print("\n>>> calling EvaluationService.evaluate_trace() — runs evaluators + StructuralClusteringService.cluster_failure")
+    print("    breakpoint targets: domain/failure/signature.py:FailureSignature.compute  or  services/structural_clustering_service.py:cluster_failure")
     if break_before:
-        print("    --break-before: dropping into pdb; `s` to step into evaluate_run")
+        print("    --break-before: dropping into pdb; `s` to step into evaluate_trace")
         breakpoint()
-    result = evaluate_run(project_id, trace_id)
-    print(f"<<< evaluate_run returned: {result}")
+    result = EvaluationService().evaluate_trace(project_id, trace_id)
+    print(f"<<< evaluate_trace returned: {result}")
     show_clusters_for_trace(project_id, trace_id)
 
 
@@ -127,14 +128,14 @@ def run_semantic(project_id: str, break_before: bool) -> None:
     """Project-wide: embed every failing trace, HDBSCAN, then LLM-name each cluster."""
     if not settings.openai_api_key:
         sys.exit("OPENAI_API_KEY not set in .env — semantic path needs it")
-    from tracely import fi
+    from tracely.services.failure_intel_service import FailureIntelService
 
-    print("\n>>> calling fi.rebuild_clusters() — embeds all failing traces, HDBSCAN, LangGraph agent")
-    print("    set breakpoint() in backend/tracely/fi.py:rebuild_clusters or :embedding_text")
+    print("\n>>> calling FailureIntelService.rebuild_clusters() — embeds all failing traces, HDBSCAN, LangGraph agent")
+    print("    breakpoint targets: services/failure_intel_service.py:rebuild_clusters  or  domain/failure/text.py:embedding_text")
     if break_before:
         print("    --break-before: dropping into pdb; `s` to step into rebuild_clusters")
         breakpoint()
-    result = fi.rebuild_clusters(project_id)
+    result = FailureIntelService().rebuild_clusters(project_id)
     print(f"<<< rebuild_clusters returned: {result}")
 
 

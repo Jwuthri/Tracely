@@ -16,8 +16,8 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from tracely import fi
-from tracely.models import ClusterMember, FailureCluster
+from tracely.infrastructure.db.models import ClusterMember, FailureCluster
+from tracely.services.failure_intel_service import FailureIntelService
 
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -61,7 +61,7 @@ def test_prune_drops_orphan_agents_keeps_rebuilt(session):
     _add_cluster(session, "proj", "orphan", "c-orphan-open", ["old1"])
     _add_cluster(session, "proj", "orphan", "c-orphan-promoted", ["old2"], status="PROMOTED")
 
-    pruned = fi._prune_orphan_clusters(session, "proj", {"keep"})
+    pruned = FailureIntelService._prune_orphan_clusters(session, "proj", {"keep"})
 
     assert pruned == 2
     assert _cluster_ids(session, "proj") == {"c-keep"}
@@ -74,7 +74,7 @@ def test_prune_empty_keep_set_drops_all_in_project(session):
     _add_cluster(session, "proj", "a1", "c1", ["t1"])
     _add_cluster(session, "proj", "a2", "c2", ["t2"])
 
-    pruned = fi._prune_orphan_clusters(session, "proj", set())
+    pruned = FailureIntelService._prune_orphan_clusters(session, "proj", set())
 
     assert pruned == 2
     assert _cluster_ids(session, "proj") == set()
@@ -85,7 +85,7 @@ def test_prune_leaves_other_projects_untouched(session):
     _add_cluster(session, "proj", "orphan", "c1", ["t1"])
     _add_cluster(session, "other", "orphan", "c2", ["t2"])
 
-    fi._prune_orphan_clusters(session, "proj", set())
+    FailureIntelService._prune_orphan_clusters(session, "proj", set())
 
     assert _cluster_ids(session, "proj") == set()
     assert _cluster_ids(session, "other") == {"c2"}  # scoped to project_id
@@ -95,7 +95,7 @@ def test_prune_noop_when_all_agents_kept(session):
     _add_cluster(session, "proj", "a1", "c1", ["t1"])
     _add_cluster(session, "proj", "a2", "c2", ["t2"])
 
-    pruned = fi._prune_orphan_clusters(session, "proj", {"a1", "a2"})
+    pruned = FailureIntelService._prune_orphan_clusters(session, "proj", {"a1", "a2"})
 
     assert pruned == 0
     assert _cluster_ids(session, "proj") == {"c1", "c2"}

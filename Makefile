@@ -19,13 +19,13 @@ install:     ## sync python deps (uv, all workspace packages) + frontend deps (p
 migrate: migrate-ch migrate-pg ## run all migrations
 
 migrate-ch:  ## apply ClickHouse migrations
-	uv run python -m tracely.ch_migrate
+	uv run python -m tracely.infrastructure.clickhouse.migrations
 
 migrate-pg:  ## apply Postgres (Alembic) migrations
 	cd backend && uv run alembic upgrade head
 
 seed:        ## create the default project + ingest key (tracely_dev_key)
-	uv run python -m tracely.seed
+	uv run python -m tracely.services.seeding_service
 
 backend:     ## run FastAPI (ingestion + reads) on :8000
 	uv run uvicorn tracely.api.main:app --reload --port 8000

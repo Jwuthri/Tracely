@@ -73,29 +73,84 @@ Two stages:
 
 ## Module map (`backend/tracely/`)
 
-| File | Purpose |
+The package is layered: **domain** (pure logic, no I/O), **infrastructure** (DB / CH / S3 / Redis / LLM adapters), **services** (use-case orchestrators, classes), **workers** (Celery tasks), **api** (HTTP). Old flat paths (`tracely.regression`, `tracely.gate`, `tracely.fi`, `tracely.evaluators`, `tracely.db`, …) are kept as thin re-export shims so external callers (alembic, workers, scripts, SDK tests) keep working unchanged.
+
+### `tracely/config.py`
+`Settings` (pydantic-settings) — all env: ClickHouse/Postgres/Redis/S3, OpenAI keys, embedding/judge models, gate thresholds, `default_agent_slug`.
+
+### `tracely/domain/` — pure logic, no I/O
+| Module | Purpose |
 |---|---|
-| `config.py` | `Settings` (pydantic-settings) — all env: ClickHouse/Postgres/Redis/S3, OpenAI keys, embedding/judge models, gate thresholds, `default_agent_slug` (fallback agent for agent-less traces). |
-| `db.py` | SQLAlchemy 2.0 async engine (API) + sync engine (workers/migrations); `AsyncSessionLocal` / `SyncSessionLocal`. |
-| `models.py` | Postgres registry entities + enums (`Project, IngestKey, Agent, AgentVersion, EvaluationSuite/Case, GateRun/Case, FailureCluster/Member, FailureEmbedding, Evaluator, CaseReplay`). |
-| `clickhouse.py` | sync + async CH clients; `insert_rows()` (server-side `async_insert`). |
-| `blobstore.py` | S3/MinIO (boto3); `put_blob`/`get_blob`/`event_blob_key` — blob-first durability. |
-| `events.py` | `EVENT_COLUMNS` — the canonical ClickHouse `events` row schema; `to_rows()` fills defaults/timestamps. |
-| `otel/mapping.py` | OTLP `ExportTraceServiceRequest` → event dicts. Type classification (`tracely.observation.type` > OpenInference > `gen_ai.operation.name` > heuristics); `_KNOWN_TYPES` incl. `THINKING`. |
-| `registry.py` | idempotent `upsert_agent` / `upsert_agent_version` (slug/`config_hash` → UUID). |
-| `ingestion/` | blob-first enqueue (`process_batch.ingest_otlp`). |
-| `celery_app.py` / `tasks.py` | Celery app + the three tasks: `ingest_otlp_blob`, `evaluate_run`, `rebuild_clusters`. |
-| `eval_runner.py` | run the project's evaluators on a trace, persist `scores`, trigger structural clustering. |
-| `evaluators.py` | the structural checks + LLM judge + `run_evaluator()` dispatch + recommended `TEMPLATES`. |
-| `trajectory.py` | `Trajectory`/`TrajectoryStep` snapshot + assertion helpers (`tool_sequence`, `erroring_steps`, `split_errors`, `tools_satisfied`). |
-| `regression.py` | `promote_trace`, `evaluate_case`, fixture capture (v2), `read_trace_spans`. |
-| `cluster.py` | ingest-time structural failure clustering (cheap signature). |
-| `fi.py` | semantic failure intelligence — embed → HDBSCAN → analyze → consolidate. |
-| `agents.py` | LangGraph/LangChain agents (`analyze_cluster`, `consolidate`) — lazy-imported. |
-| `gate.py` | `run_gate`, suite replay, candidate metrics, baseline compare, soft warnings. |
-| `schemas.py` | Pydantic API models (`SpanOut`, `TraceDetail`, …). |
-| `seed.py` / `ch_migrate.py` | bootstrap the default project + ingest key + the recommended evaluators; apply ClickHouse DDL. |
-| `api/` | FastAPI `main.py`, `auth.py` (Bearer → `project_id`), and the routers below. |
+| `trajectory.py` | `Trajectory` / `TrajectoryStep` + assertion helpers (`tool_sequence`, `erroring_steps`, `split_errors`, `tools_satisfied`). |
+| `traces/spans.py` | `root_span`, `input_digest`, `failure_facts` — canonical span helpers used by every service. |
+| `traces/metadata.py` | Parse the ClickHouse-aggregated `tracely.metadata.*` JSON. |
+| `evaluation/results.py` | `EvalResult`, `RunContext` dataclasses. |
+| `evaluation/text.py` | Answer / I/O text extraction shared between structural + judge. |
+| `evaluation/evaluators/` | `Evaluator` ABC + `EvaluatorRegistry` + one class per check (`RunOutcomeEvaluator`, `ToolSuccessEvaluator`, `ToolConsistencyEvaluator`, `LatencyEvaluator`, `RequiredToolsEvaluator`, `LLMJudgeEvaluator`) + `TEMPLATES` catalog. |
+| `evaluation/evaluator_suggestion.py` | Generate a starting-point evaluator from a cluster's mechanism. |
+| `failure/signature.py` | `FailureSignature` value object — the cheap masked sha256 key. |
+| `failure/text.py` | `embedding_text` / `summarize_failure` — terse mechanism vs. full-context summaries. |
+| `failure/clustering.py` | `ClusterEngine` — UMAP+HDBSCAN regime selection. |
+| `failure/histogram.py` | Occurrence-over-time bucketing. |
+| `regression/contract.py` | `evaluate_assertions(case, traj)` — pure fail-to-pass evaluation. |
+| `regression/fixtures.py` | `FixtureBundle` value object — capture/encode/decode the v2 hermetic-replay bundle. |
+| `gate/warnings.py` | `delta_warnings(latency, tokens, baseline)` — pure % regression check. |
+
+### `tracely/infrastructure/` — I/O adapters
+| Module | Purpose |
+|---|---|
+| `db/base.py` | SQLAlchemy 2.0 `Base = DeclarativeBase`. |
+| `db/engine.py` | Async + sync engines + sessionmakers. |
+| `db/session.py` | `get_session()` / `sync_session()` helpers. |
+| `db/models.py` | Postgres registry entities + enums (Project, IngestKey, Agent, AgentVersion, EvaluationSuite/Case, GateRun/Case, FailureCluster/Member, FailureEmbedding, Evaluator, CaseReplay). |
+| `clickhouse/client.py` | sync + async clients; `insert_rows()`. |
+| `clickhouse/events_schema.py` | `EVENT_COLUMNS` + `to_rows()`. |
+| `clickhouse/trace_reader.py` | `TraceReader` — one class owns every `events`/`scores` SELECT (`read_spans`, `candidate_metrics`, `latest_traces_for_env`, `failing_trace_reasons`, `member_meta`). |
+| `clickhouse/score_writer.py` | `ScoreWriter` — `write_eval_scores` + `write_regression_verdict`. |
+| `clickhouse/migrations.py` + `ddl/` | Tiny migration runner + the `*.up.sql` files. |
+| `blob/s3.py` | S3/MinIO `put_blob` / `get_blob` / `event_blob_key`. |
+| `queue/celery_app.py` | The shared Celery app. |
+| `llm/embeddings.py` | `Embedder` (OpenAI embeddings, lazy-imported). |
+| `llm/judge.py` | `judge(rubric, ...)` — LLM judge HTTP call. |
+| `llm/analysis_agents.py` | LangGraph/LangChain agents (`analyze_cluster`, `consolidate`) — lazy-imported. |
+| `registry/agents.py` | Idempotent `upsert_agent` / `upsert_agent_version`. |
+| `text.py` | `extract_text` / `message_text` — readable text from stored I/O. |
+
+### `tracely/services/` — use-case orchestrators (classes)
+| Class | Owns |
+|---|---|
+| `IngestionService` | `process_blob` — blob → events → registry resolve → CH insert. Plus the producer `ingest_otlp()` module function. |
+| `EvaluationService` | `evaluate_trace` — load project's evaluators, dispatch via `EvaluatorRegistry`, persist scores, trigger structural clustering. |
+| `RegressionService` | `promote_trace`, `replay_case`. |
+| `GateService` | `run_gate`, `replay_suite`, `resolve_agent_id`. |
+| `FailureIntelService` | `rebuild_clusters` — embed → cluster → analyze → consolidate. |
+| `StructuralClusteringService` | `cluster_failure` — ingest-time signature clustering. |
+| `seeding_service` | `main()` — default project + ingest key + recommended evaluators. |
+
+### `tracely/workers/tasks.py`
+Three Celery tasks, each a 3-line dispatch into a service class: `ingest_otlp_blob` → `IngestionService`, `evaluate_run` → `EvaluationService`, `rebuild_clusters` → `FailureIntelService`.
+
+### `tracely/otel/` — OTLP → event mapper (split from the old 1035-line `mapping.py`)
+| Module | Purpose |
+|---|---|
+| `attributes.py` | OTLP `AnyValue` decoding + tiny scalar helpers. |
+| `types.py` | Observation-type constants + `map_observation_type` (`tracely.observation.type` > OpenInference > `gen_ai.operation.name` > heuristics; includes `THINKING`). |
+| `messages.py` | Reassemble the three on-the-wire message shapes (structured / OpenInference flattened / OpenLLMetry legacy) into Tracely's `{role, content:[blocks]}`. |
+| `io_field.py` | Resolve a span's `input`/`output` column from the attrs. |
+| `usage.py` | Token usage + model parameters + TTFT. |
+| `convention.py` | Detect which message convention the span used (drift tracking). |
+| `tool_enrichment.py` | Reconstruct TOOL span input/output for instrumentors that don't capture them. |
+| `span_mapper.py` | `_map_span` — the central span → event row rule. |
+| `parser.py` | `events_from_request`, `parse_otlp_traces`, `parse_otlp_traces_json`. |
+| `mapping.py` | Back-compat shim re-exporting the public + commonly-imported private names. |
+
+### `tracely/api/` — FastAPI
+| Module | Purpose |
+|---|---|
+| `main.py` | App factory + middleware + router mount. |
+| `auth.py` | `Authorization: Bearer <ingest-key>` → `project_id`. |
+| `dto/{common,traces}.py` | Pydantic response models (`SpanOut`, `TraceDetail`, `AgentOut`, `IngestResponse`). |
+| `routers/{traces,sessions,search,cases,gate,clusters,analytics,otlp,health}.py` | Thin request/response — business logic in services/domain. |
 
 ## API surface (`backend/tracely/api/routers/`)
 
