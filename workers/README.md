@@ -4,14 +4,14 @@ The deployable worker process. It is a **thin shim** (`tracely_workers/worker.py
 
 ```python
 # tracely_workers/worker.py
-import tracely.tasks          # registers the tasks
-from tracely.celery_app import celery_app
+import tracely.workers.tasks                                # registers the tasks
+from tracely.infrastructure.queue.celery_app import celery_app
 app = celery_app
 ```
 
 ## What it runs
 
-The same `celery_app` the API enqueues onto (Redis broker). Tasks (`backend/tracely/tasks.py`):
+The same `celery_app` the API enqueues onto (Redis broker). Tasks (`backend/tracely/workers/tasks.py`):
 
 | Task | Triggered by | Does |
 |---|---|---|
