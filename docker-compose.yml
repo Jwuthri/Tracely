@@ -106,7 +106,7 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-    command: ["sh", "-c", "python -m tracely.ch_migrate && (cd backend && alembic upgrade head) && python -m tracely.seed"]
+    command: ["sh", "-c", "python -m tracely.infrastructure.clickhouse.migrations && (cd backend && alembic upgrade head) && python -m tracely.services.seeding_service"]
     volumes:                       # live source so new migrations apply without an image rebuild
       - ./backend:/app/backend
       - ./workers:/app/workers
