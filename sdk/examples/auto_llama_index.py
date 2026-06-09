@@ -44,7 +44,7 @@ def main() -> None:
     ]
     # LlamaIndex 0.12+ replaced ReActAgent.from_tools / .chat with a Workflow whose runs are awaitable.
     # `streaming=False` so each LLM call returns usage tokens (streamed OpenAI calls omit them).
-    agent = ReActAgent(tools=tools, llm=LlamaOpenAI(model="gpt-4o-mini"), verbose=False, streaming=False)
+    agent = ReActAgent(tools=tools, llm=LlamaOpenAI(model="gpt-5.4-mini"), verbose=False, streaming=False)
 
     async def run() -> None:
         with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):

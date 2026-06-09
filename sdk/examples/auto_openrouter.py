@@ -28,7 +28,7 @@ tracely.init(
     endpoint=API, api_key=KEY, service_name="support-agent", env="prod", instrument=["langchain"]
 )
 
-MODEL = "anthropic/claude-3.5-sonnet"  # OpenRouter "provider/model" format — route to any model
+MODEL = "anthropic/claude-4.6-sonnet"  # OpenRouter "provider/model" format — route to any model
 
 
 def main() -> None:

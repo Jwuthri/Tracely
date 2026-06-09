@@ -39,7 +39,7 @@ def main() -> None:
     def support_agent(question: str) -> str:
         messages: list = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": question}]
         for _ in range(5):
-            resp = litellm.completion(model="gpt-4o-mini", messages=messages, tools=OPENAI_TOOLS)
+            resp = litellm.completion(model="gpt-5.4-mini", messages=messages, tools=OPENAI_TOOLS)
             msg = resp.choices[0].message
             messages.append(msg.model_dump(exclude_none=True))
             if not msg.tool_calls:

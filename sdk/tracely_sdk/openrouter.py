@@ -7,12 +7,12 @@ get a traced client pointed at the right base URL.
     from tracely_sdk.openrouter import OpenRouter            # a pre-wrapped, base-url-preset client
     client = OpenRouter(api_key=...)
     client.chat.completions.create(
-        model="anthropic/claude-3.5-sonnet",
+        model="anthropic/claude-4.6-sonnet",
         messages=[...],
         extra_headers={"HTTP-Referer": "https://your.app", "X-Title": "Your App"},
     )
 
-The `model` you pass is recorded verbatim (e.g. `anthropic/claude-3.5-sonnet`), so the backend can
+The `model` you pass is recorded verbatim (e.g. `anthropic/claude-4.6-sonnet`), so the backend can
 attribute usage to the underlying provider for free.
 """
 

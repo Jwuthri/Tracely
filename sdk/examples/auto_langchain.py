@@ -50,7 +50,7 @@ def main() -> None:
 
     # model can be a "provider:model" string (init_chat_model) or a ChatModel instance.
     agent = create_agent(
-        "openai:gpt-4o-mini", tools=[get_order_status, check_inventory], system_prompt=SYSTEM
+        "openai:gpt-5.4-mini", tools=[get_order_status, check_inventory], system_prompt=SYSTEM
     )
 
     with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):

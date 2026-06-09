@@ -136,7 +136,7 @@ auto-registers the LangChain callback handler. Build agents with the current **L
 
 ```python
 from langchain.agents import create_agent
-agent = create_agent("openai:gpt-4o-mini", tools=[get_order_status], system_prompt="…")
+agent = create_agent("openai:gpt-5.4-mini", tools=[get_order_status], system_prompt="…")
 agent.invoke({"messages": [{"role": "user", "content": "…"}]})
 ```
 

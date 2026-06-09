@@ -152,7 +152,7 @@ def test_openllmetry_legacy_flattened_messages() -> None:
     """OpenLLMetry legacy flattened gen_ai.prompt.<i>.* / gen_ai.completion.<i>.* + tool calls."""
     e = _event(
         {
-            "gen_ai.request.model": "gpt-4o-mini",
+            "gen_ai.request.model": "gpt-5.4-mini",
             "gen_ai.prompt.0.role": "system",
             "gen_ai.prompt.0.content": "You are helpful.",
             "gen_ai.prompt.1.role": "user",
@@ -237,3 +237,49 @@ def test_unknown_openinference_kind_falls_through_to_span() -> None:
         )
         == "GENERATION"
     )
+
+
+def test_langchain_serialized_messages_normalized() -> None:
+    """LangChain ChatModel spans arrive with lc-constructor messages under `input.value` and a
+    `{generations:[[…]]}` envelope under `output.value`; both must reduce to canonical messages so the
+    UI (and evals) see the same `[{role, content}]` shape every other provider produces."""
+    gen_in = json.dumps({"messages": [[
+        {"lc": 1, "type": "constructor", "id": ["langchain", "schema", "messages", "SystemMessage"],
+         "kwargs": {"content": "You are helpful.", "type": "system"}},
+        {"lc": 1, "type": "constructor", "id": ["langchain", "schema", "messages", "HumanMessage"],
+         "kwargs": {"content": "hi", "type": "human"}},
+    ]]})
+    gen_out = json.dumps({"generations": [[{"text": "", "type": "ChatGeneration", "message": {
+        "lc": 1, "type": "constructor", "id": ["langchain", "schema", "messages", "AIMessage"],
+        "kwargs": {"content": "", "additional_kwargs": {"tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]}}}}]],
+        "llm_output": {"token_usage": {}}})
+    span = Span(name="ChatOpenAI", trace_id=b"\x03" * 16, span_id=b"\x04" * 8,
+                start_time_unix_nano=1_000, end_time_unix_nano=2_000)
+    span.attributes.extend([
+        _kv("gen_ai.operation.name", "chat"),
+        _kv("input.value", gen_in),
+        _kv("output.value", gen_out),
+    ])
+    ss = ScopeSpans(scope=InstrumentationScope(name="test"), spans=[span])
+    rs = ResourceSpans(resource=Resource(attributes=[_kv("service.name", "svc")]), scope_spans=[ss])
+    e = events_from_request(ExportTraceServiceRequest(resource_spans=[rs]), "p")[0]
+    inp, out = json.loads(e["input"]), json.loads(e["output"])
+    assert [m["role"] for m in inp] == ["system", "user"]
+    assert inp[1]["content"] == "hi"
+    assert out[0]["role"] == "assistant"
+    assert out[0]["tool_calls"][0]["function"]["name"] == "lookup"
+
+
+def test_langchain_messages_to_dict_and_node_updates() -> None:
+    """LangGraph CHAIN nodes serialize via `messages_to_dict` ({type, data}) and node updates as
+    [{update:{messages:[…]}}]; the unwrap maps roles (human→user, ai→assistant) and keeps tool ids."""
+    from tracely.otel.messages import _decode_langchain
+
+    chain = {"messages": [{"type": "ai", "data": {"content": "ok", "type": "ai"}}]}
+    assert _decode_langchain(chain) == [{"role": "assistant", "content": "ok"}]
+
+    upd = [{"graph": None, "update": {"messages": [
+        {"type": "tool", "data": {"content": '{"k": 1}', "type": "tool", "tool_call_id": "c1", "name": "t"}}]}}]
+    out = _decode_langchain(upd)
+    assert out[0]["role"] == "tool" and out[0]["tool_call_id"] == "c1" and out[0]["name"] == "t"

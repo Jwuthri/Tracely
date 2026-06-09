@@ -8,7 +8,7 @@ Use cases covered:
     embedding · guardrail · chain
   • a full RAG pipeline (guardrail → embed → retrieve → grounded generation)
   • multimodal user messages (text + image + file content blocks)
-  • structured / output-schema JSON generations, multiple models (gpt-4o, gpt-4o-mini, sonnet)
+  • structured / output-schema JSON generations, multiple models (gpt-4o, gpt-5.4-mini, sonnet)
   • tool success, tool error + graceful recovery, a guardrail block, a hallucination, a silent
     (requested-but-not-executed) tool via llm(tool_calls=...)
   • every field populated: user / trace_name (agent root) · agent version · sampling params
@@ -238,7 +238,7 @@ def seed_laptop():
             },
             96,
             44,
-            model="gpt-4o-mini",
+            model="gpt-5.4-mini",
             temperature=0.0,
             metadata={"task": "intent_classification"},
         )
@@ -773,7 +773,7 @@ def seed_faq():
             ans,
             90,
             28,
-            model="gpt-4o-mini",
+            model="gpt-5.4-mini",
             temperature=0.0,
         )
     seeded.append(f"{conv}  quick FAQ (cheap model)")

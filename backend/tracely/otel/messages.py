@@ -242,6 +242,143 @@ def _unwrap_langchain_tool_message(v: Any) -> Any:
     return v
 
 
+# ── LangChain / LangGraph serialization ──────────────────────────────────────────
+# LangChain emits two message serializations the canonical conventions (gen_ai.*, llm.*_messages.*)
+# don't cover, so they arrive raw under input.value / output.value:
+#   • lc-constructor   {"lc":1,"type":"constructor","id":[…,"HumanMessage"],"kwargs":{content,…}}
+#       — ChatModel GENERATION spans: input `{"messages":[[…]]}`, output `{"generations":[[{message…}]]}`
+#   • messages_to_dict {"type":"human"|"ai"|"tool"|"system","data":{content, tool_calls, …}}
+#       — LangGraph CHAIN nodes: `{"messages":[…]}` and node updates `[{"update":{"messages":[…]}}]`
+# Decoding both into Tracely's canonical `{role, content, tool_calls?}` keeps every provider coherent.
+_LC_ROLE = {
+    "system": "system", "systemmessage": "system", "developer": "system",
+    "human": "user", "humanmessage": "user", "user": "user",
+    "ai": "assistant", "aimessage": "assistant", "assistant": "assistant",
+    "tool": "tool", "toolmessage": "tool", "function": "tool", "functionmessage": "tool",
+    "chat": "user", "chatmessage": "user",
+}
+
+
+def _lc_role(*cands: Any) -> str:
+    for c in cands:
+        if isinstance(c, str) and c.strip().lower() in _LC_ROLE:
+            return _LC_ROLE[c.strip().lower()]
+    return ""
+
+
+def _lc_tool_calls(kwargs: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Prefer the OpenAI-shaped calls LangChain mirrors into `additional_kwargs.tool_calls`; else
+    convert LangChain's `{name, args, id}` list into the `{function:{name, arguments}}` shape."""
+    ak = kwargs.get("additional_kwargs")
+    raw = (ak.get("tool_calls") if isinstance(ak, dict) else None) or kwargs.get("tool_calls")
+    if not isinstance(raw, list) or not raw:
+        return None
+    out: list[dict[str, Any]] = []
+    for c in raw:
+        if not isinstance(c, dict):
+            continue
+        if isinstance(c.get("function"), dict):
+            out.append(c)  # already OpenAI-shaped
+        elif "name" in c or "args" in c:
+            args = c.get("args")
+            out.append({
+                "id": str(c.get("id") or ""),
+                "type": "function",
+                "function": {
+                    "name": str(c.get("name") or ""),
+                    "arguments": json.dumps(args) if isinstance(args, (dict, list)) else (args if args is not None else ""),
+                },
+            })
+    return out or None
+
+
+def _lc_message(m: Any) -> dict[str, Any] | None:
+    """Decode one LangChain-serialized message (lc-constructor or messages_to_dict) into a canonical
+    `{role, content, tool_calls?, tool_call_id?, name?}`. None when `m` isn't a LangChain message."""
+    if not isinstance(m, dict):
+        return None
+    kw: dict[str, Any] | None = None
+    role_hints: tuple[Any, ...] = ()
+    if m.get("lc") and m.get("type") == "constructor" and isinstance(m.get("kwargs"), dict):
+        kw = m["kwargs"]
+        cls = m["id"][-1] if isinstance(m.get("id"), list) and m["id"] else ""
+        role_hints = (kw.get("type"), kw.get("role"), cls)
+    elif isinstance(m.get("data"), dict) and isinstance(m.get("type"), str) and m["type"].lower() in _LC_ROLE:
+        kw = m["data"]
+        role_hints = (m.get("type"), kw.get("type"), kw.get("role"))
+    if kw is None:
+        return None
+    msg: dict[str, Any] = {"role": _lc_role(*role_hints), "content": kw.get("content", "")}
+    tcs = _lc_tool_calls(kw)
+    if tcs:
+        msg["tool_calls"] = tcs
+    for k in ("tool_call_id", "name"):
+        if kw.get(k):
+            msg[k] = kw[k]
+    return msg
+
+
+def _lc_messages_from(v: Any) -> list[dict[str, Any]] | None:
+    """Decode a list / list-of-lists / single LangChain message into canonical messages. Returns the
+    list only when at least one genuine LangChain message was decoded (else None, so non-LangChain
+    values fall through to the existing handling)."""
+    v = _as_obj(v)
+    items: list[Any]
+    if isinstance(v, list):
+        items = []
+        for x in v:
+            items.extend(x) if isinstance(x, list) else items.append(x)  # flatten batched [[…]]
+    elif isinstance(v, dict):
+        items = [v]
+    else:
+        return None
+    decoded: list[dict[str, Any]] = []
+    saw_lc = False
+    for it in items:
+        d = _lc_message(it)
+        if d is not None:
+            saw_lc = True
+            decoded.append(d)
+        elif isinstance(it, dict) and ("role" in it or "content" in it):
+            decoded.append(it)  # already canonical — keep in place
+    return decoded if (saw_lc and decoded) else None
+
+
+def _decode_langchain(v: Any) -> list[dict[str, Any]] | None:
+    """Top-level LangChain decode: `{messages:…}` (input), `{generations:…}` (output), LangGraph node
+    updates, or a bare LangChain message / list. None when `v` isn't a LangChain payload."""
+    if isinstance(v, dict):
+        if "generations" in v:
+            gens = _as_obj(v["generations"])
+            flat: list[Any] = []
+            if isinstance(gens, list):
+                for g in gens:
+                    flat.extend(g) if isinstance(g, list) else flat.append(g)
+            msgs: list[dict[str, Any]] = []
+            for g in flat:
+                if not isinstance(g, dict):
+                    continue
+                lc = _lc_message(g.get("message"))
+                if lc is not None:
+                    msgs.append(lc)
+                elif isinstance(g.get("text"), str) and g["text"]:
+                    msgs.append({"role": "assistant", "content": g["text"]})
+            return msgs or None
+        if "messages" in v:
+            return _lc_messages_from(v["messages"])
+        return None
+    if isinstance(v, list):
+        # LangGraph node updates: [{"graph":…, "update":{"messages":[…]}}]
+        upd: list[Any] = []
+        for it in v:
+            if isinstance(it, dict) and isinstance(it.get("update"), dict):
+                upd.extend(it["update"].get("messages") or [])
+        if upd:
+            return _lc_messages_from(upd)
+        return _lc_messages_from(v)
+    return None
+
+
 def _normalize_message_content(m: Any) -> Any:
     """Walk a chat-message dict and normalize its `content` field."""
     if not isinstance(m, dict):
@@ -268,6 +405,9 @@ def _normalize_parsed(v: Any) -> Any:
     """Apply LangChain-envelope unwrap and chat-message-content normalization to an already-parsed
     value (dict / list / scalar). Idempotent."""
     v = _unwrap_langchain_tool_message(v)
+    lc = _decode_langchain(v)
+    if lc is not None:
+        return [_normalize_message_content(x) for x in lc]
     if isinstance(v, list) and v and any(isinstance(x, dict) and ("role" in x or "content" in x) for x in v):
         return [_normalize_message_content(x) for x in v]
     if isinstance(v, dict) and ("role" in v or "content" in v):

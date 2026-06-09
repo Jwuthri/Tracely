@@ -56,7 +56,7 @@ def main() -> None:
         return _fake_db.check_inventory(sku)
 
     tools = [get_order_status, check_inventory]
-    model = ChatOpenAI(model="gpt-4o-mini").bind_tools(tools)
+    model = ChatOpenAI(model="gpt-5.4-mini").bind_tools(tools)
 
     def call_model(state: MessagesState) -> dict:
         return {"messages": [model.invoke([SystemMessage(SYSTEM), *state["messages"]])]}

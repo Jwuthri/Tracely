@@ -234,7 +234,7 @@ function nearestAgentLabel(span: SpanOut, allSpans: SpanOut[]): string {
   let cur: SpanOut | undefined = span;
   // safety: cap the walk at the tree's depth
   for (let i = 0; i < 64 && cur; i++) {
-    const parent = cur.parent_span_id ? byId.get(cur.parent_span_id) : undefined;
+    const parent: SpanOut | undefined = cur.parent_span_id ? byId.get(cur.parent_span_id) : undefined;
     if (!parent) break;
     if (parent.type === "AGENT") return parent.name || agentLabel(parent);
     cur = parent;
@@ -534,7 +534,10 @@ function ChatBody({ msgs }: { msgs: ChatMsg[] }) {
 // A chat transcript shown as a compact pill (role + last message preview) → conversation popover.
 function ChatPill({ msgs }: { msgs: ChatMsg[] }) {
   const n = msgs.length;
-  const last = msgs[n - 1] ?? {};
+  // Prefer the last *conversational* turn for the collapsed preview: a prompt history that ends in a
+  // tool result should still headline with the user/assistant turn, not a raw tool-result dump.
+  const last =
+    [...msgs].reverse().find((m) => /^(user|assistant|human|ai)$/i.test(String(m.role ?? ""))) ?? msgs[n - 1] ?? {};
   const lastText =
     typeof last.content === "string"
       ? last.content
@@ -626,6 +629,13 @@ function MessageContent({ raw }: { raw: string | null }) {
   // surfaced. Raw structured data with no `role` (tool args/results, output-schema) stays JSON below.
   if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "role" in (parsed as object)) {
     return <ChatPill msgs={[parsed as ChatMsg]} />;
+  }
+  // a {messages:[…]} wrapper (a LangGraph state object / an OpenAI-style request) -> conversation
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const inner = (parsed as Record<string, unknown>).messages;
+    if (Array.isArray(inner) && inner.length > 0 && inner.every(isChatMsg)) {
+      return <ChatPill msgs={inner as ChatMsg[]} />;
+    }
   }
   // one message's multimodal parts (no roles) -> text + image/file chips
   if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(isContentBlock)) {
