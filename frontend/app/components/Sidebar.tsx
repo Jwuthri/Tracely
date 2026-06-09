@@ -2,7 +2,9 @@
 
 import clsx from "clsx";
 import { usePathname } from "next/navigation";
-import { IconActivity, IconGate, IconGrid, IconLayers, IconShield, IconTrend } from "./icons";
+import type { Me } from "@/app/lib/auth/types";
+import { AccountMenu } from "./AccountMenu";
+import { IconActivity, IconGate, IconGrid, IconLayers, IconSettings, IconShield, IconTrend } from "./icons";
 
 const NAV = [
   {
@@ -25,6 +27,10 @@ const NAV = [
     group: "Ship",
     items: [{ href: "/gates", label: "CI gates", Icon: IconGate }],
   },
+  {
+    group: "Configure",
+    items: [{ href: "/settings/api-keys", label: "Settings", Icon: IconSettings }],
+  },
 ];
 
 function Mark() {
@@ -38,7 +44,7 @@ function Mark() {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ me }: { me: Me | null }) {
   const path = usePathname();
   return (
     <aside className="sticky top-0 hidden h-screen w-[244px] shrink-0 flex-col border-r border-line bg-ink-900/80 backdrop-blur-md md:flex">
@@ -89,16 +95,7 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t border-line px-4 py-4">
-        <div className="flex items-center justify-between rounded-lg border border-line bg-ink-800 px-3 py-2">
-          <div className="leading-tight">
-            <div className="text-[12.5px] text-fg">default</div>
-            <div className="font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">project</div>
-          </div>
-          <span className="flex items-center gap-1.5 rounded-md bg-ok/10 px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-ok">
-            <span className="h-1.5 w-1.5 animate-pulse2 rounded-full bg-ok" />
-            prod
-          </span>
-        </div>
+        <AccountMenu me={me} />
         <div className="mt-3 px-1 font-mono text-[10px] text-fg-faint">v0.1.0 · MVP</div>
       </div>
     </aside>

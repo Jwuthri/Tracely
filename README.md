@@ -67,6 +67,10 @@ make send-trace    # a single sample OTLP trace
 make test          # backend unit tests (no infra)
 ```
 
+### Option C — deploy to Railway
+
+A pre-defined deployment for the whole stack — the three app services plus Postgres/pgvector, ClickHouse, Redis, and MinIO — lives in **[`deploy/railway/`](deploy/railway/README.md)**: add the four database templates, point three Railway services at the `deploy/railway/*.json` config files, wire the env from [`.env.railway.example`](deploy/railway/.env.railway.example), and deploy. Supports `local` (email/password) and `clerk` auth modes.
+
 ## Ingest from your agent
 
 Point any OTLP/HTTP exporter at `POST {endpoint}/v1/traces` with `Authorization: Bearer tracely_dev_key`. Tracely reads standard `gen_ai.*` / OpenInference attributes plus first-class hints — `tracely.agent.id` (auto-registered), `tracely.agent.version`, `tracely.conversation.id` / `turn.*` / `step.*`, `tracely.observation.type`, and `tracely.env` (`prod|staging|ci|dev`, the gating axis). The [`tracely-sdk`](sdk/README.md) is the ergonomic path and also ships the `tracely gate` / `tracely replay` CI commands.

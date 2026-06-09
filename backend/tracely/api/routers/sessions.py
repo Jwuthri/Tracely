@@ -23,12 +23,30 @@ _FAILING = (
 
 @router.get("/sessions")
 async def list_sessions(
-    limit: int = 50, project_id: str = Depends(get_project_id)
+    limit: int = 50,
+    offset: int = 0,
+    from_ts: str | None = None,
+    to_ts: str | None = None,
+    project_id: str = Depends(get_project_id),
 ) -> list[dict]:
     """Traces grouped into threads by conversation/session (a trace with no conversation is its
     own 1-turn thread). Each row: first user input, last agent answer, turns, tokens, cost,
-    status."""
+    status.
+
+    `from_ts`/`to_ts` (ISO-8601, treated as UTC) bound the trace's `start_time` at the events level
+    so ClickHouse can prune by the `toYYYYMM(start_time)` partition; `offset` pages the threads
+    (newest first) for the UI's "Load more". Callers derive "has more" from `len(rows) == limit`."""
     client = await get_async_client()
+    # Optional time window, applied inside the per-trace subquery. Each bound is bound as a param and
+    # only injected when provided; parseDateTimeBestEffort is lenient about the exact ISO format.
+    time_clause = ""
+    params: dict = {"p": project_id, "n": limit, "o": max(offset, 0)}
+    if from_ts:
+        time_clause += " AND start_time >= parseDateTimeBestEffort({from:String})"
+        params["from"] = from_ts
+    if to_ts:
+        time_clause += " AND start_time < parseDateTimeBestEffort({to:String})"
+        params["to"] = to_ts
     res = await client.query(
         f"""
         SELECT
@@ -79,14 +97,14 @@ async def list_sessions(
               (groupArrayArray(mapKeys(mapFilter((k, v) -> startsWith(k, 'tracely.metadata.'), CAST(metadata, 'Map(String, String)')))),
                groupArrayArray(mapValues(mapFilter((k, v) -> startsWith(k, 'tracely.metadata.'), CAST(metadata, 'Map(String, String)'))))),
               'Map(String, String)')                                      AS t_meta
-          FROM events FINAL WHERE project_id = {{p:String}}
+          FROM events FINAL WHERE project_id = {{p:String}}{time_clause}
           GROUP BY trace_id
         )
         GROUP BY thread
         ORDER BY last_ts DESC
-        LIMIT {{n:UInt32}}
+        LIMIT {{n:UInt32}} OFFSET {{o:UInt32}}
         """,
-        parameters={"p": project_id, "n": limit},
+        parameters=params,
     )
     rows = []
     for row in res.result_rows:

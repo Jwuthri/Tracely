@@ -1,7 +1,6 @@
-const API = process.env.TRACELY_API ?? "http://localhost:8000";
-const KEY = process.env.TRACELY_KEY ?? "tracely_dev_key";
+import { authHeaders } from "./auth";
 
-const headers = { Authorization: `Bearer ${KEY}` };
+const API = process.env.TRACELY_API ?? "http://localhost:8000";
 
 export type TraceRow = {
   trace_id: string;
@@ -46,7 +45,7 @@ export type SpanOut = {
 };
 
 export async function getTraces(): Promise<TraceRow[]> {
-  const res = await fetch(`${API}/api/traces?limit=50`, { headers, cache: "no-store" });
+  const res = await fetch(`${API}/api/traces?limit=50`, { headers: await authHeaders(), cache: "no-store" });
   if (!res.ok) return [];
   return res.json();
 }
@@ -68,8 +67,22 @@ export type Thread = {
   metadata?: Record<string, string>;
 };
 
-export async function getSessions(): Promise<Thread[]> {
-  const res = await fetch(`${API}/api/sessions?limit=50`, { headers, cache: "no-store" });
+export type SessionsQuery = {
+  limit?: number;
+  offset?: number;
+  from?: string | null; // ISO-8601 (UTC) lower bound on a trace's start_time
+  to?: string | null; // ISO-8601 (UTC) upper bound (exclusive)
+};
+
+export async function getSessions(opts: SessionsQuery = {}): Promise<Thread[]> {
+  const { limit = 50, offset = 0, from, to } = opts;
+  const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (from) qs.set("from_ts", from);
+  if (to) qs.set("to_ts", to);
+  const res = await fetch(`${API}/api/sessions?${qs.toString()}`, {
+    headers: await authHeaders(),
+    cache: "no-store",
+  });
   if (!res.ok) return [];
   return res.json();
 }
@@ -91,7 +104,7 @@ export type ThreadTurn = {
 };
 
 export async function getSession(id: string): Promise<{ thread_id: string; turns: ThreadTurn[] }> {
-  const res = await fetch(`${API}/api/sessions/${id}`, { headers, cache: "no-store" });
+  const res = await fetch(`${API}/api/sessions/${id}`, { headers: await authHeaders(), cache: "no-store" });
   if (!res.ok) return { thread_id: id, turns: [] };
   return res.json();
 }
@@ -110,7 +123,7 @@ export type TraceDetailData = {
 };
 
 export async function getTrace(traceId: string): Promise<TraceDetailData> {
-  const res = await fetch(`${API}/api/traces/${traceId}`, { headers, cache: "no-store" });
+  const res = await fetch(`${API}/api/traces/${traceId}`, { headers: await authHeaders(), cache: "no-store" });
   if (!res.ok) return { trace_id: traceId, spans: [], scores: [], eval_verdict: null };
   return res.json();
 }
@@ -141,13 +154,13 @@ export type EvalCase = {
 };
 
 export async function getCases(): Promise<EvalCase[]> {
-  const res = await fetch(`${API}/api/cases`, { headers, cache: "no-store" });
+  const res = await fetch(`${API}/api/cases`, { headers: await authHeaders(), cache: "no-store" });
   if (!res.ok) return [];
   return res.json();
 }
 
 export async function getCase(caseId: string): Promise<EvalCase | null> {
-  const res = await fetch(`${API}/api/cases/${caseId}`, { headers, cache: "no-store" });
+  const res = await fetch(`${API}/api/cases/${caseId}`, { headers: await authHeaders(), cache: "no-store" });
   if (!res.ok) return null;
   return res.json();
 }
@@ -163,7 +176,7 @@ export type Stats = {
 };
 
 export async function getStats(): Promise<Stats> {
-  const res = await fetch(`${API}/api/stats`, { headers, cache: "no-store" });
+  const res = await fetch(`${API}/api/stats`, { headers: await authHeaders(), cache: "no-store" });
   if (!res.ok)
     return { traces: 0, spans: 0, failing_traces: 0, auto_failures: 0, open_clusters: 0, agents: 0, cases: 0 };
   return res.json();
@@ -200,13 +213,13 @@ export type FailureCluster = {
 };
 
 export async function getClusters(): Promise<FailureCluster[]> {
-  const res = await fetch(`${API}/api/clusters`, { headers, cache: "no-store" });
+  const res = await fetch(`${API}/api/clusters`, { headers: await authHeaders(), cache: "no-store" });
   if (!res.ok) return [];
   return res.json();
 }
 
 export async function getCluster(id: string): Promise<FailureCluster | null> {
-  const res = await fetch(`${API}/api/clusters/${id}`, { headers, cache: "no-store" });
+  const res = await fetch(`${API}/api/clusters/${id}`, { headers: await authHeaders(), cache: "no-store" });
   if (!res.ok) return null;
   return res.json();
 }
@@ -238,13 +251,13 @@ export type GateRun = {
 };
 
 export async function getGates(): Promise<GateRun[]> {
-  const res = await fetch(`${API}/api/gates`, { headers, cache: "no-store" });
+  const res = await fetch(`${API}/api/gates`, { headers: await authHeaders(), cache: "no-store" });
   if (!res.ok) return [];
   return res.json();
 }
 
 export async function getGate(gateId: string): Promise<GateRun | null> {
-  const res = await fetch(`${API}/api/gates/${gateId}`, { headers, cache: "no-store" });
+  const res = await fetch(`${API}/api/gates/${gateId}`, { headers: await authHeaders(), cache: "no-store" });
   if (!res.ok) return null;
   return res.json();
 }
@@ -277,7 +290,7 @@ const EMPTY_TRENDS: Trends = {
 };
 
 export async function getTrends(days = 14): Promise<Trends> {
-  const res = await fetch(`${API}/api/trends?days=${days}`, { headers, cache: "no-store" });
+  const res = await fetch(`${API}/api/trends?days=${days}`, { headers: await authHeaders(), cache: "no-store" });
   if (!res.ok) return EMPTY_TRENDS;
   return res.json();
 }

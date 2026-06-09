@@ -1,7 +1,5 @@
 import "./globals.css";
-import { CommandPalette } from "./components/CommandPalette";
-import { Sidebar } from "./components/Sidebar";
-import { Topbar } from "./components/Topbar";
+import { AuthRootProvider } from "./_providers/AuthRootProvider";
 
 export const metadata = {
   title: "Tracely — trace-native CI/CD for AI agents",
@@ -20,14 +18,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link href={FONTS} rel="stylesheet" />
       </head>
       <body className="min-h-screen bg-ink font-sans text-fg antialiased">
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <div className="bg-grid relative flex min-h-screen flex-1 flex-col">
-            <Topbar />
-            <main className="mx-auto w-full max-w-[1240px] flex-1 px-8 py-8">{children}</main>
-          </div>
-        </div>
-        <CommandPalette />
+        {/* The dashboard shell (sidebar/topbar) lives in the (app) route group; (auth) pages render bare. */}
+        <AuthRootProvider>{children}</AuthRootProvider>
       </body>
     </html>
   );

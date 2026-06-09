@@ -1,0 +1,36 @@
+# Production Next.js build for Railway (the default frontend/Dockerfile runs `next dev` for local compose).
+# Build context = repo ROOT (so the root .dockerignore excludes frontend/node_modules + frontend/.next).
+# Point the Railway service's Dockerfile path at "frontend/Dockerfile.railway".
+FROM node:22-slim
+
+RUN npm install -g pnpm@9
+WORKDIR /app/frontend
+
+# deps first for layer caching
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --no-frozen-lockfile
+
+# app source (node_modules/.next excluded by the root .dockerignore)
+COPY frontend/ ./
+# frontend/pnpm-workspace.yaml holds only `allowBuilds` (no `packages`), which pnpm rejects in a
+# single-package build — the local Dockerfile drops it via frontend/.dockerignore; do the same here
+# (our build context is the repo root, so that .dockerignore doesn't apply).
+RUN rm -f pnpm-workspace.yaml
+
+# NEXT_PUBLIC_* are inlined into the CLIENT bundle at build time, so they must be present during
+# `next build`. Railway exposes service variables to the build when declared as ARG.
+ARG NEXT_PUBLIC_AUTH_MODE=dev
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+ENV NEXT_PUBLIC_AUTH_MODE=$NEXT_PUBLIC_AUTH_MODE \
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
+    NEXT_PUBLIC_CLERK_SIGN_IN_URL=$NEXT_PUBLIC_CLERK_SIGN_IN_URL \
+    NEXT_PUBLIC_CLERK_SIGN_UP_URL=$NEXT_PUBLIC_CLERK_SIGN_UP_URL \
+    NEXT_TELEMETRY_DISABLED=1
+
+RUN pnpm build
+
+EXPOSE 3000
+# bind :: so Railway's public edge + private networking (IPv4/IPv6) both reach it; $PORT is injected
+CMD ["sh", "-c", "pnpm exec next start -H :: -p ${PORT:-3000}"]

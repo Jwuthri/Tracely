@@ -28,6 +28,10 @@ dependencies = [
   "langgraph>=0.3",
   "langchain>=0.3.20",
   "langchain-openai>=0.3",
+  # auth & multi-tenancy: JWT sign/verify (HS256 local + RS256/JWKS Clerk), argon2 password hashing
+  "pyjwt[crypto]>=2.8",
+  "argon2-cffi>=23.1",
+  "httpx>=0.27",
 ]
 
 [build-system]

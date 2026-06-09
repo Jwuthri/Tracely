@@ -35,6 +35,24 @@ def get_blob(key: str) -> bytes:
     return _s3().get_object(Bucket=settings.s3_bucket, Key=key)["Body"].read()
 
 
+def ensure_bucket() -> None:
+    """Create the configured bucket if it doesn't exist (idempotent). Run once at deploy/init time —
+    a fresh MinIO/S3 host has no bucket (locally the compose `minio-init` service handles it; on
+    Railway/managed S3 the backend pre-deploy step calls this)."""
+    client = _s3()
+    bucket = settings.s3_bucket
+    try:
+        client.head_bucket(Bucket=bucket)
+        return  # already there
+    except Exception:
+        pass
+    try:
+        client.create_bucket(Bucket=bucket)
+        print(f"created bucket {bucket}")
+    except Exception as e:  # race / already-owned / region quirk — tolerate, the bucket exists
+        print(f"ensure_bucket({bucket}): {type(e).__name__} — assuming it already exists")
+
+
 def event_blob_key(project_id: str, batch_id: str, content_type: str) -> str:
     ext = "pb" if "x-protobuf" in content_type else "json"
     return f"{settings.s3_event_prefix}{project_id}/otlp/{batch_id}.{ext}"

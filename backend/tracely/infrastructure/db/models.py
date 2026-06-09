@@ -15,10 +15,12 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -42,14 +44,20 @@ class AgentRole(str, enum.Enum):
 
 class Project(Base):
     __tablename__ = "projects"
+    __table_args__ = (UniqueConstraint("source", "external_id", name="uq_projects_source_external"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     slug: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(256))
+    # tenancy source: "local" (self-host workspace) or "clerk" (org/personal provisioned from Clerk)
+    source: Mapped[str] = mapped_column(String(16), default="local")
+    # Clerk org_id, or "user:<clerk_user_id>" for a personal workspace; NULL for local single-workspace
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     ingest_keys: Mapped[list["IngestKey"]] = relationship(back_populates="project")
     agents: Mapped[list["Agent"]] = relationship(back_populates="project")
+    memberships: Mapped[list["Membership"]] = relationship(back_populates="project")
 
 
 class IngestKey(Base):
@@ -61,6 +69,72 @@ class IngestKey(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     project: Mapped[Project] = relationship(back_populates="ingest_keys")
+
+
+class User(Base):
+    """A human identity. In local mode, `password_hash` is set (argon2). In clerk mode the user is
+    upserted from a verified Clerk JWT (`external_id` = Clerk user id, `password_hash` NULL).
+    Email/external_id are unique *per source* so the two backends never collide."""
+
+    __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("source", "external_id", name="uq_users_source_external"),
+        # email is unique only among local accounts (Clerk emails may be unknown/empty/duplicated)
+        Index(
+            "uq_users_local_email",
+            "email",
+            unique=True,
+            postgresql_where=text("source = 'local'"),
+            sqlite_where=text("source = 'local'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    source: Mapped[str] = mapped_column(String(16), default="local")
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    display_name: Mapped[str] = mapped_column(String(256), default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    memberships: Mapped[list["Membership"]] = relationship(back_populates="user")
+
+
+class Membership(Base):
+    """Maps a user to a project (the tenant) with a role. The unique (user, project) constraint makes
+    Clerk role-sync and `X-Tracely-Project` selection safe idempotent operations."""
+
+    __tablename__ = "memberships"
+    __table_args__ = (UniqueConstraint("user_id", "project_id", name="uq_membership_user_project"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    role: Mapped[str] = mapped_column(String(16), default="MEMBER")  # OWNER | ADMIN | MEMBER
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="memberships")
+    project: Mapped[Project] = relationship(back_populates="memberships")
+
+
+class Invitation(Base):
+    """A pending invite to join a project (local mode only; Clerk owns invites in hosted mode).
+    Only the sha256 of the raw token is stored; the raw token is shown once at creation."""
+
+    __tablename__ = "invitations"
+    __table_args__ = (UniqueConstraint("token_hash", name="uq_invitations_token_hash"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    role: Mapped[str] = mapped_column(String(16), default="MEMBER")
+    token_hash: Mapped[str] = mapped_column(String(64))
+    invited_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="PENDING")  # PENDING|ACCEPTED|REVOKED|EXPIRED
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Agent(Base):

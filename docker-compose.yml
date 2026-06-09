@@ -21,6 +21,16 @@ x-app-env: &app-env
   S3_EVENT_PREFIX: events/
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   LLM_JUDGE_API_KEY: ${OPENAI_API_KEY:-}
+  # Auth (default "dev" = no human login, ingest key only — the stack runs open out of the box).
+  # Self-host: TRACELY_AUTH_MODE=local SESSION_SECRET=$(openssl rand -hex 32) docker compose up
+  AUTH_MODE: ${TRACELY_AUTH_MODE:-dev}
+  SESSION_SECRET: ${SESSION_SECRET:-}
+  SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-604800}
+  CLERK_ISSUER: ${CLERK_ISSUER:-}
+  CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
+  CLERK_AUDIENCE: ${CLERK_AUDIENCE:-}
+  CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+  FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-}
 
 services:
   # ── infra ────────────────────────────────────────────────────────────────
@@ -168,7 +178,12 @@ services:
       - ./frontend/app:/app/app           # live source -> next dev hot-reload (node_modules/.next stay baked)
     environment:
       TRACELY_API: http://backend:8000     # server-side fetch uses the compose network
-      TRACELY_KEY: tracely_dev_key
+      TRACELY_KEY: tracely_dev_key         # dev-mode fallback only (AUTH_MODE=dev)
+      NEXT_PUBLIC_AUTH_MODE: ${TRACELY_AUTH_MODE:-dev}   # dev | local | clerk (must match backend AUTH_MODE)
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      NEXT_PUBLIC_CLERK_SIGN_IN_URL: /sign-in
+      NEXT_PUBLIC_CLERK_SIGN_UP_URL: /sign-up
       WATCHPACK_POLLING: "true"            # reliable HMR over the macOS bind mount
     depends_on:
       backend:
