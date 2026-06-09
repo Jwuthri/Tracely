@@ -16,7 +16,7 @@ import json
 import os
 
 import tracely_sdk as tracely
-from _fake_db import ANTHROPIC_TOOLS, QUESTION, SYSTEM, run_tool
+from _fake_db import ANTHROPIC_TOOLS, QUESTION, SYSTEM, observed_tools
 
 from pathlib import Path
 
@@ -46,9 +46,12 @@ def main() -> None:
     )  # pre-wrapped (= wrap_anthropic(anthropic.Anthropic()))
 
     client = Anthropic()
-    messages: list = [{"role": "user", "content": QUESTION}]
-    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
-        for _ in range(5):
+    tools = observed_tools()  # your tool fns, decorated once with @observe(as_type="tool")
+
+    @tracely.observe(as_type="agent")
+    def support_agent(question: str) -> str:
+        messages: list = [{"role": "user", "content": question}]
+        for _ in range(5):  # agentic loop: call tools until Claude gives a final answer
             resp = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=1024,
@@ -58,12 +61,11 @@ def main() -> None:
             )
             messages.append({"role": "assistant", "content": resp.content})
             if resp.stop_reason != "tool_use":
-                print("agent:", "".join(b.text for b in resp.content if b.type == "text"))
-                break
+                return "".join(b.text for b in resp.content if b.type == "text")
             results = []
-            for block in resp.content:
+            for block in resp.content:  # dispatch as usual — the decorator makes each a TOOL span
                 if block.type == "tool_use":
-                    result = run_tool(block.name, block.input)
+                    result = tools[block.name](**block.input)
                     results.append(
                         {
                             "type": "tool_result",
@@ -72,6 +74,15 @@ def main() -> None:
                         }
                     )
             messages.append({"role": "user", "content": results})
+        return "(loop limit hit)"
+
+    with tracely.trace(
+        agent="support-agent",
+        conversation=os.path.basename(__file__),
+        user="ada@example.com",
+        example=os.path.basename(__file__),
+    ):
+        print("agent:", support_agent(QUESTION))
 
     tracely.flush()
     print("sent — Claude tool-calling agent traced via the drop-in; nothing patched globally.")

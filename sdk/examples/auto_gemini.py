@@ -1,8 +1,12 @@
-"""Google Gemini — automatic tracing of a tool-calling agent (PRD 12).
+"""Google Gemini — automatic tracing of a real tool-calling agent (PRD 12).
 
-Uses the `google-genai` SDK's **automatic function calling**: pass the fake-DB functions as tools and
-Gemini calls them itself. `tracely.init()` activates the Gemini instrumentor, so the generation +
-the function calls are captured — no span code.
+A support agent answers a multi-part question with Gemini's function calling against the fake DB,
+then summarizes. `tracely.init()` activates the Gemini instrumentor, so each `generate_content`
+call is captured automatically as a GENERATION span — **no span code on the LLM calls**. One
+`@observe(as_type="agent")` on the loop gives the run a single AGENT root so the generations + tool
+spans land in one trace tree; we disable the SDK's *automatic* function calling and dispatch the
+tools ourselves — the tool fns are decorated with `@observe(as_type="tool")`, so each tool round-trip
+is a TOOL span (generation → tools → generation), matching the framework examples.
 
     pip install "tracely-sdk[google]" google-genai
     export GEMINI_API_KEY=...        # or GOOGLE_API_KEY
@@ -14,7 +18,7 @@ from __future__ import annotations
 import os
 
 import tracely_sdk as tracely
-from _fake_db import QUESTION, SYSTEM, check_inventory, get_order_status
+from _fake_db import QUESTION, SYSTEM, check_inventory, get_order_status, observed_tools
 
 from pathlib import Path
 
@@ -45,19 +49,44 @@ def main() -> None:
     from google.genai import types
 
     client = genai.Client()
-    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
-        resp = client.models.generate_content(
-            model="gemini-3.1-flash-lite",
-            contents=QUESTION,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM,
-                tools=[get_order_status, check_inventory],  # automatic function calling
-            ),
-        )
-        print("agent:", resp.text)
+    tools = observed_tools()  # your tool fns, decorated once with @observe(as_type="tool")
+    config = types.GenerateContentConfig(
+        system_instruction=SYSTEM,
+        tools=[get_order_status, check_inventory],  # the SDK builds tool schemas from the fns
+        # disable the SDK's auto-calling so WE dispatch the tools — each becomes a TOOL span
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    )
+
+    @tracely.observe(as_type="agent")
+    def support_agent(question: str) -> str:
+        contents: list = [types.Content(role="user", parts=[types.Part(text=question)])]
+        for _ in range(5):  # agentic loop: call tools until Gemini gives a final answer
+            resp = client.models.generate_content(
+                model="gemini-3.1-flash-lite", contents=contents, config=config
+            )
+            calls = resp.function_calls or []
+            if not calls:
+                return resp.text or ""
+            contents.append(resp.candidates[0].content)  # the model's function-call turn
+            parts = []
+            for fc in calls:  # dispatch as usual — the decorator makes each a TOOL span
+                result = tools[fc.name](**dict(fc.args))
+                parts.append(
+                    types.Part.from_function_response(name=fc.name, response={"result": result})
+                )
+            contents.append(types.Content(role="user", parts=parts))
+        return "(loop limit hit)"
+
+    with tracely.trace(
+        agent="support-agent",
+        conversation=os.path.basename(__file__),
+        user="ada@example.com",
+        example=os.path.basename(__file__),
+    ):
+        print("agent:", support_agent(QUESTION))
 
     tracely.flush()
-    print("sent — open Tracely → Traces: the generation + Gemini's tool calls, no span code.")
+    print("sent — open Tracely → Traces: one AGENT run → generations + tool spans, no span code.")
 
 
 if __name__ == "__main__":

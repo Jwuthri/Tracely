@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 
 import tracely_sdk as tracely
-from _fake_db import BEDROCK_TOOLS, QUESTION, SYSTEM, run_tool
+from _fake_db import BEDROCK_TOOLS, QUESTION, SYSTEM, observed_tools
 
 from pathlib import Path
 
@@ -44,9 +44,12 @@ def main() -> None:
     import boto3
 
     client = boto3.client("bedrock-runtime", region_name=region)
-    messages: list = [{"role": "user", "content": [{"text": QUESTION}]}]
-    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
-        for _ in range(5):
+    tools = observed_tools()  # your tool fns, decorated once with @observe(as_type="tool")
+
+    @tracely.observe(as_type="agent")
+    def support_agent(question: str) -> str:
+        messages: list = [{"role": "user", "content": [{"text": question}]}]
+        for _ in range(5):  # agentic loop: call tools until the model gives a final answer
             resp = client.converse(
                 modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
                 system=[{"text": SYSTEM}],
@@ -56,13 +59,12 @@ def main() -> None:
             out_msg = resp["output"]["message"]
             messages.append(out_msg)
             if resp.get("stopReason") != "tool_use":
-                print("agent:", "".join(c.get("text", "") for c in out_msg["content"]))
-                break
+                return "".join(c.get("text", "") for c in out_msg["content"])
             results = []
-            for block in out_msg["content"]:
+            for block in out_msg["content"]:  # dispatch as usual — the decorator adds a TOOL span
                 if "toolUse" in block:
                     tu = block["toolUse"]
-                    result = run_tool(tu["name"], tu["input"])
+                    result = tools[tu["name"]](**tu["input"])
                     results.append(
                         {
                             "toolResult": {
@@ -72,9 +74,18 @@ def main() -> None:
                         }
                     )
             messages.append({"role": "user", "content": results})
+        return "(loop limit hit)"
+
+    with tracely.trace(
+        agent="support-agent",
+        conversation=os.path.basename(__file__),
+        user="ada@example.com",
+        example=os.path.basename(__file__),
+    ):
+        print("agent:", support_agent(QUESTION))
 
     tracely.flush()
-    print("sent — open Tracely → Traces: each converse call + tool round-trip, no span code.")
+    print("sent — open Tracely → Traces: one AGENT run → converse generations + tool spans.")
 
 
 if __name__ == "__main__":

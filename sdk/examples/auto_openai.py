@@ -18,7 +18,7 @@ import json
 import os
 
 import tracely_sdk as tracely
-from _fake_db import OPENAI_TOOLS, QUESTION, SYSTEM, run_tool
+from _fake_db import OPENAI_TOOLS, QUESTION, SYSTEM, observed_tools
 
 from pathlib import Path
 
@@ -47,10 +47,14 @@ def main() -> None:
     from openai import OpenAI
 
     client = OpenAI()
+    tools = observed_tools()  # your tool fns, decorated once with @observe(as_type="tool")
 
     @tracely.observe(as_type="agent")
     def support_agent(question: str) -> str:
-        messages: list = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": question}]
+        messages: list = [
+            {"role": "system", "content": SYSTEM},
+            {"role": "user", "content": question},
+        ]
         for _ in range(5):  # agentic loop: call tools until the model gives a final answer
             resp = client.chat.completions.create(
                 model="gpt-5.4-mini", messages=messages, tools=OPENAI_TOOLS
@@ -59,17 +63,21 @@ def main() -> None:
             messages.append(msg.model_dump(exclude_none=True))
             if not msg.tool_calls:
                 return msg.content or ""
-            for call in msg.tool_calls:  # run each requested tool against the fake DB
-                result = run_tool(call.function.name, json.loads(call.function.arguments))
-                print(
-                    f"  tool {call.function.name}{json.loads(call.function.arguments)} -> {result}"
-                )
+            for call in msg.tool_calls:  # dispatch as usual — the decorator makes each a TOOL span
+                args = json.loads(call.function.arguments)
+                result = tools[call.function.name](**args)
+                print(f"  tool {call.function.name}{args} -> {result}")
                 messages.append(
                     {"role": "tool", "tool_call_id": call.id, "content": json.dumps(result)}
                 )
         return "(loop limit hit)"
 
-    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
+    with tracely.trace(
+        agent="support-agent",
+        conversation=os.path.basename(__file__),
+        user="ada@example.com",
+        example=os.path.basename(__file__),
+    ):
         print("agent:", support_agent(QUESTION))
 
     tracely.flush()

@@ -14,7 +14,7 @@ import json
 import os
 
 import tracely_sdk as tracely
-from _fake_db import OPENAI_TOOLS, QUESTION, SYSTEM, run_tool
+from _fake_db import OPENAI_TOOLS, QUESTION, SYSTEM, observed_tools
 
 from pathlib import Path
 
@@ -34,6 +34,10 @@ tracely.init(
 
 def main() -> None:
     if "mistral" not in tracely._instrumented:
+        # The OpenInference Mistral instrumentor targets a different mistralai major than the one
+        # installed here, so the auto path is unavailable. (For a no-patch alternative that works
+        # with this mistralai, wrap a client with `tracely_sdk.mistral.Mistral` — same as the other
+        # drop-ins.) Skip cleanly rather than emit a half-traced run.
         print('Mistral instrumentation not active — pip install "tracely-sdk[mistral]" mistralai')
         return
     if not os.environ.get("MISTRAL_API_KEY"):
@@ -43,9 +47,15 @@ def main() -> None:
     from mistralai import Mistral
 
     client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
-    messages: list = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": QUESTION}]
-    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
-        for _ in range(5):
+    tools = observed_tools()  # your tool fns, decorated once with @observe(as_type="tool")
+
+    @tracely.observe(as_type="agent")
+    def support_agent(question: str) -> str:
+        messages: list = [
+            {"role": "system", "content": SYSTEM},
+            {"role": "user", "content": question},
+        ]
+        for _ in range(5):  # agentic loop: call tools until the model gives a final answer
             resp = client.chat.complete(
                 model="mistral-large-latest", messages=messages, tools=OPENAI_TOOLS
             )
@@ -69,11 +79,10 @@ def main() -> None:
                 }
             )
             if not calls:
-                print("agent:", msg.content)
-                break
-            for call in calls:
+                return msg.content or ""
+            for call in calls:  # dispatch as usual — the decorator makes each a TOOL span
                 args = json.loads(call.function.arguments)
-                result = run_tool(call.function.name, args)
+                result = tools[call.function.name](**args)
                 messages.append(
                     {
                         "role": "tool",
@@ -82,9 +91,18 @@ def main() -> None:
                         "content": json.dumps(result),
                     }
                 )
+        return "(loop limit hit)"
+
+    with tracely.trace(
+        agent="support-agent",
+        conversation=os.path.basename(__file__),
+        user="ada@example.com",
+        example=os.path.basename(__file__),
+    ):
+        print("agent:", support_agent(QUESTION))
 
     tracely.flush()
-    print("sent — open Tracely → Traces: each generation + tool round-trip captured, no span code.")
+    print("sent — open Tracely → Traces: one AGENT run → generations + tool spans, no span code.")
 
 
 if __name__ == "__main__":

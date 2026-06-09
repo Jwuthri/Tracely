@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import os
 
-# CrewAI ships its own tracer that competes with our TracerProvider; turn it off so Tracely owns
-# tracing (and the LiteLLM instrumentor's GENERATION spans flow through).
+# CrewAI ships its own telemetry that emits flat "Crew Created"/"Task Created"/"Tool Usage" spans
+# (each its own root → a separate trace). Disable it via CrewAI's own knobs so Tracely owns tracing —
+# NOT via OTEL_SDK_DISABLED, which would also silence our exporter (keep that explicitly enabled).
+os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
+os.environ.setdefault("CREWAI_DISABLE_TRACKING", "true")
 os.environ.setdefault("CREWAI_TRACING_ENABLED", "false")
 os.environ.setdefault("OTEL_SDK_DISABLED", "false")
 
@@ -77,8 +80,19 @@ def main() -> None:
     task = Task(description=QUESTION, expected_output="A concise, helpful answer.", agent=support)
     crew = Crew(agents=[support], tasks=[task])
 
-    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
-        print("agent:", crew.kickoff())
+    # Wrap kickoff in an AGENT root so the crew's GENERATION + TOOL spans nest into ONE trace
+    # (without it, each model/tool call CrewAI makes becomes its own root → a separate trace).
+    @tracely.observe(as_type="agent", name="support-agent")
+    def run_crew(question: str) -> str:
+        return str(crew.kickoff())
+
+    with tracely.trace(
+        agent="support-agent",
+        conversation=os.path.basename(__file__),
+        user="ada@example.com",
+        example=os.path.basename(__file__),
+    ):
+        print("agent:", run_crew(QUESTION))
 
     tracely.flush()
     print("sent — open Tracely → Traces to see the crew → agent → task → tool/LLM tree.")

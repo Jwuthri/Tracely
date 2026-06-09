@@ -4,7 +4,7 @@ No real I/O — deterministic in-memory data so the examples are reproducible an
 functions are plain Python; each example wires them into its provider/harness's native tool-calling
 format (the schemas below cover the common shapes). Import what you need:
 
-    from _fake_db import QUESTION, OPENAI_TOOLS, run_tool          # OpenAI / Mistral / LiteLLM
+    from _fake_db import QUESTION, OPENAI_TOOLS, observed_tools    # OpenAI / Mistral / LiteLLM
     from _fake_db import ANTHROPIC_TOOLS, BEDROCK_TOOLS            # Anthropic / Bedrock
     from _fake_db import get_order_status, check_inventory         # raw fns (Gemini / @observe)
 """
@@ -38,8 +38,9 @@ INVENTORY: dict[str, dict[str, Any]] = {
 # Kept RAW (no @observe) so framework examples that auto-trace tool dispatch (LangChain `@tool`,
 # LlamaIndex FunctionTool, CrewAI, OpenAI Agents SDK, Google ADK, Claude Agent SDK) don't get a
 # duplicate inner TOOL span on top of the framework's own. Provider-SDK examples that dispatch
-# tools themselves (OpenAI/Anthropic/Mistral/Bedrock/LiteLLM + drop-ins) call `observed_tools()`
-# below to get @observe-wrapped versions, so the run_tool dispatch becomes a real TOOL span.
+# tools themselves (OpenAI/Anthropic/Mistral/Bedrock/LiteLLM + drop-ins) build their dispatch map
+# from `observed_tools()` below — the same fns decorated once with @observe(as_type="tool") — so
+# each tool call becomes a real TOOL span under the agent root with no change at the call site.
 def get_order_status(order_id: str) -> dict:
     """Look up an order's delivery status and ETA by its order id (e.g. ORD-4471)."""
     return ORDERS.get(order_id, {"error": f"no order {order_id}"})
@@ -56,7 +57,6 @@ def check_inventory(sku: str) -> dict:
 
 
 TOOL_IMPLS = {"get_order_status": get_order_status, "check_inventory": check_inventory}
-
 
 
 _DESCRIPTIONS = {
@@ -106,6 +106,21 @@ QUESTION = "Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-
 
 
 def run_tool(name: str, args: dict) -> dict:
-    """Dispatch a model-requested tool call to the fake DB."""
+    """Dispatch a model-requested tool call to the raw fake-DB impls (no span)."""
     fn = TOOL_IMPLS.get(name)
     return fn(**args) if fn else {"error": f"unknown tool {name}"}
+
+
+def observed_tools() -> dict:
+    """The fake-DB tools, each wrapped with `@tracely.observe(as_type="tool")` — so a hand-rolled
+    tool-calling loop auto-emits a TOOL span per call (input=args, output=result), nested under the
+    agent run.
+
+    This is the whole point: the ONLY change a user makes to trace their own tool calls is decorating
+    their tool functions once — the dispatch stays exactly as they wrote it. Provider-SDK examples
+    (OpenAI/Anthropic/Mistral/Bedrock/LiteLLM/Gemini + the drop-ins) build their dispatch map from
+    this. Framework examples (LangChain/LlamaIndex/CrewAI/Agents SDKs) keep the raw `TOOL_IMPLS` so
+    they don't double-trace on top of the framework's own tool spans."""
+    import tracely_sdk as tracely
+
+    return {name: tracely.observe(fn, name=name, as_type="tool") for name, fn in TOOL_IMPLS.items()}

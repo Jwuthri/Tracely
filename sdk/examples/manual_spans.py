@@ -32,14 +32,23 @@ tracely.init(endpoint=API, api_key=KEY, service_name="support-agent", env="prod"
 
 
 def main() -> None:
-    with tracely.trace(example=os.path.basename(__file__)), tracely.agent(
-        "support-agent",
-        version="v3",
-        conversation=os.path.basename(__file__),
-        turn=0,
-        user="ada@example.com",
-        trace_name="order + stock",
-    ) as a:  # AGENT span = run root
+    # conversation/user on trace() so the run context flows onto EVERY child span (thinking, llm,
+    # tools) — not just the AGENT root — keeping conversation_id consistent across the whole trace.
+    with (
+        tracely.trace(
+            conversation=os.path.basename(__file__),
+            user="ada@example.com",
+            example=os.path.basename(__file__),
+        ),
+        tracely.agent(
+            "support-agent",
+            version="v3",
+            conversation=os.path.basename(__file__),
+            turn=0,
+            user="ada@example.com",
+            trace_name="order + stock",
+        ) as a,
+    ):  # AGENT span = run root
         tracely.set_io(a, input=QUESTION)
 
         with tracely.thinking(agent="support-agent") as th:  # THINKING span
