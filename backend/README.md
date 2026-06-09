@@ -73,7 +73,7 @@ Two stages:
 
 ## Module map (`backend/tracely/`)
 
-The package is layered: **domain** (pure logic, no I/O), **infrastructure** (DB / CH / S3 / Redis / LLM adapters), **services** (use-case orchestrators, classes), **workers** (Celery tasks), **api** (HTTP). Old flat paths (`tracely.regression`, `tracely.gate`, `tracely.fi`, `tracely.evaluators`, `tracely.db`, …) are kept as thin re-export shims so external callers (alembic, workers, scripts, SDK tests) keep working unchanged.
+The package is layered: **domain** (pure logic, no I/O), **infrastructure** (DB / CH / S3 / Redis / LLM adapters), **services** (use-case orchestrators, classes), **workers** (Celery tasks), **api** (HTTP). The only top-level Python files are `config.py` (pydantic settings) and `__init__.py` (re-exports `settings`) — everything else lives under one of the six packages above. Callers import directly from the new paths (e.g. `from tracely.services.regression_service import RegressionService`, `from tracely.infrastructure.db.models import EvaluationCase`).
 
 ### `tracely/config.py`
 `Settings` (pydantic-settings) — all env: ClickHouse/Postgres/Redis/S3, OpenAI keys, embedding/judge models, gate thresholds, `default_agent_slug`.
