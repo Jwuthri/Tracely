@@ -16,6 +16,14 @@ import os
 import tracely_sdk as tracely
 from _fake_db import QUESTION, SYSTEM, check_inventory, get_order_status
 
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(_PROJECT_ROOT / ".env", override=True)  # provider keys from the repo-root .env
+
+
 API = os.environ.get("TRACELY_API", "http://localhost:8000")
 KEY = os.environ.get("TRACELY_KEY", "tracely_dev_key")
 
@@ -39,7 +47,7 @@ def main() -> None:
     client = genai.Client()
     with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
         resp = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3.1-flash-lite",
             contents=QUESTION,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM,

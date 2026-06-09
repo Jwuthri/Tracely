@@ -4,7 +4,7 @@ wrap a client *instance*, no global patching.
 
     from tracely_sdk.google import Client                 # a pre-wrapped client
     client = Client(api_key=...)
-    client.models.generate_content(model="gemini-2.0-flash", contents="hi")
+    client.models.generate_content(model="gemini-3.1-flash", contents="hi")
 
     # or wrap one you already built:
     from tracely_sdk.google import wrap_google

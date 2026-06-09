@@ -17,6 +17,14 @@ import os
 import tracely_sdk as tracely
 from _fake_db import ANTHROPIC_TOOLS, QUESTION, SYSTEM, run_tool
 
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(_PROJECT_ROOT / ".env", override=True)  # provider keys from the repo-root .env
+
+
 API = os.environ.get("TRACELY_API", "http://localhost:8000")
 KEY = os.environ.get("TRACELY_KEY", "tracely_dev_key")
 
@@ -40,7 +48,7 @@ def main() -> None:
     with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
         for _ in range(5):
             resp = client.messages.create(
-                model="claude-3-5-sonnet-latest",
+                model="claude-haiku-4-5-20251001",
                 max_tokens=1024,
                 system=SYSTEM,
                 messages=messages,

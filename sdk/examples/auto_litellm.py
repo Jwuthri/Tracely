@@ -17,6 +17,14 @@ import os
 import tracely_sdk as tracely
 from _fake_db import OPENAI_TOOLS, QUESTION, SYSTEM, run_tool
 
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(_PROJECT_ROOT / ".env", override=True)  # provider keys from the repo-root .env
+
+
 API = os.environ.get("TRACELY_API", "http://localhost:8000")
 KEY = os.environ.get("TRACELY_KEY", "tracely_dev_key")
 

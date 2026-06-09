@@ -27,6 +27,14 @@ import sys
 import time
 import urllib.request
 
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(_PROJECT_ROOT / ".env", override=True)  # provider keys from the repo-root .env
+
+
 API = os.environ.get("TRACELY_API", "http://localhost:8000")
 KEY = os.environ.get("TRACELY_KEY", "tracely_dev_key")
 AGENT = os.environ.get("TRACELY_AGENT", "planner")

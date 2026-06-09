@@ -794,6 +794,26 @@ function parseMaybe(s: string | null): unknown {
   return s;
 }
 
+// The assistant's reply text out of a value that may be a plain string, a chat-message array (take
+// the last assistant/ai turn), or a {role:"assistant", content} object — the output-side mirror of
+// firstText (which prefers the user turn).
+function assistantText(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (Array.isArray(v)) {
+    const asst = [...v].reverse().find(
+      (m) => m && typeof m === "object" && /assistant|ai/i.test(String((m as Record<string, unknown>).role ?? (m as Record<string, unknown>).type ?? "")),
+    );
+    if (asst) return firstText((asst as Record<string, unknown>).content ?? asst);
+    return firstText(v);
+  }
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    if (typeof o.content === "string") return o.content;
+    if (o.content != null) return firstText(o.content);
+  }
+  return firstText(v);
+}
+
 // Turn I/O may already be a message object ({role, content}); if so use it directly, else wrap the
 // raw value with the given role — so the summary never double-nests a message inside a message.
 function toMsg(role: string, raw: string | null): { role: string; content: unknown } | null {
@@ -808,6 +828,14 @@ function toMsg(role: string, raw: string | null): { role: string; content: unkno
   if (Array.isArray(v) && v.length === 1 && v[0] && typeof v[0] === "object" && "role" in (v[0] as object)) {
     const m = v[0] as { role?: string; content?: unknown };
     return { role: m.role ?? role, content: m.content };
+  }
+  // A full prompt history ([system, user, …]) or a kwarg dict ({question: "…"}) — NOT a single
+  // message. Pull out this side's readable text so the summary reads as a clean USER question /
+  // ASSISTANT answer identically in every view (the single-trace turns AND the list's
+  // first_input/last_output), instead of dumping the raw messages array as {role:…} JSON pills.
+  if (v && typeof v === "object") {
+    const text = role === "assistant" ? assistantText(v) : firstText(v);
+    if (text) return { role, content: text };
   }
   return { role, content: v };
 }

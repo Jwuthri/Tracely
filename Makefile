@@ -12,8 +12,8 @@ infra-down:  ## stop infra (keeps volumes)
 infra-prune: ## stop infra and delete volumes
 	docker compose down -v
 
-install:     ## sync python deps (uv, all workspace packages) + frontend deps (pnpm)
-	uv sync --all-packages
+install:     ## sync python deps (uv, all workspace packages + provider extras) + frontend deps (pnpm)
+	uv sync --all-packages --all-extras
 	cd frontend && pnpm install
 
 migrate: migrate-ch migrate-pg ## run all migrations
@@ -46,7 +46,7 @@ send-trace:  ## post a sample OTLP trace to the running API
 	uv run python scripts/send_test_trace.py
 
 # Override the target when the API is not on :8000 — e.g. `make demo-failures TRACELY_API=http://localhost:8088`
-TRACELY_API ?= http://localhost:8000
+TRACELY_API ?= http://localhost:8088
 demo-failures: ## seed a mix of failing runs (errors + silent + hallucinations) for the clustering demo
 	@for i in 1 2 3 4 5; do TRACELY_API=$(TRACELY_API) RANDOM=1 uv run python scripts/send_test_trace.py; done
 	@for i in 1 2 3 4 5 6 7 8 9; do TRACELY_API=$(TRACELY_API) RANDOM=1 SILENT=1 uv run python scripts/send_test_trace.py; done

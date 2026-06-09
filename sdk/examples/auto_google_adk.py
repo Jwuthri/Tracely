@@ -19,6 +19,14 @@ import _fake_db
 import tracely_sdk as tracely
 from _fake_db import QUESTION, SYSTEM
 
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(_PROJECT_ROOT / ".env", override=True)  # provider keys from the repo-root .env
+
+
 API = os.environ.get("TRACELY_API", "http://localhost:8000")
 KEY = os.environ.get("TRACELY_KEY", "tracely_dev_key")
 
@@ -46,7 +54,7 @@ async def run() -> None:
     conv = os.path.basename(__file__)
     agent = Agent(
         name="support_agent",
-        model="gemini-2.0-flash",
+        model="gemini-3.1-flash-lite",
         description="Customer-support agent",
         instruction=SYSTEM,
         tools=[get_order_status, check_inventory],
