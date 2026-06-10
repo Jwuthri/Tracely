@@ -54,6 +54,9 @@ export function InviteManager() {
     setRevoking(null);
   }
 
+  // Hide revoked invites — the link is dead, so they're just clutter (still kept in the DB/API).
+  const visible = invites.filter((i) => i.status !== "REVOKED");
+
   return (
     <div className="space-y-6">
       <section className="card p-5">
@@ -111,10 +114,10 @@ export function InviteManager() {
 
       <section className="card overflow-hidden">
         <div className="hairline px-4 py-3 text-[13px] font-semibold text-fg">Invitations</div>
-        {invites.length === 0 ? (
+        {visible.length === 0 ? (
           <div className="px-4 py-8 text-center text-[13px] text-fg-faint">No invitations yet.</div>
         ) : (
-          invites.map((i) => (
+          visible.map((i) => (
             <div
               key={i.id}
               className="flex items-center justify-between border-b border-line/50 px-4 py-3 text-[13px] last:border-0"
