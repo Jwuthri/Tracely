@@ -6,7 +6,7 @@ import { IconArrowLeft } from "@/app/components/icons";
 
 export default async function ThreadPage({ params }: { params: Promise<{ threadId: string }> }) {
   const { threadId } = await params;
-  const { turns } = await getSession(threadId);
+  const { turns, scores: threadScores } = await getSession(threadId);
   // Eagerly resolve each turn's spans so the whole tree renders pre-expanded.
   const traces = await Promise.all(turns.map((t) => getTrace(t.trace_id)));
   const fullTurns: FullTurn[] = turns.map((t, i) => ({ ...t, spans: traces[i].spans }));
@@ -27,6 +27,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
     last_trace_id: turns[turns.length - 1]?.trace_id ?? threadId,
     failing,
     turnsData: fullTurns,
+    scores: threadScores ?? [],
   };
   const usage = convUsage(conv);
 

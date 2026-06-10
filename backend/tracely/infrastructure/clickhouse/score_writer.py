@@ -1,8 +1,10 @@
 """Write access to the ClickHouse `scores` table.
 
 Two flavors of scores go in here:
-- Online eval scores (one per evaluator per trace; ids derived from a stable UUID5 namespace so
-  re-evaluating a trace replaces rather than duplicates via ReplacingMergeTree).
+- Online eval scores (one per evaluator per target; ids derived from a stable UUID5 namespace so
+  re-evaluating a target replaces rather than duplicates via ReplacingMergeTree). A target is a
+  trace (AGENT_RUN), one of its spans (SPAN/TOOL/…, via `observation_id`), or — for
+  CONVERSATION-level evaluators — the whole thread (addressed by `session_id`, no trace_id).
 - Regression/gate verdict scores (one per case×trace; carries `evaluation_case_id`).
 """
 
@@ -20,9 +22,11 @@ from tracely.infrastructure.clickhouse.client import get_client, insert_rows
 # multiple batches converge to the same id under ReplacingMergeTree.
 _ONLINE_EVAL_NS = uuid.UUID("c0ffee00-0000-0000-0000-000000000001")
 
+_CONVERSATION = "CONVERSATION"
+
 _ONLINE_EVAL_COLS = [
-    "project_id", "id", "trace_id", "observation_id", "agent_run_id", "name", "source",
-    "data_type", "value", "string_value", "verdict", "evaluation_level", "comment",
+    "project_id", "id", "trace_id", "observation_id", "session_id", "agent_run_id", "name",
+    "source", "data_type", "value", "string_value", "verdict", "evaluation_level", "comment",
     "created_at", "event_ts",
 ]
 
@@ -40,6 +44,7 @@ class _EvalResultLike(Protocol):
     verdict: str
     data_type: str
     value: float | None
+    string_value: str
     target_span_id: str
     comment: str
 
@@ -60,16 +65,25 @@ class ScoreWriter:
         trace_id: str,
         agent_run_id: str,
         results: list[_EvalResultLike],
+        thread_id: str = "",
     ) -> None:
         if not results:
             return
         now = datetime.now(timezone.utc)
         rows = []
         for r in results:
-            sid = str(uuid.uuid5(_ONLINE_EVAL_NS, f"{trace_id}:{r.name}:{r.target_span_id}"))
+            if r.level == _CONVERSATION:
+                # Thread-scoped: keyed by the thread so any turn's re-evaluation converges to
+                # one row. No trace_id — readers find these via session_id.
+                sid = str(uuid.uuid5(_ONLINE_EVAL_NS, f"thread:{thread_id}:{r.name}"))
+                row_trace, row_session = None, thread_id
+            else:
+                sid = str(uuid.uuid5(_ONLINE_EVAL_NS, f"{trace_id}:{r.name}:{r.target_span_id}"))
+                row_trace, row_session = trace_id, thread_id or None
             rows.append([
-                project_id, sid, trace_id, r.target_span_id or None, agent_run_id, r.name, "EVAL",
-                r.data_type, r.value, "", r.verdict, r.level, r.comment, now, now,
+                project_id, sid, row_trace, r.target_span_id or None, row_session, agent_run_id,
+                r.name, "EVAL", r.data_type, r.value, r.string_value or "", r.verdict, r.level,
+                r.comment, now, now,
             ])
         insert_rows(self.client, "scores", _ONLINE_EVAL_COLS, rows)
 

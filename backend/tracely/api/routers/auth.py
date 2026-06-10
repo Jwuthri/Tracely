@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tracely.api.auth import get_principal, require_role
@@ -23,10 +22,9 @@ from tracely.api.dto.auth import (
     RegisterIn,
     SessionOut,
 )
-from tracely.auth import invitations, passwords, provisioning, tokens
+from tracely.auth import invitations, passwords, provisioning, queries, tokens
 from tracely.auth.principal import Principal, select_membership
 from tracely.infrastructure import mailer
-from tracely.infrastructure.db.models import IngestKey, Invitation, Membership, Project, User
 from tracely.infrastructure.db.session import get_session
 
 common_router = APIRouter()
@@ -35,31 +33,17 @@ clerk_router = APIRouter()
 
 
 async def _build_me(principal: Principal, session: AsyncSession) -> MeOut:
-    project = (
-        await session.execute(select(Project).where(Project.id == principal.project_id))
-    ).scalar_one_or_none()
-    keys = (
-        await session.execute(
-            select(IngestKey.key).where(IngestKey.project_id == principal.project_id)
-        )
-    ).scalars().all()
+    project = await queries.get_project(session, principal.project_id)
+    keys = await queries.project_ingest_keys(session, principal.project_id)
     email = display_name = None
     projects: list[ProjectRef] = []
     if principal.user_id:
-        user = (
-            await session.execute(select(User).where(User.id == principal.user_id))
-        ).scalar_one_or_none()
+        user = await queries.get_user(session, principal.user_id)
         if user:
             email, display_name = user.email, user.display_name
-        rows = (
-            await session.execute(
-                select(Membership, Project)
-                .join(Project, Project.id == Membership.project_id)
-                .where(Membership.user_id == principal.user_id)
-            )
-        ).all()
         projects = [
-            ProjectRef(id=p.id, name=p.name, slug=p.slug, role=m.role) for (m, p) in rows
+            ProjectRef(id=p.id, name=p.name, slug=p.slug, role=m.role)
+            for (m, p) in await queries.user_memberships(session, principal.user_id)
         ]
     return MeOut(
         user_id=principal.user_id,
@@ -127,11 +111,7 @@ async def register(
 
 @local_router.post("/auth/login", response_model=SessionOut)
 async def login(body: LoginIn, session: AsyncSession = Depends(get_session)) -> SessionOut:
-    user = (
-        await session.execute(
-            select(User).where(User.source == "local", User.email == body.email.lower().strip())
-        )
-    ).scalar_one_or_none()
+    user = await queries.local_user_by_email(session, body.email.lower().strip())
     ok = passwords.verify_password(body.password, user.password_hash if user else None)
     if not ok or not user or not user.is_active:
         raise HTTPException(401, "invalid email or password")
@@ -163,14 +143,10 @@ async def create_invitation(
     # so the UI can still surface the link manually (and as a fallback if delivery fails).
     emailed = False
     if mailer.email_enabled():
-        project = (
-            await session.execute(select(Project).where(Project.id == principal.project_id))
-        ).scalar_one_or_none()
+        project = await queries.get_project(session, principal.project_id)
         inviter = None
         if principal.user_id:
-            u = (
-                await session.execute(select(User).where(User.id == principal.user_id))
-            ).scalar_one_or_none()
+            u = await queries.get_user(session, principal.user_id)
             inviter = (u.display_name or u.email) if u else None
         emailed = await mailer.send_invite_email(
             to=inv.email,
@@ -193,13 +169,7 @@ async def list_invitations(
     principal: Principal = Depends(require_role("OWNER", "ADMIN")),
     session: AsyncSession = Depends(get_session),
 ) -> list[InviteSummary]:
-    rows = (
-        await session.execute(
-            select(Invitation)
-            .where(Invitation.project_id == principal.project_id)
-            .order_by(Invitation.created_at.desc())
-        )
-    ).scalars().all()
+    rows = await queries.invitations_for_project(session, principal.project_id)
     return [
         InviteSummary(
             id=i.id,
@@ -218,13 +188,7 @@ async def revoke_invitation(
     principal: Principal = Depends(require_role("OWNER", "ADMIN")),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    inv = (
-        await session.execute(
-            select(Invitation).where(
-                Invitation.id == invite_id, Invitation.project_id == principal.project_id
-            )
-        )
-    ).scalar_one_or_none()
+    inv = await queries.invitation_get(session, principal.project_id, invite_id)
     if not inv:
         raise HTTPException(404, "invitation not found")
     if inv.status == "PENDING":

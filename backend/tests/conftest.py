@@ -24,13 +24,15 @@ from tracely.infrastructure.db.base import Base  # noqa: E402
 from tracely.infrastructure.db.session import get_session  # noqa: E402
 
 # Only the tables the auth flows touch — avoids the pgvector `Vector` column (failure_embeddings),
-# which has no SQLite type compiler.
+# which has no SQLite type compiler. Evaluators ride along because workspace provisioning seeds
+# the recommended catalog (and the /api/evaluators CRUD tests need it).
 _AUTH_TABLES = [
     models.Project.__table__,
     models.IngestKey.__table__,
     models.User.__table__,
     models.Membership.__table__,
     models.Invitation.__table__,
+    models.Evaluator.__table__,
 ]
 
 

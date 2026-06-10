@@ -31,6 +31,9 @@ class SpanOut(BaseModel):
 
 class TraceDetail(BaseModel):
     trace_id: str
+    # The conversation thread this trace belongs to (== trace_id for a 1-turn thread). The UI
+    # uses it to scope conversation-level metric columns + thread-wide eval runs.
+    thread_id: str | None = None
     spans: list[SpanOut]
     scores: list[dict] = []
     eval_verdict: str | None = None

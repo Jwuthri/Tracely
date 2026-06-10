@@ -10,6 +10,8 @@ from tracely.api.routers import (
     analytics,
     cases,
     clusters,
+    evaluations,
+    evaluators,
     gate,
     health,
     otlp,
@@ -48,6 +50,8 @@ app.include_router(cases.router)
 app.include_router(gate.router)
 app.include_router(clusters.router)
 app.include_router(analytics.router)
+app.include_router(evaluators.router)
+app.include_router(evaluations.router)
 
 # Auth: /auth/me + /auth/logout always; mode-specific endpoints gated by AUTH_MODE.
 app.include_router(auth_router.common_router)

@@ -8,7 +8,7 @@ import { IconArrowLeft } from "@/app/components/icons";
 
 export default async function TracePage({ params }: { params: Promise<{ traceId: string }> }) {
   const { traceId } = await params;
-  const { spans, scores, eval_verdict } = await getTrace(traceId);
+  const { spans, scores, eval_verdict, thread_id } = await getTrace(traceId);
   const hasError = spans.some((s) => s.level === "ERROR");
   const failing = hasError || eval_verdict === "FAIL";
   const root = spans.find((s) => s.parent_span_id === "") ?? spans[0];
@@ -45,7 +45,9 @@ export default async function TracePage({ params }: { params: Promise<{ traceId:
     spans,
   };
   const conv: ConvNode = {
-    thread: traceId,
+    // the real conversation thread (== traceId for a 1-turn thread) so conversation-level
+    // metric columns resolve and thread-scoped eval runs target the right rows
+    thread: thread_id || traceId,
     turns: 1,
     first_input: input,
     last_output: output,
@@ -62,6 +64,7 @@ export default async function TracePage({ params }: { params: Promise<{ traceId:
     last_trace_id: traceId,
     failing: failing ? 1 : 0,
     turnsData: [turn],
+    scores: scores.filter((s) => s.evaluation_level === "CONVERSATION"),
   };
   const usage = convUsage(conv);
 
@@ -95,7 +98,7 @@ export default async function TracePage({ params }: { params: Promise<{ traceId:
         </div>
       </header>
 
-      <SingleTraceView conv={conv} spans={spans} scores={scores} verdict={eval_verdict} />
+      <SingleTraceView conv={conv} spans={spans} verdict={eval_verdict} />
     </div>
   );
 }

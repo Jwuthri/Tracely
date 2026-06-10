@@ -21,7 +21,7 @@ _SPAN_COLS = [
     "span_id", "parent_span_id", "type", "name", "level", "status_message",
     "start_time", "end_time", "agent_id", "agent_version_id", "agent_run_id",
     "turn_id", "step_id", "model_id", "input", "output", "tool_call_names",
-    "trace_id", "is_app_root",
+    "trace_id", "is_app_root", "conversation_id",
 ]
 
 
@@ -51,6 +51,29 @@ class TraceReader:
             parameters={"p": project_id, "t": trace_id},
         )
         return [dict(zip(res.column_names, row)) for row in res.result_rows]
+
+    def read_thread_spans(self, project_id: str, thread_id: str) -> list[dict]:
+        """All spans across a conversation thread, ordered by start_time. A thread is every
+        trace sharing `conversation_id == thread_id`; a trace with no conversation is its own
+        1-turn thread (`thread_id == trace_id`) — mirror of the sessions API's grouping."""
+        res = self.client.query(
+            f"SELECT {', '.join(_SPAN_COLS)} FROM events FINAL "
+            "WHERE project_id = {p:String} "
+            "AND (conversation_id = {th:String} OR trace_id = {th:String}) "
+            "ORDER BY start_time",
+            parameters={"p": project_id, "th": thread_id},
+        )
+        return [dict(zip(res.column_names, row)) for row in res.result_rows]
+
+    def thread_trace_ids(self, project_id: str, thread_id: str) -> list[str]:
+        """The trace ids (turns) inside one thread, oldest first."""
+        rows = self.client.query(
+            "SELECT trace_id FROM events FINAL WHERE project_id = {p:String} "
+            "AND (conversation_id = {th:String} OR trace_id = {th:String}) "
+            "GROUP BY trace_id ORDER BY min(start_time)",
+            parameters={"p": project_id, "th": thread_id},
+        ).result_rows
+        return [tid for (tid,) in rows]
 
     def candidate_metrics(
         self, project_id: str, trace_ids: Iterable[str]

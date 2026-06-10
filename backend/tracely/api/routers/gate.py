@@ -1,16 +1,19 @@
-"""CI/CD gate endpoints: run a gate, list gates, gate detail, fetch the replay suite."""
+"""CI/CD gate endpoints: run a gate, list gates, gate detail, fetch the replay suite.
+
+Pure HTTP shaping — Postgres queries live in `infrastructure.db.repositories`.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException
-from sqlalchemy import desc, select
 from starlette.concurrency import run_in_threadpool
 
 from tracely.api.auth import get_project_id
+from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
-from tracely.infrastructure.db.models import Agent, EvaluationCase, GateCase, GateRun
+from tracely.infrastructure.db.models import Agent, GateRun
 from tracely.services.gate_service import GateService
 
 router = APIRouter(prefix="/api")
@@ -42,11 +45,6 @@ def _gate_dict(
 
 
 def _cases(session, gate_id: str) -> list[dict]:
-    rows = session.execute(
-        select(GateCase, EvaluationCase.title)
-        .join(EvaluationCase, GateCase.evaluation_case_id == EvaluationCase.id)
-        .where(GateCase.gate_run_id == gate_id)
-    ).all()
     return [
         {
             "title": title,
@@ -55,7 +53,7 @@ def _cases(session, gate_id: str) -> list[dict]:
             "detail": gc.detail,
             "evaluation_case_id": gc.evaluation_case_id,
         }
-        for gc, title in rows
+        for gc, title in repo.gate_cases_with_titles(session, gate_id)
     ]
 
 
@@ -116,13 +114,7 @@ async def gate_suite(agent: str, project_id: str = Depends(get_project_id)) -> d
 async def list_gates(project_id: str = Depends(get_project_id)) -> list[dict]:
     def work():
         with SyncSessionLocal() as s:
-            rows = s.execute(
-                select(GateRun, Agent.slug)
-                .join(Agent, GateRun.agent_id == Agent.id)
-                .where(GateRun.project_id == project_id)
-                .order_by(desc(GateRun.created_at))
-            ).all()
-            return [_gate_dict(g, slug) for g, slug in rows]
+            return [_gate_dict(g, slug) for g, slug in repo.gates_list_with_agent(s, project_id)]
 
     return await run_in_threadpool(work)
 

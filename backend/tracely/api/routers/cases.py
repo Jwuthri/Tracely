@@ -1,22 +1,21 @@
-"""Regression: promote a trace, list/get cases, replay a case + the dashboard stats."""
+"""Regression: promote a trace, list/get cases, replay a case + the dashboard stats.
+
+Pure HTTP shaping — ClickHouse counters live in `infrastructure.clickhouse.async_reader`,
+Postgres queries in `infrastructure.db.repositories`.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException
-from sqlalchemy import desc, func, select
 from starlette.concurrency import run_in_threadpool
 
 from tracely.api.auth import get_project_id
-from tracely.infrastructure.clickhouse import client as clickhouse
+from tracely.infrastructure.clickhouse import async_reader
+from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
-from tracely.infrastructure.db.models import (
-    Agent,
-    CaseReplay,
-    EvaluationCase,
-    FailureCluster,
-)
+from tracely.infrastructure.db.models import EvaluationCase
 from tracely.services.regression_service import NotFound, RegressionService
 
 router = APIRouter(prefix="/api")
@@ -24,46 +23,16 @@ router = APIRouter(prefix="/api")
 
 @router.get("/stats")
 async def stats(project_id: str = Depends(get_project_id)) -> dict:
-    def work():
-        c = clickhouse.get_client()
-        r = c.query(
-            "SELECT uniqExact(trace_id), count() FROM events FINAL WHERE project_id = {p:String}",
-            parameters={"p": project_id},
-        ).result_rows
-        traces, spans = (int(r[0][0]), int(r[0][1])) if r else (0, 0)
-        f = c.query(
-            "SELECT uniqExact(trace_id) FROM events FINAL WHERE project_id = {p:String} AND level = 'ERROR'",
-            parameters={"p": project_id},
-        ).result_rows
-        failing = int(f[0][0]) if f else 0
-        af = c.query(
-            "SELECT uniqExact(trace_id) FROM scores FINAL WHERE project_id = {p:String} "
-            "AND source = 'EVAL' AND verdict = 'FAIL' AND evaluation_case_id = ''",
-            parameters={"p": project_id},
-        ).result_rows
-        auto_failures = int(af[0][0]) if af else 0
+    counters = await async_reader.stats_counts(project_id)
+
+    def registry():
         with SyncSessionLocal() as s:
-            agents = s.execute(
-                select(func.count()).select_from(Agent).where(Agent.project_id == project_id)
-            ).scalar() or 0
-            cases = s.execute(
-                select(func.count()).select_from(EvaluationCase).where(EvaluationCase.project_id == project_id)
-            ).scalar() or 0
-            open_clusters = s.execute(
-                select(func.count()).select_from(FailureCluster).where(
-                    FailureCluster.project_id == project_id, FailureCluster.status == "OPEN"
-                )
-            ).scalar() or 0
-        return {
-            "traces": traces, "spans": spans, "failing_traces": failing,
-            "auto_failures": auto_failures, "open_clusters": int(open_clusters),
-            "agents": int(agents), "cases": int(cases),
-        }
+            return repo.registry_counts(s, project_id)
 
-    return await run_in_threadpool(work)
+    return {**counters, **await run_in_threadpool(registry)}
 
 
-def _case_dict(c: EvaluationCase, replays: list[CaseReplay] | None = None) -> dict[str, Any]:
+def _case_dict(c: EvaluationCase, replays: list | None = None) -> dict[str, Any]:
     d = {
         "id": c.id,
         "agent_id": c.agent_id,
@@ -112,27 +81,9 @@ async def promote(trace_id: str, project_id: str = Depends(get_project_id)) -> d
 async def list_cases(project_id: str = Depends(get_project_id)) -> list[dict]:
     def work():
         with SyncSessionLocal() as s:
-            rows = (
-                s.execute(
-                    select(EvaluationCase)
-                    .where(EvaluationCase.project_id == project_id)
-                    .order_by(desc(EvaluationCase.created_at))
-                )
-                .scalars()
-                .all()
-            )
             out = []
-            for c in rows:
-                last = (
-                    s.execute(
-                        select(CaseReplay)
-                        .where(CaseReplay.case_id == c.id)
-                        .order_by(desc(CaseReplay.created_at))
-                        .limit(1)
-                    )
-                    .scalars()
-                    .first()
-                )
+            for c in repo.cases_list(s, project_id):
+                last = repo.case_last_replay(s, c.id)
                 d = _case_dict(c)
                 d["last_verdict"] = last.verdict if last else None
                 out.append(d)
@@ -145,19 +96,10 @@ async def list_cases(project_id: str = Depends(get_project_id)) -> list[dict]:
 async def get_case(case_id: str, project_id: str = Depends(get_project_id)) -> dict:
     def work():
         with SyncSessionLocal() as s:
-            c = s.get(EvaluationCase, case_id)
-            if not c or c.project_id != project_id:
+            c = repo.case_get(s, project_id, case_id)
+            if not c:
                 return None
-            replays = (
-                s.execute(
-                    select(CaseReplay)
-                    .where(CaseReplay.case_id == case_id)
-                    .order_by(desc(CaseReplay.created_at))
-                )
-                .scalars()
-                .all()
-            )
-            return _case_dict(c, replays)
+            return _case_dict(c, repo.case_replays(s, case_id))
 
     res = await run_in_threadpool(work)
     if res is None:
@@ -175,8 +117,8 @@ async def replay(
 
     def work():
         with SyncSessionLocal() as s:
-            c = s.get(EvaluationCase, case_id)
-            if not c or c.project_id != project_id:
+            c = repo.case_get(s, project_id, case_id)
+            if not c:
                 return ("err", "case not found")
             tid = candidate or c.source_trace_id
             try:

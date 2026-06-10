@@ -19,6 +19,11 @@ x-app-env: &app-env
   S3_SECRET_ACCESS_KEY: tracely-secret
   S3_BUCKET: tracely-events
   S3_EVENT_PREFIX: events/
+  # LLM access: every chat call (judge, metric generation, failure-intel agents) goes through
+  # LangChain `create_agent` on OpenRouter. OPENAI_API_KEY stays for embeddings only
+  # (OpenRouter has no embeddings API); LLM_JUDGE_API_KEY is the legacy direct-endpoint
+  # fallback used when no OpenRouter key is set.
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   LLM_JUDGE_API_KEY: ${OPENAI_API_KEY:-}
   # Auth (default "dev" = no human login, ingest key only — the stack runs open out of the box).

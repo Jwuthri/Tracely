@@ -2,27 +2,25 @@
 
 import clsx from "clsx";
 import { useState } from "react";
-import type { ConvNode, EvalScore, SpanOut } from "../lib/api";
+import type { ConvNode, SpanOut } from "../lib/api";
 import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
-import { Evaluations } from "./Evaluations";
 import { TraceTable } from "./TraceTable";
 import { Waterfall } from "./Waterfall";
 import { Badge, verdictVariant } from "./ui";
 
-// One trace = a single-turn conversation. The hierarchical table is primary; the waterfall
-// timeline and the raw evaluations list remain available as alternate tabs.
+// One trace = a single-turn conversation. The hierarchical table is primary — evaluation
+// results live INSIDE it as metric columns (with per-row/per-column Run buttons), so there is
+// no separate Evaluations tab anymore; the waterfall timeline remains as an alternate lens.
 export function SingleTraceView({
   conv,
   spans,
-  scores,
   verdict,
 }: {
   conv: ConvNode;
   spans: SpanOut[];
-  scores: EvalScore[];
   verdict: string | null;
 }) {
-  const [tab, setTab] = useState<"table" | "timeline" | "evaluations">("table");
+  const [tab, setTab] = useState<"table" | "timeline">("table");
   const [wide, setWide] = useWide();
   return (
     <div className="space-y-4">
@@ -34,17 +32,19 @@ export function SingleTraceView({
           <TabButton active={tab === "timeline"} onClick={() => setTab("timeline")}>
             Timeline <span className="font-mono text-[11px] text-fg-faint">{spans.length}</span>
           </TabButton>
-          <TabButton active={tab === "evaluations"} onClick={() => setTab("evaluations")}>
-            Evaluations
-            {verdict ? <Badge variant={verdictVariant(verdict)}>{verdict}</Badge> : <span className="font-mono text-[11px] text-fg-faint">{scores.length}</span>}
-          </TabButton>
         </div>
-        <WideToggle wide={wide} onToggle={() => setWide(!wide)} />
+        <div className="flex items-center gap-2">
+          {verdict && (
+            <Badge variant={verdictVariant(verdict)} dot>
+              evals {verdict}
+            </Badge>
+          )}
+          <WideToggle wide={wide} onToggle={() => setWide(!wide)} />
+        </div>
       </div>
       <div style={wide ? WIDE_STYLE : undefined} className="transition-[width,margin] duration-200">
         {tab === "table" && <TraceTable conversations={[conv]} embedded />}
         {tab === "timeline" && <Waterfall spans={spans} />}
-        {tab === "evaluations" && <Evaluations scores={scores} verdict={verdict} />}
       </div>
     </div>
   );

@@ -1,4 +1,7 @@
-"""Trace endpoints: list traces, get trace detail (spans + scores + verdict)."""
+"""Trace endpoints: list traces, get trace detail (spans + scores + verdict).
+
+Pure HTTP shaping — all ClickHouse access lives in `infrastructure.clickhouse.async_reader`.
+"""
 
 from __future__ import annotations
 
@@ -6,64 +9,26 @@ from fastapi import APIRouter, Depends
 
 from tracely.api.auth import get_project_id
 from tracely.api.dto.traces import SpanOut, TraceDetail
-from tracely.infrastructure.clickhouse.client import get_async_client
+from tracely.infrastructure.clickhouse import async_reader
 
 router = APIRouter(prefix="/api")
 
 
 @router.get("/traces")
 async def list_traces(limit: int = 20, project_id: str = Depends(get_project_id)) -> list[dict]:
-    client = await get_async_client()
-    res = await client.query(
-        """
-        SELECT trace_id,
-               min(start_time)                       AS ts,
-               count()                               AS spans,
-               anyIf(name, parent_span_id = '')      AS root_name,
-               anyIf(agent_id, parent_span_id = '')  AS agent_id,
-               maxIf(1, level = 'ERROR')             AS has_error
-        FROM events
-        WHERE project_id = {p:String}
-        GROUP BY trace_id
-        ORDER BY ts DESC
-        LIMIT {n:UInt32}
-        """,
-        parameters={"p": project_id, "n": limit},
-    )
-    rows = [dict(zip(res.column_names, row)) for row in res.result_rows]
-    # attach the auto-eval verdict per trace
-    ev = await client.query(
-        "SELECT trace_id, maxIf(1, verdict = 'FAIL') AS fail FROM scores FINAL "
-        "WHERE project_id = {p:String} AND source = 'EVAL' AND evaluation_case_id = '' GROUP BY trace_id",
-        parameters={"p": project_id},
-    )
-    verdict = {r[0]: ("FAIL" if r[1] else "PASS") for r in ev.result_rows}
-    for r in rows:
-        r["eval"] = verdict.get(r["trace_id"])
-    return rows
+    return await async_reader.traces_overview(project_id, limit)
 
 
 @router.get("/traces/{trace_id}")
 async def get_trace(
     trace_id: str, project_id: str = Depends(get_project_id)
 ) -> TraceDetail:
-    client = await get_async_client()
-    res = await client.query(
-        """
-        SELECT span_id, parent_span_id, name, type, level, status_message,
-               start_time, end_time, agent_id, agent_run_id, turn_id, step_name,
-               model_id, input, output, metadata,
-               toUInt64(arraySum(mapValues(usage_details)))               AS tokens,
-               toFloat64(arraySum(mapValues(cost_details)))               AS cost
-        FROM events FINAL
-        WHERE project_id = {p:String} AND trace_id = {t:String}
-        ORDER BY start_time
-        """,
-        parameters={"p": project_id, "t": trace_id},
-    )
+    raw_spans = await async_reader.trace_spans(project_id, trace_id)
+    thread_id = trace_id  # a trace with no conversation is its own 1-turn thread
     spans: list[SpanOut] = []
-    for row in res.result_rows:
-        d = dict(zip(res.column_names, row))
+    for d in raw_spans:
+        if d.get("conversation_id"):
+            thread_id = d["conversation_id"]
         latency = None
         if d.get("end_time") and d.get("start_time"):
             latency = (d["end_time"] - d["start_time"]).total_seconds() * 1000.0
@@ -90,16 +55,11 @@ async def get_trace(
                 output=d["output"],
             )
         )
-    sres = await client.query(
-        "SELECT name, evaluation_level, observation_id, value, verdict, comment, data_type "
-        "FROM scores FINAL WHERE project_id = {p:String} AND trace_id = {t:String} AND source = 'EVAL' "
-        "AND evaluation_case_id = '' "  # online evals only (exclude regression/gate verdicts)
-        "ORDER BY evaluation_level, name",
-        parameters={"p": project_id, "t": trace_id},
-    )
-    scores = [dict(zip(sres.column_names, row)) for row in sres.result_rows]
+    scores = await async_reader.trace_scores(project_id, trace_id, thread_id)
     eval_verdict = (
         "FAIL" if any(s["verdict"] == "FAIL" for s in scores)
         else ("PASS" if scores else None)
     )
-    return TraceDetail(trace_id=trace_id, spans=spans, scores=scores, eval_verdict=eval_verdict)
+    return TraceDetail(
+        trace_id=trace_id, thread_id=thread_id, spans=spans, scores=scores, eval_verdict=eval_verdict
+    )

@@ -1,13 +1,23 @@
 "use client";
 
 import clsx from "clsx";
-import { useEffect, useMemo, useState, type ReactNode, type SVGProps } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode, type SVGProps } from "react";
 import { useRouter } from "next/navigation";
-import type { ConvNode, FullTurn, SpanOut, ThreadTurn } from "../lib/api";
+import type { ConvNode, EvalScore, FullTurn, SpanOut, ThreadTurn } from "../lib/api";
 import { convUsage, fmtUsd, spanUsage, turnUsage, usageSummary } from "../lib/usage";
+import {
+  deleteEvaluator,
+  levelGroup,
+  listEvaluators,
+  streamEvaluationRun,
+  LEVEL_LABEL,
+  type EvaluatorDef,
+  type RunScope,
+} from "../lib/evaluators";
 import { mergeMeta } from "../lib/meta";
 import { useHiddenTypes } from "../lib/typePrefs";
 import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
+import { AddColumnModal } from "./AddColumnModal";
 import { ExpandableText, FloatingPanel, HighlightedJson, IconBox, JsonPill, Pill, Plain, prettyJson } from "./JsonView";
 import { normalizeType, TypeChip } from "./ui";
 
@@ -57,10 +67,40 @@ const FileIcon = (p: SVGProps<SVGSVGElement>) => (
 const FilterIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...svg(p)}><path d="M22 3H2l8 9.46V19l4 2v-8.54z" /></svg>
 );
+const PlusIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...svg(p)}><path d="M5 12h14" /><path d="M12 5v14" /></svg>
+);
+const DotsIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...svg(p)}><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>
+);
 
 // ── columns ───────────────────────────────────────────────────────────────────
 type Group = "C" | "M" | "S";
-type Col = { key: string; label: string; group: Group; width: number };
+// `evaluator` marks a dynamic metric column (one per evaluator row, keyed by score_name);
+// `tint` is its full-column color wash (header + body) so adjacent metrics read as
+// distinct columns instead of one wide band.
+type MetricTint = { th: string; td: string };
+type Col = {
+  key: string;
+  label: string;
+  group: Group;
+  width: number;
+  evaluator?: EvaluatorDef;
+  tint?: MetricTint;
+};
+
+// Cycled per metric column, TurnWise-style. Literal class strings (Tailwind JIT needs to see
+// them in source); header gets the stronger wash, body cells a subtle one.
+const METRIC_TINTS: MetricTint[] = [
+  { th: "bg-emerald-500/15", td: "bg-emerald-500/[0.06]" },
+  { th: "bg-rose-500/15", td: "bg-rose-500/[0.06]" },
+  { th: "bg-sky-500/15", td: "bg-sky-500/[0.06]" },
+  { th: "bg-violet-500/15", td: "bg-violet-500/[0.06]" },
+  { th: "bg-amber-500/15", td: "bg-amber-500/[0.06]" },
+  { th: "bg-teal-500/15", td: "bg-teal-500/[0.06]" },
+  { th: "bg-fuchsia-500/15", td: "bg-fuchsia-500/[0.06]" },
+  { th: "bg-indigo-500/15", td: "bg-indigo-500/[0.06]" },
+];
 
 const COLUMNS: Col[] = [
   { key: "conversation", label: "Conversation", group: "C", width: 260 },
@@ -859,6 +899,154 @@ function ConvSummaryCell({ conv }: { conv: ConvNode }) {
   return <ChatPill msgs={msgs} />;
 }
 
+// ── evaluation columns (dynamic metric columns + live run state) ─────────────────
+// Live results and run actions reach the deeply nested cells via context, so the
+// row/cell component tree stays prop-free. Keys:
+//   live score   →  `th:<thread>|<name>` | `tr:<trace>|<name>` | `span:<span>|<name>`
+//   busy row     →  `th:<thread>` | `tr:<trace>`     busy column → score_name
+type EvalView = {
+  live: Record<string, EvalScore>;
+  busyCols: Set<string>;
+  busyRows: Set<string>;
+  hasEvaluators: boolean;
+  runThread: (thread: string) => void;
+  runTrace: (trace: string) => void;
+  runColumn: (ev: EvaluatorDef) => void;
+  editColumn: (ev: EvaluatorDef) => void;
+  removeColumn: (ev: EvaluatorDef) => void;
+};
+const EvalViewContext = createContext<EvalView>({
+  live: {}, busyCols: new Set(), busyRows: new Set(), hasEvaluators: false,
+  runThread: () => {}, runTrace: () => {}, runColumn: () => {}, editColumn: () => {}, removeColumn: () => {},
+});
+
+// Where a streamed score lands in `live` (mirrors the per-cell lookup keys).
+function scoreKey(s: EvalScore): string | null {
+  if (s.observation_id) return `span:${s.observation_id}|${s.name}`;
+  if (s.evaluation_level === "CONVERSATION") return s.session_id ? `th:${s.session_id}|${s.name}` : null;
+  return s.trace_id ? `tr:${s.trace_id}|${s.name}` : null;
+}
+
+function fmtScoreValue(s: EvalScore): string {
+  if (s.data_type === "NUMERIC" && s.value != null) {
+    if (s.name.endsWith("latency_ms")) {
+      return s.value < 1000 ? `${Math.round(s.value)}ms` : `${(s.value / 1000).toFixed(2)}s`;
+    }
+    return Number.isInteger(s.value) ? String(s.value) : s.value.toFixed(2);
+  }
+  if ((s.data_type === "CATEGORICAL" || s.data_type === "TEXT") && s.string_value) return s.string_value;
+  return "";
+}
+
+function VerdictChip({ verdict }: { verdict: string }) {
+  if (verdict !== "PASS" && verdict !== "FAIL") return null;
+  const ok = verdict === "PASS";
+  return (
+    <span
+      className={clsx(
+        "inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wider",
+        ok ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400" : "border-rose-500/30 bg-rose-500/10 text-rose-400",
+      )}
+    >
+      {verdict}
+    </span>
+  );
+}
+
+const EvalSpinner = () => (
+  <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500">
+    <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" />
+    evaluating
+  </span>
+);
+
+// One metric result in a cell: verdict chip + value (or reason teaser), click → floating
+// detail panel with the judge's full reasoning.
+function EvalScorePill({ score, evaluator, busy }: { score: EvalScore; evaluator: EvaluatorDef; busy: boolean }) {
+  const val = fmtScoreValue(score) || score.comment || "";
+  const icon = (
+    <IconBox accent={score.verdict === "FAIL" ? "fuchsia" : "cyan"}>
+      <span className="text-[10px] font-bold">✓</span>
+    </IconBox>
+  );
+  const rows: Array<[string, string]> = [];
+  if (score.verdict) rows.push(["Verdict", score.verdict]);
+  if (score.value != null) rows.push(["Value", String(score.value)]);
+  if (score.string_value) rows.push([score.data_type === "CATEGORICAL" ? "Category" : "Output", score.string_value]);
+  if (score.comment) rows.push(["Reason", score.comment]);
+  return (
+    // max-w-full + overflow-hidden: the pill can NEVER bleed into the neighboring column —
+    // the teaser text is hard-trimmed to fit and the full reason lives in the click panel.
+    <span className={clsx("inline-flex max-w-full items-center gap-1.5 overflow-hidden", busy && "opacity-50")}>
+      {score.verdict ? <VerdictChip verdict={score.verdict} /> : null}
+      {val ? (
+        <Pill
+          iconBox={icon}
+          summary={<span className="text-slate-300/90">{val.length > 16 ? `${val.slice(0, 16).trimEnd()}…` : val}</span>}
+          panel={(a, c) => (
+            <FloatingPanel
+              anchor={a}
+              onClose={c}
+              icon={icon}
+              title={evaluator.name}
+              subtitle={LEVEL_LABEL[score.evaluation_level] ?? score.evaluation_level.toLowerCase()}
+              copyText={JSON.stringify(score, null, 2)}
+            >
+              <div className="space-y-2 p-3 text-[12px]">
+                {evaluator.description && <p className="text-slate-500">{evaluator.description}</p>}
+                {rows.map(([k, v]) => (
+                  <div key={k} className="flex items-start justify-between gap-4">
+                    <span className="shrink-0 text-slate-400">{k}</span>
+                    <span className={clsx("whitespace-pre-wrap break-words text-right font-mono text-[11.5px]", k === "Verdict" ? (v === "FAIL" ? "text-rose-400" : "text-emerald-400") : "text-slate-200")}>
+                      {v}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </FloatingPanel>
+          )}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+// Span types a step-level evaluator grades — used to blank non-target step rows.
+function evaluatorSpanTypes(ev: EvaluatorDef): string[] | null {
+  if (ev.level === "SPAN") return (ev.config?.span_types as string[] | undefined) ?? ["TOOL", "GENERATION"];
+  if (ev.level === "TOOL" || ev.level === "GENERATION" || ev.level === "CHAIN") return [ev.level];
+  return null;
+}
+
+function EvalColumnCell({ evaluator, ctx }: { evaluator: EvaluatorDef; ctx: RowCtx }) {
+  const view = useContext(EvalViewContext);
+  if (levelGroup(evaluator.level) !== ctx.level) return null;
+  const name = evaluator.score_name;
+  let score: EvalScore | undefined;
+  let busy = view.busyCols.has(name);
+  if (ctx.level === "C") {
+    score =
+      view.live[`th:${ctx.conv.thread}|${name}`] ??
+      ctx.conv.scores?.find((s) => s.name === name && s.evaluation_level === "CONVERSATION");
+    busy = busy || view.busyRows.has(`th:${ctx.conv.thread}`);
+  } else if (ctx.level === "M") {
+    if (ctx.role !== "assistant") return null; // run-level grades attach to the agent's reply
+    score =
+      view.live[`tr:${ctx.turn.trace_id}|${name}`] ??
+      ctx.turn.scores?.find((s) => s.name === name && !s.observation_id && s.evaluation_level !== "CONVERSATION");
+    busy = busy || view.busyRows.has(`tr:${ctx.turn.trace_id}`) || view.busyRows.has(`th:${ctx.conv.thread}`);
+  } else {
+    const types = evaluatorSpanTypes(evaluator);
+    if (types && !types.includes(ctx.span.type)) return null;
+    score =
+      view.live[`span:${ctx.span.span_id}|${name}`] ??
+      ctx.turn.scores?.find((s) => s.name === name && s.observation_id === ctx.span.span_id);
+    busy = busy || view.busyRows.has(`tr:${ctx.turn.trace_id}`);
+  }
+  if (!score) return busy ? <EvalSpinner /> : <span className="text-slate-500">—</span>;
+  return <EvalScorePill score={score} evaluator={evaluator} busy={busy} />;
+}
+
 // ── row context + per-column dispatch ───────────────────────────────────────────
 type RowCtx =
   | { level: "C"; conv: ConvNode; agentCount: number }
@@ -866,6 +1054,7 @@ type RowCtx =
   | { level: "S"; span: SpanOut; index: number; turn: FullTurn };
 
 function renderCell(col: Col, ctx: RowCtx): ReactNode {
+  if (col.evaluator) return <EvalColumnCell evaluator={col.evaluator} ctx={ctx} />;
   switch (col.key) {
     // C group
     case "conversation":
@@ -973,6 +1162,39 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
 }
 
 // ── rows ────────────────────────────────────────────────────────────────────────
+// The per-row Play button: C rows evaluate the whole thread (turns + conversation metrics),
+// M/S rows re-evaluate their turn. Spins while that scope is running.
+function RowRunButton({ ctx }: { ctx: RowCtx }) {
+  const view = useContext(EvalViewContext);
+  if (!view.hasEvaluators) return null;
+  const busy =
+    ctx.level === "C"
+      ? view.busyRows.has(`th:${ctx.conv.thread}`)
+      : view.busyRows.has(`tr:${ctx.turn.trace_id}`) ||
+        (ctx.level === "M" && view.busyRows.has(`th:${ctx.conv.thread}`));
+  if (busy) {
+    return (
+      <span className="inline-flex h-6 w-6 items-center justify-center" title="Evaluating…">
+        <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" />
+      </span>
+    );
+  }
+  return (
+    <button
+      tabIndex={-1}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (ctx.level === "C") view.runThread(ctx.conv.thread);
+        else view.runTrace(ctx.turn.trace_id);
+      }}
+      className="inline-flex h-6 w-6 items-center justify-center rounded-lg opacity-0 transition-opacity hover:bg-slate-700 group-hover:opacity-100"
+      title={ctx.level === "C" ? "Run all evaluations for this conversation" : "Run all evaluations for this turn"}
+    >
+      <Play className="h-3 w-3 text-slate-400" />
+    </button>
+  );
+}
+
 function DataRow({
   depth,
   ctx,
@@ -1027,9 +1249,7 @@ function DataRow({
         )}
       </td>
       <td style={CTRL} className="px-2 py-2 align-top sm:px-3">
-        <button tabIndex={-1} className="inline-flex h-6 w-6 items-center justify-center rounded-lg opacity-0 transition-opacity hover:bg-slate-700 group-hover:opacity-100" title="Run evaluations for this row">
-          <Play className="h-3 w-3 text-slate-400" />
-        </button>
+        <RowRunButton ctx={ctx} />
       </td>
       <td style={CTRL} className="px-2 py-2 align-top sm:px-3">
         {ctx.level === "C" ? (
@@ -1042,7 +1262,11 @@ function DataRow({
         <td
           key={col.key}
           style={{ width: col.width, minWidth: 80 }}
-          className={clsx("px-2 py-2 align-top text-sm text-slate-300 sm:px-3", i > 0 && cols[i - 1].group !== col.group && "border-l border-slate-700/70")}
+          className={clsx(
+            "px-2 py-2 align-top text-sm text-slate-300 sm:px-3",
+            (col.evaluator || (i > 0 && cols[i - 1].group !== col.group)) && "border-l border-slate-600/50",
+            col.tint?.td,
+          )}
         >
           {renderCell(col, ctx)}
         </td>
@@ -1172,17 +1396,18 @@ function EmptyTr({ cols, text }: { cols: Col[]; text: string }) {
 }
 
 // ── column-visibility menu ──────────────────────────────────────────────────────
-function ColumnsMenu({ hidden, onToggle, onClose }: { hidden: Set<string>; onToggle: (k: string) => void; onClose: () => void }) {
+function ColumnsMenu({ all, hidden, onToggle, onClose }: { all: Col[]; hidden: Set<string>; onToggle: (k: string) => void; onClose: () => void }) {
   return (
     <>
       <div className="fixed inset-0 z-20" onClick={onClose} />
       <div className="absolute right-0 top-full z-30 mt-1 w-60 rounded-lg border border-slate-700 bg-slate-900 p-2 shadow-xl shadow-slate-900/50">
         <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-slate-500">Toggle columns</div>
         <div className="max-h-72 overflow-auto">
-          {COLUMNS.map((col) => (
+          {all.map((col) => (
             <label key={col.key} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
               <input type="checkbox" checked={!hidden.has(col.key)} onChange={() => onToggle(col.key)} className="accent-cyan-500" />
               <span className="truncate">{col.label}</span>
+              {col.evaluator && <span className="rounded bg-cyan-500/15 px-1 text-[9px] font-medium uppercase text-cyan-300">eval</span>}
               <span className={clsx("ml-auto rounded px-1 text-[10px] font-medium", LEVEL_BADGE[col.group])}>{col.group}</span>
             </label>
           ))}
@@ -1221,6 +1446,62 @@ function TypesMenu({ types, hidden, onToggle, onReset, onClose }: { types: strin
 }
 
 // ── header ──────────────────────────────────────────────────────────────────────
+// Metric-column header controls: a Run button (whole column across the loaded rows) and a
+// ⋯ menu with Edit / Delete.
+function HeaderEvalControls({ evaluator }: { evaluator: EvaluatorDef }) {
+  const view = useContext(EvalViewContext);
+  const [menu, setMenu] = useState(false);
+  const busy = view.busyCols.has(evaluator.score_name);
+  return (
+    <span className="ml-0.5 inline-flex items-center">
+      {busy ? (
+        <span className="inline-flex h-5 w-5 items-center justify-center" title="Evaluating…">
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" />
+        </span>
+      ) : (
+        <button
+          onClick={() => view.runColumn(evaluator)}
+          className="inline-flex h-5 w-5 items-center justify-center rounded text-emerald-400 transition-colors hover:bg-slate-700 hover:text-emerald-300"
+          title={`Run "${evaluator.name}" on all loaded rows`}
+        >
+          <Play className="h-3 w-3" />
+        </button>
+      )}
+      <span className="relative">
+        <button
+          onClick={() => setMenu((o) => !o)}
+          className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-500 transition-colors hover:bg-slate-700 hover:text-slate-300"
+          title="Column options"
+        >
+          <DotsIcon className="h-3 w-3" />
+        </button>
+        {menu && (
+          <>
+            <span className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
+            <span className="absolute right-0 top-full z-30 mt-1 block w-36 overflow-hidden rounded-lg border border-slate-700 bg-slate-900 py-1 shadow-xl shadow-slate-900/50">
+              {!evaluator.enabled && (
+                <span className="block px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-amber-400/80">auto-run off</span>
+              )}
+              <button
+                onClick={() => { setMenu(false); view.editColumn(evaluator); }}
+                className="block w-full px-3 py-1.5 text-left text-xs font-normal normal-case tracking-normal text-slate-300 hover:bg-slate-800"
+              >
+                Edit column
+              </button>
+              <button
+                onClick={() => { setMenu(false); view.removeColumn(evaluator); }}
+                className="block w-full px-3 py-1.5 text-left text-xs font-normal normal-case tracking-normal text-rose-400 hover:bg-slate-800"
+              >
+                Delete column
+              </button>
+            </span>
+          </>
+        )}
+      </span>
+    </span>
+  );
+}
+
 function HeaderRow({ cols }: { cols: Col[] }) {
   return (
     <tr className="border-b border-slate-700 bg-slate-800">
@@ -1231,11 +1512,18 @@ function HeaderRow({ cols }: { cols: Col[] }) {
         <th
           key={col.key}
           style={{ width: col.width, minWidth: 80 }}
-          className={clsx(HEAD_TH, i > 0 && cols[i - 1].group !== col.group && "border-l border-slate-700")}
+          className={clsx(
+            HEAD_TH,
+            (col.evaluator || (i > 0 && cols[i - 1].group !== col.group)) && "border-l border-slate-600/60",
+            col.tint?.th,
+          )}
         >
           <div className="flex items-center gap-1">
-            <span>{col.label}</span>
+            <span className={clsx(col.evaluator && "max-w-[150px] truncate")} title={col.evaluator ? `${col.label} — ${col.evaluator.description || "evaluation column"}` : undefined}>
+              {col.label}
+            </span>
             <span className={clsx("rounded px-1.5 py-0.5 text-[10px] font-medium", LEVEL_BADGE[col.group])}>{col.group}</span>
+            {col.evaluator && <HeaderEvalControls evaluator={col.evaluator} />}
           </div>
         </th>
       ))}
@@ -1283,7 +1571,97 @@ export function TraceTable({
   const [typeMenu, setTypeMenu] = useState(false);
   const [wide, setWide] = useWide();
 
-  const cols = useMemo(() => COLUMNS.filter((c) => !hidden.has(c.key)), [hidden]);
+  // ── evaluation columns: definitions + live run state ──────────────────────────
+  const [evaluators, setEvaluators] = useState<EvaluatorDef[]>([]);
+  const [liveScores, setLiveScores] = useState<Record<string, EvalScore>>({});
+  const [busyCols, setBusyCols] = useState<Set<string>>(new Set());
+  const [busyRows, setBusyRows] = useState<Set<string>>(new Set());
+  const [runError, setRunError] = useState("");
+  const [columnModal, setColumnModal] = useState<{ open: boolean; editing: EvaluatorDef | null }>({
+    open: false,
+    editing: null,
+  });
+  useEffect(() => {
+    void listEvaluators().then(setEvaluators).catch(() => {});
+  }, []);
+
+  // Fixed columns first, then EVERY metric column at the right end of the table (ordered
+  // C-metrics → M-metrics → S-metrics, creation order within a level), each with its own
+  // cycled column tint — the TurnWise layout.
+  const allColumns = useMemo<Col[]>(() => {
+    const groupOrder: Record<Group, number> = { C: 0, M: 1, S: 2 };
+    const metric: Col[] = [...evaluators]
+      .sort((a, b) => groupOrder[levelGroup(a.level)] - groupOrder[levelGroup(b.level)])
+      .map((ev, i) => ({
+        key: `eval:${ev.score_name}`,
+        label: ev.name,
+        group: levelGroup(ev.level),
+        // sized so chip + 16-char teaser pill fit without spilling into the next column
+        width: 230,
+        evaluator: ev,
+        tint: METRIC_TINTS[i % METRIC_TINTS.length],
+      }));
+    return [...COLUMNS, ...metric];
+  }, [evaluators]);
+  const cols = useMemo(() => allColumns.filter((c) => !hidden.has(c.key)), [allColumns, hidden]);
+
+  async function runScope(scope: RunScope, busy: { cols?: string[]; rows?: string[] }) {
+    setRunError("");
+    if (busy.cols?.length) setBusyCols((p) => new Set([...p, ...busy.cols!]));
+    if (busy.rows?.length) setBusyRows((p) => new Set([...p, ...busy.rows!]));
+    try {
+      await streamEvaluationRun(scope, (e) => {
+        if (e.type === "result") {
+          const key = scoreKey(e.score);
+          if (key) setLiveScores((p) => ({ ...p, [key]: e.score }));
+        } else if (e.type === "target_error") {
+          setRunError(`${e.target}: ${e.detail}`);
+        } else if (e.type === "error") {
+          setRunError(e.detail);
+        }
+      });
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : "evaluation run failed");
+    } finally {
+      if (busy.cols?.length) setBusyCols((p) => { const n = new Set(p); busy.cols!.forEach((c) => n.delete(c)); return n; });
+      if (busy.rows?.length) setBusyRows((p) => { const n = new Set(p); busy.rows!.forEach((r) => n.delete(r)); return n; });
+    }
+  }
+
+  function threadBusyKeys(thread: string): string[] {
+    const t = turns[thread];
+    return [`th:${thread}`, ...(Array.isArray(t) ? t.map((x) => `tr:${x.trace_id}`) : [])];
+  }
+
+  const evalView = useMemo<EvalView>(() => ({
+    live: liveScores,
+    busyCols,
+    busyRows,
+    hasEvaluators: evaluators.length > 0,
+    runThread: (thread) => void runScope({ thread_ids: [thread] }, { rows: threadBusyKeys(thread) }),
+    runTrace: (trace) => void runScope({ trace_ids: [trace] }, { rows: [`tr:${trace}`] }),
+    runColumn: (ev) =>
+      void runScope(
+        { evaluator_ids: [ev.id], thread_ids: conversations.map((c) => c.thread) },
+        { cols: [ev.score_name] },
+      ),
+    editColumn: (ev) => setColumnModal({ open: true, editing: ev }),
+    removeColumn: (ev) => {
+      if (!window.confirm(`Delete the "${ev.name}" column? Past results stay in the score history.`)) return;
+      void deleteEvaluator(ev.id)
+        .then(() => listEvaluators().then(setEvaluators))
+        .catch((e) => setRunError(e instanceof Error ? e.message : "delete failed"));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [liveScores, busyCols, busyRows, evaluators, conversations, turns]);
+
+  function runAllEvals() {
+    void runScope(
+      { thread_ids: conversations.map((c) => c.thread) },
+      { cols: evaluators.map((e) => e.score_name) },
+    );
+  }
+  const anyRunning = busyCols.size > 0 || busyRows.size > 0;
   // Types listed in the filter menu: the canonical set (always) plus any extra types the current
   // data emits (so SDK additions show up automatically). Canonical order first, extras alphabetical.
   const spanTypes = useMemo(() => {
@@ -1411,66 +1789,109 @@ export function TraceTable({
   }
 
   return (
-    <div
-      style={!embedded && wide ? WIDE_STYLE : undefined}
-      className="overflow-hidden rounded-lg border border-slate-700 transition-[width,margin] duration-200"
-    >
-      <div className="flex items-center justify-between border-b border-slate-700 bg-slate-800/50 px-4 py-2">
-        <button onClick={toggleAll} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-white">
-          <ChevronsUpDown className="h-3.5 w-3.5" />
-          <span>{allOpen ? "Collapse All" : "Expand All"}</span>
-        </button>
-        <div className="flex items-center gap-1">
-          {!embedded && <WideToggle wide={wide} onToggle={() => setWide(!wide)} />}
-          <div className="relative">
-            <button onClick={() => setTypeMenu((o) => !o)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-white" title="Filter step types">
-              <FilterIcon className="h-3.5 w-3.5" />
-              <span>Types</span>
-              {hiddenTypes.size > 0 && <span className="rounded bg-cyan-500/20 px-1.5 text-[10px] font-medium text-cyan-300">{hiddenTypes.size}</span>}
+    <EvalViewContext.Provider value={evalView}>
+      <div
+        style={!embedded && wide ? WIDE_STYLE : undefined}
+        className="overflow-hidden rounded-lg border border-slate-700 transition-[width,margin] duration-200"
+      >
+        <div className="flex items-center justify-between border-b border-slate-700 bg-slate-800/50 px-4 py-2">
+          <div className="flex items-center gap-1">
+            <button onClick={toggleAll} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-white">
+              <ChevronsUpDown className="h-3.5 w-3.5" />
+              <span>{allOpen ? "Collapse All" : "Expand All"}</span>
             </button>
-            {typeMenu && <TypesMenu types={spanTypes} hidden={hiddenTypes} onToggle={toggleType} onReset={resetTypes} onClose={() => setTypeMenu(false)} />}
+            {evaluators.length > 0 && conversations.length > 0 && (
+              <button
+                onClick={runAllEvals}
+                disabled={anyRunning}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-emerald-300 disabled:opacity-50"
+                title="Run every evaluation column on all loaded rows"
+              >
+                {anyRunning ? (
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-700 border-t-emerald-400" />
+                ) : (
+                  <Play className="h-3.5 w-3.5 text-emerald-400" />
+                )}
+                <span>Run evals</span>
+              </button>
+            )}
           </div>
-          <div className="relative">
-            <button onClick={() => setColMenu((o) => !o)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-white" title="Manage Column Visibility">
-              <Eye className="h-3.5 w-3.5" />
-              <span>Columns</span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setColumnModal({ open: true, editing: null })}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-500"
+              title="Add an evaluation column"
+            >
+              <PlusIcon className="h-3.5 w-3.5" />
+              <span>Add Column</span>
             </button>
-            {colMenu && <ColumnsMenu hidden={hidden} onToggle={toggleCol} onClose={() => setColMenu(false)} />}
+            {!embedded && <WideToggle wide={wide} onToggle={() => setWide(!wide)} />}
+            <div className="relative">
+              <button onClick={() => setTypeMenu((o) => !o)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-white" title="Filter step types">
+                <FilterIcon className="h-3.5 w-3.5" />
+                <span>Types</span>
+                {hiddenTypes.size > 0 && <span className="rounded bg-cyan-500/20 px-1.5 text-[10px] font-medium text-cyan-300">{hiddenTypes.size}</span>}
+              </button>
+              {typeMenu && <TypesMenu types={spanTypes} hidden={hiddenTypes} onToggle={toggleType} onReset={resetTypes} onClose={() => setTypeMenu(false)} />}
+            </div>
+            <div className="relative">
+              <button onClick={() => setColMenu((o) => !o)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-white" title="Manage Column Visibility">
+                <Eye className="h-3.5 w-3.5" />
+                <span>Columns</span>
+              </button>
+              {colMenu && <ColumnsMenu all={allColumns} hidden={hidden} onToggle={toggleCol} onClose={() => setColMenu(false)} />}
+            </div>
           </div>
+        </div>
+
+        {runError && (
+          <div className="flex items-center justify-between gap-3 border-b border-rose-500/20 bg-rose-500/[0.06] px-4 py-2 text-[12px] text-rose-300">
+            <span className="truncate">{runError}</span>
+            <button onClick={() => setRunError("")} className="shrink-0 rounded px-1.5 text-rose-400 hover:bg-rose-500/10" aria-label="Dismiss">
+              ✕
+            </button>
+          </div>
+        )}
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[800px] border-collapse">
+            <thead>
+              <HeaderRow cols={cols} />
+            </thead>
+            <tbody>
+              {conversations.length === 0 ? (
+                <tr>
+                  <td colSpan={3 + cols.length} className="px-6 py-14 text-center text-sm text-slate-500">
+                    No conversations.
+                  </td>
+                </tr>
+              ) : (
+                conversations.map((c) => (
+                  <ConvRows
+                    key={c.thread}
+                    conv={c}
+                    turns={turns[c.thread]}
+                    spansCache={spans}
+                    open={openConv.has(c.thread)}
+                    openTurn={openTurn}
+                    cols={cols}
+                    hiddenTypes={hiddenTypes}
+                    onToggleConv={toggleConv}
+                    onToggleTurn={toggleTurn}
+                  />
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[800px] border-collapse">
-          <thead>
-            <HeaderRow cols={cols} />
-          </thead>
-          <tbody>
-            {conversations.length === 0 ? (
-              <tr>
-                <td colSpan={3 + cols.length} className="px-6 py-14 text-center text-sm text-slate-500">
-                  No conversations.
-                </td>
-              </tr>
-            ) : (
-              conversations.map((c) => (
-                <ConvRows
-                  key={c.thread}
-                  conv={c}
-                  turns={turns[c.thread]}
-                  spansCache={spans}
-                  open={openConv.has(c.thread)}
-                  openTurn={openTurn}
-                  cols={cols}
-                  hiddenTypes={hiddenTypes}
-                  onToggleConv={toggleConv}
-                  onToggleTurn={toggleTurn}
-                />
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
+      <AddColumnModal
+        open={columnModal.open}
+        editing={columnModal.editing}
+        onClose={() => setColumnModal({ open: false, editing: null })}
+        onSaved={() => void listEvaluators().then(setEvaluators)}
+      />
+    </EvalViewContext.Provider>
   );
 }

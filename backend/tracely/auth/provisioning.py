@@ -17,12 +17,37 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tracely.auth.invitations import hash_token
 from tracely.auth.principal import AuthError, Principal
-from tracely.infrastructure.db.models import IngestKey, Invitation, Membership, Project, User
+from tracely.domain.evaluation.evaluators import TEMPLATES
+from tracely.infrastructure.db.models import Evaluator, IngestKey, Invitation, Membership, Project, User
 
 
 def new_ingest_key() -> str:
     """Opaque, dot-free ingest key — the classifier must never mistake it for a JWT."""
     return "tk_" + secrets.token_urlsafe(32)
+
+
+async def seed_recommended_evaluators(session: AsyncSession, project_id: str) -> int:
+    """Install the recommended evaluator catalog as editable records (idempotent by score_name)
+    so online evaluation + the grid's metric columns work out of the box for every new
+    workspace. Async twin of services/seeding_service._seed_evaluators (the CLI seeder)."""
+    existing = set(
+        (
+            await session.execute(
+                select(Evaluator.score_name).where(Evaluator.project_id == project_id)
+            )
+        ).scalars()
+    )
+    added = 0
+    for t in TEMPLATES:
+        if not t.get("recommended") or t["score_name"] in existing:
+            continue
+        session.add(Evaluator(
+            id=str(uuid4()), project_id=project_id, name=t["name"],
+            description=t.get("description", ""), kind=t["kind"], score_name=t["score_name"],
+            level=t["level"], config=t.get("config") or {},
+        ))
+        added += 1
+    return added
 
 
 def _as_utc(dt: datetime) -> datetime:
@@ -32,17 +57,18 @@ def _as_utc(dt: datetime) -> datetime:
 
 async def _get_or_create(session: AsyncSession, model, *, where, defaults):
     """Portable, race-safe get-or-create (works on Postgres + SQLite). A concurrent insert that loses
-    the unique-constraint race is caught at the savepoint and resolved by re-selecting the winner."""
+    the unique-constraint race is caught at the savepoint and resolved by re-selecting the winner.
+    Returns `(obj, created)` so callers can run one-time provisioning (e.g. evaluator seeding)."""
     obj = (await session.execute(select(model).where(*where))).scalar_one_or_none()
     if obj is not None:
-        return obj
+        return obj, False
     try:
         async with session.begin_nested():
             obj = model(**defaults)
             session.add(obj)
-        return obj
+        return obj, True
     except IntegrityError:
-        return (await session.execute(select(model).where(*where))).scalar_one()
+        return (await session.execute(select(model).where(*where))).scalar_one(), False
 
 
 # ── local mode ────────────────────────────────────────────────────────────────
@@ -93,6 +119,7 @@ async def bootstrap_owner(
         session.add(project)
         await session.flush()
     await _ensure_ingest_key(session, project.id)
+    await seed_recommended_evaluators(session, project.id)
     user = User(
         id=str(uuid4()),
         email=email,
@@ -135,6 +162,7 @@ async def create_workspace(
     session.add(
         Membership(id=str(uuid4()), user_id=owner_user_id, project_id=project.id, role="OWNER")
     )
+    await seed_recommended_evaluators(session, project.id)
     await session.commit()
     return project, key
 
@@ -238,7 +266,7 @@ async def upsert_clerk_principal(
     Concurrent first-requests can't create duplicates (unique constraints + race-safe get-or-create)."""
     external_project = org_id or f"user:{clerk_user_id}"
 
-    user = await _get_or_create(
+    user, _ = await _get_or_create(
         session,
         User,
         where=(User.source == "clerk", User.external_id == clerk_user_id),
@@ -252,7 +280,7 @@ async def upsert_clerk_principal(
     )
 
     # the tenant — one project per org, or a personal workspace per user
-    project = await _get_or_create(
+    project, project_created = await _get_or_create(
         session,
         Project,
         where=(Project.source == "clerk", Project.external_id == external_project),
@@ -265,9 +293,11 @@ async def upsert_clerk_principal(
         ),
     )
     await _ensure_ingest_key(session, project.id)
+    if project_created:
+        await seed_recommended_evaluators(session, project.id)
 
     # membership — role synced from Clerk on every request (Clerk is source of truth)
-    membership = await _get_or_create(
+    membership, _ = await _get_or_create(
         session,
         Membership,
         where=(Membership.user_id == user.id, Membership.project_id == project.id),

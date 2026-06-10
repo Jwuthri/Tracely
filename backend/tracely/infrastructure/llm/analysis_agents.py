@@ -37,18 +37,14 @@ class Consolidation(BaseModel):
     issues: list[IssueGroup]
 
 
-def _model():
-    from langchain_openai import ChatOpenAI
-
-    return ChatOpenAI(model=settings.agent_model, api_key=settings.openai_api_key, temperature=0)
-
-
 def _create(response_format):
-    try:
-        from langchain.agents import create_agent  # LangChain v1
-    except ImportError:
-        from langgraph.prebuilt import create_react_agent as create_agent  # fallback
-    return create_agent(_model(), tools=[], response_format=response_format)
+    from langchain.agents import create_agent  # LangChain v1
+
+    from tracely.infrastructure.llm.provider import get_chat_model
+
+    return create_agent(
+        get_chat_model(settings.agent_model), tools=[], response_format=response_format
+    )
 
 
 def analyze_cluster(traces_text: str) -> ClusterAnalysis:

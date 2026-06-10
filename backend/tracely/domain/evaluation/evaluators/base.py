@@ -15,10 +15,17 @@ from tracely.domain.evaluation.results import EvalResult, RunContext
 # Evaluation levels — mirror `EvaluationLevel` in design 00. Kept as module constants (not
 # enums) so the level fields on `EvalResult` / `Evaluator` stay plain strings (the value
 # `ClickHouse` actually stores).
+# Granularity ladder: CONVERSATION (a whole thread, across traces) → AGENT_RUN (one trace/turn)
+# → SPAN/TOOL/GENERATION/CHAIN (one step inside a trace).
+CONVERSATION = "CONVERSATION"
 RUN = "AGENT_RUN"
+SPAN = "SPAN"
 TOOL = "TOOL"
 GENERATION = "GENERATION"
 CHAIN = "CHAIN"
+
+# Levels that address one span (the score's observation_id is the step's span_id).
+STEP_LEVELS = (SPAN, TOOL, GENERATION, CHAIN)
 
 
 class Evaluator(ABC):
@@ -28,11 +35,17 @@ class Evaluator(ABC):
     is the inner discriminator within a `kind` — for structural evaluators it's
     `config["check"]` (e.g. `"run_outcome"`, `"tool_success"`). LLM-judge evaluators leave
     `check` as `None`: a single class handles every LLM-judge config.
+
+    `level` is stamped per-dispatch from the evaluator's DB row (so one class can grade at
+    CONVERSATION / AGENT_RUN / SPAN granularity — the LLM judge branches on it).
     """
 
     kind: ClassVar[str]
     check: ClassVar[str | None] = None
     default_level: ClassVar[str] = RUN
+
+    def __init__(self) -> None:
+        self.level: str = self.default_level
 
     @abstractmethod
     def run(self, ctx: RunContext, params: dict) -> list[EvalResult]:
@@ -74,9 +87,14 @@ class EvaluatorRegistry:
         cls = self.resolve(kind, config.get("check"))
         if cls is None:
             return []
-        results = cls().run(ctx, config.get("params") or config or {})
+        ev = cls()
+        ev.level = level or cls.default_level
+        results = ev.run(ctx, config.get("params") or config or {})
         for r in results:
             r.name = score_name
+            # Evaluators that emit the generic default get re-stamped with the configured
+            # level; ones that set a specific level themselves (per-span judges, tool checks)
+            # keep it.
             if level and r.level == RUN:
                 r.level = level
         return results

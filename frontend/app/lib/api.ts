@@ -17,9 +17,13 @@ export type EvalScore = {
   evaluation_level: string;
   observation_id: string | null;
   value: number | null;
+  string_value?: string;
   verdict: string;
   comment: string;
   data_type: string;
+  // present on streamed results (SSE run frames) for cell routing
+  trace_id?: string | null;
+  session_id?: string | null;
 };
 
 export type SpanOut = {
@@ -65,6 +69,7 @@ export type Thread = {
   last_trace_id: string;
   failing: number;
   metadata?: Record<string, string>;
+  scores?: EvalScore[]; // CONVERSATION-level metric results for the C-row columns
 };
 
 export type SessionsQuery = {
@@ -103,9 +108,11 @@ export type ThreadTurn = {
   verdict: string | null;
 };
 
-export async function getSession(id: string): Promise<{ thread_id: string; turns: ThreadTurn[] }> {
+export async function getSession(
+  id: string,
+): Promise<{ thread_id: string; turns: ThreadTurn[]; scores?: EvalScore[] }> {
   const res = await fetch(`${API}/api/sessions/${id}`, { headers: await authHeaders(), cache: "no-store" });
-  if (!res.ok) return { thread_id: id, turns: [] };
+  if (!res.ok) return { thread_id: id, turns: [], scores: [] };
   return res.json();
 }
 
@@ -117,6 +124,7 @@ export type ConvNode = Thread & { turnsData?: FullTurn[] };
 
 export type TraceDetailData = {
   trace_id: string;
+  thread_id?: string | null; // the conversation this trace belongs to (== trace_id when single-turn)
   spans: SpanOut[];
   scores: EvalScore[];
   eval_verdict: string | null;

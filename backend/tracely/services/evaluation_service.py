@@ -1,26 +1,42 @@
-"""Run a project's enabled evaluators on a trace and persist the resulting `Scores`.
+"""Run a project's evaluators on traces/threads and persist the resulting `Scores`.
 
-Score ids are deterministic per `(trace, evaluator, target span)` (see `ScoreWriter`) so
-re-evaluating a trace as spans arrive across batches replaces rather than duplicates via
+Score ids are deterministic per `(trace, evaluator, target span)` — and per `(thread, evaluator)`
+for CONVERSATION-level evaluators — (see `ScoreWriter`) so re-evaluating as spans arrive across
+batches, or re-running on demand from the UI, replaces rather than duplicates via
 ReplacingMergeTree.
 
-Cluster-on-failure runs immediately after the eval batch — the cheap structural signature
+Entry points:
+- `evaluate_trace`  — the ingest path (Celery) AND the on-demand path for one trace/turn.
+  Runs every applicable evaluator: trace+span-level on the trace, conversation-level on the
+  trace's thread (unless `skip_conversation`).
+- `evaluate_thread` — the on-demand path for a whole conversation row: every turn, then the
+  conversation-level evaluators once.
+
+`on_result` (optional) fires once per persisted score with a JSON-ready dict — the SSE run
+endpoint streams these straight into the grid.
+
+Cluster-on-failure runs immediately after a trace's eval batch — the cheap structural signature
 clustering, NOT the embedding rebuild (that's on-demand via `FailureIntelService`).
 """
 
 from __future__ import annotations
 
+from typing import Callable
+
 import structlog
 
 from tracely.domain.evaluation.evaluators import EvalResult, RunContext, default_registry
+from tracely.domain.evaluation.evaluators.base import CONVERSATION
 from tracely.domain.traces.spans import root_span
 from tracely.infrastructure.clickhouse.score_writer import ScoreWriter
 from tracely.infrastructure.clickhouse.trace_reader import TraceReader
+from tracely.infrastructure.db import repositories
 from tracely.infrastructure.db.engine import SyncSessionLocal
-from tracely.infrastructure.db.models import Evaluator
 from tracely.services.structural_clustering_service import StructuralClusteringService
 
 log = structlog.get_logger()
+
+OnResult = Callable[[dict], None]
 
 
 class EvaluationService:
@@ -37,36 +53,90 @@ class EvaluationService:
         self.score_writer = score_writer or ScoreWriter(self.trace_reader.client)
         self.registry = registry
 
-    def evaluate_trace(self, project_id: str, trace_id: str) -> dict:
+    def evaluate_trace(
+        self,
+        project_id: str,
+        trace_id: str,
+        specs: list[dict] | None = None,
+        on_result: OnResult | None = None,
+        skip_conversation: bool = False,
+    ) -> dict:
         spans = self.trace_reader.read_spans(project_id, trace_id)
         if not spans:
             return {"scores": 0}
         root = root_span(spans)
         agent_run_id = root.get("agent_run_id") or trace_id
+        thread_id = next((s.get("conversation_id") for s in spans if s.get("conversation_id")), "") or trace_id
+        if specs is None:
+            specs = self.load_enabled_evaluators(project_id)
+        trace_specs = [s for s in specs if s["level"] != CONVERSATION]
+        conv_specs = [] if skip_conversation else [s for s in specs if s["level"] == CONVERSATION]
+
         ctx = RunContext(project_id, trace_id, agent_run_id, spans, root)
-
-        results = self._run_enabled_evaluators(project_id, ctx)
-        if not results:
-            return {"scores": 0}
-
-        self.score_writer.write_eval_scores(project_id, trace_id, agent_run_id, results)
+        results = self._dispatch_specs(trace_specs, ctx)
+        if results:
+            self.score_writer.write_eval_scores(
+                project_id, trace_id, agent_run_id, results, thread_id=thread_id
+            )
+            self._emit(on_result, results, trace_id=trace_id, thread_id=thread_id)
 
         fail_results = [r for r in results if r.verdict == "FAIL"]
         if fail_results and root.get("agent_id"):
             self._cluster_failure(project_id, root["agent_id"], trace_id, fail_results, spans)
 
+        conv_count = 0
+        if conv_specs:
+            conv_count = self._evaluate_conversation(project_id, thread_id, conv_specs, on_result)
+
         log.info(
-            "evaluated", trace_id=trace_id, scores=len(results), failures=len(fail_results)
+            "evaluated", trace_id=trace_id, scores=len(results) + conv_count, failures=len(fail_results)
         )
-        return {"scores": len(results), "failures": len(fail_results)}
+        return {"scores": len(results) + conv_count, "failures": len(fail_results)}
+
+    def evaluate_thread(
+        self,
+        project_id: str,
+        thread_id: str,
+        specs: list[dict] | None = None,
+        on_result: OnResult | None = None,
+    ) -> dict:
+        """Evaluate a whole conversation row: every turn with the trace/span-level evaluators,
+        then the conversation-level evaluators once across the full thread."""
+        if specs is None:
+            specs = self.load_enabled_evaluators(project_id)
+        trace_specs = [s for s in specs if s["level"] != CONVERSATION]
+        conv_specs = [s for s in specs if s["level"] == CONVERSATION]
+        total = failures = 0
+        if trace_specs:
+            for tid in self.trace_reader.thread_trace_ids(project_id, thread_id):
+                r = self.evaluate_trace(
+                    project_id, tid, specs=trace_specs, on_result=on_result, skip_conversation=True
+                )
+                total += r.get("scores", 0)
+                failures += r.get("failures", 0)
+        if conv_specs:
+            total += self._evaluate_conversation(project_id, thread_id, conv_specs, on_result)
+        return {"scores": total, "failures": failures}
 
     # ── internals ─────────────────────────────────────────────────────────────
 
-    def _run_enabled_evaluators(
-        self, project_id: str, ctx: RunContext
-    ) -> list[EvalResult]:
+    def _evaluate_conversation(
+        self, project_id: str, thread_id: str, specs: list[dict], on_result: OnResult | None
+    ) -> int:
+        """Run CONVERSATION-level specs over every span in the thread; persist thread-scoped."""
+        spans = self.trace_reader.read_thread_spans(project_id, thread_id)
+        if not spans:
+            return 0
+        ctx = RunContext(project_id, "", "", spans, root_span(spans), thread_id=thread_id)
+        results = self._dispatch_specs(specs, ctx)
+        if results:
+            self.score_writer.write_eval_scores(project_id, "", "", results, thread_id=thread_id)
+            self._emit(on_result, results, trace_id="", thread_id=thread_id)
+        return len(results)
+
+    def _dispatch_specs(self, specs: list[dict], ctx: RunContext) -> list[EvalResult]:
         results: list[EvalResult] = []
-        for spec in self._load_enabled_evaluators(project_id):
+        for spec in specs:
             try:
                 results.extend(self.registry.dispatch(
                     spec["kind"], spec["config"], spec["score_name"], spec["level"], ctx
@@ -78,22 +148,38 @@ class EvaluationService:
         return results
 
     @staticmethod
-    def _load_enabled_evaluators(project_id: str) -> list[dict]:
-        """The evaluators to run: the project's enabled `Evaluator` records. With none
-        configured, online evaluation is a no-op — evaluators are opt-in, not auto-run."""
-        try:
-            from sqlalchemy import select
+    def _emit(
+        on_result: OnResult | None, results: list[EvalResult], *, trace_id: str, thread_id: str
+    ) -> None:
+        if on_result is None:
+            return
+        for r in results:
+            try:
+                on_result({
+                    "name": r.name,
+                    "evaluation_level": r.level,
+                    "observation_id": r.target_span_id or None,
+                    "value": r.value,
+                    "string_value": r.string_value,
+                    "verdict": r.verdict,
+                    "comment": r.comment,
+                    "data_type": r.data_type,
+                    "trace_id": None if r.level == CONVERSATION else trace_id,
+                    "session_id": thread_id or None,
+                })
+            except Exception as exc:  # a slow/broken consumer must not sink the run
+                log.warning("eval_emit_failed", error=str(exc))
 
+    @staticmethod
+    def load_enabled_evaluators(
+        project_id: str, evaluator_ids: list[str] | None = None
+    ) -> list[dict]:
+        """The evaluators to run: the project's enabled `Evaluator` records (optionally narrowed
+        to `evaluator_ids`). With none configured, online evaluation is a no-op — evaluators are
+        opt-in, not auto-run."""
+        try:
             with SyncSessionLocal() as s:
-                rows = s.execute(
-                    select(Evaluator).where(
-                        Evaluator.project_id == project_id, Evaluator.enabled.is_(True)
-                    )
-                ).scalars().all()
-            return [
-                {"kind": r.kind, "config": r.config or {}, "score_name": r.score_name, "level": r.level}
-                for r in rows
-            ]
+                return repositories.evaluator_enabled_specs(s, project_id, evaluator_ids)
         except Exception as exc:  # table missing / DB hiccup -> no evals
             log.warning("evaluator_load_failed", error=str(exc))
             return []

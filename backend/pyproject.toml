@@ -19,15 +19,16 @@ dependencies = [
   "structlog>=24.1",
   "fastapi>=0.111",
   "uvicorn[standard]>=0.30",
-  # failure-intelligence: embeddings + clustering + LangGraph agents
+  # LLM stack: every chat call goes through LangChain v1 `create_agent` on OpenRouter
+  # (infrastructure/llm/provider.py); embeddings + clustering power failure intelligence
   "pgvector>=0.3",
   "numpy>=1.26",
   "scikit-learn>=1.4",
   "umap-learn>=0.5.5",
   "hdbscan>=0.8.38",
-  "langgraph>=0.3",
-  "langchain>=0.3.20",
-  "langchain-openai>=0.3",
+  "langgraph>=1.0",
+  "langchain>=1.3",
+  "langchain-openai>=1.2",
   # auth & multi-tenancy: JWT sign/verify (HS256 local + RS256/JWKS Clerk), argon2 password hashing
   "pyjwt[crypto]>=2.8",
   "argon2-cffi>=23.1",

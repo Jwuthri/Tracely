@@ -1,8 +1,9 @@
 """Failure cluster endpoints: list, detail, rebuild, promote, ignore.
 
-Slim wrapper: serialization + DB read/write only. Business logic lives in:
+Slim wrapper: HTTP shaping only. Business logic lives in:
 - `domain/evaluation/evaluator_suggestion.py` (suggested evaluator generation)
 - `domain/failure/histogram.py` (occurrence bucketing)
+- `infrastructure/db/repositories.py` (Postgres queries)
 - `infrastructure/clickhouse/trace_reader.py:TraceReader.member_meta` (CH read)
 - `services/regression_service.py:RegressionService.promote_trace` (promote action)
 """
@@ -12,7 +13,6 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import desc, select
 from starlette.concurrency import run_in_threadpool
 
 from tracely.api.auth import get_project_id
@@ -20,8 +20,10 @@ from tracely.config import settings
 from tracely.domain.evaluation.evaluator_suggestion import suggest_evaluator
 from tracely.domain.failure.histogram import histogram
 from tracely.infrastructure.clickhouse.trace_reader import TraceReader
+from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
-from tracely.infrastructure.db.models import Agent, ClusterMember, FailureCluster
+from tracely.infrastructure.db.models import Agent, FailureCluster
+from tracely.infrastructure.llm.provider import llm_enabled
 from tracely.infrastructure.text import message_text
 from tracely.services.regression_service import NotFound, RegressionService
 from tracely.workers.tasks import rebuild_clusters_task
@@ -54,24 +56,14 @@ def _cluster_dict(
     return d
 
 
-def _medoid(session, cluster_id: str) -> ClusterMember | None:
-    return (
-        session.execute(
-            select(ClusterMember)
-            .where(ClusterMember.cluster_id == cluster_id)
-            .order_by(desc(ClusterMember.is_medoid), ClusterMember.added_at)
-        )
-        .scalars()
-        .first()
-    )
-
-
 @router.post("/clusters/rebuild")
 async def rebuild(project_id: str = Depends(get_project_id)) -> dict:
-    if not settings.openai_api_key:
+    # Embeddings stay on OpenAI (OpenRouter has no embeddings API); the analysis agents run
+    # via the OpenRouter provider.
+    if not settings.openai_api_key or not llm_enabled():
         raise HTTPException(
             status_code=400,
-            detail="Set OPENAI_API_KEY to enable embedding + agent analysis",
+            detail="Set OPENAI_API_KEY (embeddings) and OPENROUTER_API_KEY (agent analysis) to enable cluster rebuild",
         )
     rebuild_clusters_task.delay(project_id)
     return {"status": "started"}
@@ -81,13 +73,10 @@ async def rebuild(project_id: str = Depends(get_project_id)) -> dict:
 async def list_clusters(project_id: str = Depends(get_project_id)) -> list[dict]:
     def work():
         with SyncSessionLocal() as s:
-            rows = s.execute(
-                select(FailureCluster, Agent.slug)
-                .join(Agent, FailureCluster.agent_id == Agent.id)
-                .where(FailureCluster.project_id == project_id)
-                .order_by(desc(FailureCluster.count), desc(FailureCluster.last_seen_at))
-            ).all()
-            return [_cluster_dict(cl, slug) for cl, slug in rows]
+            return [
+                _cluster_dict(cl, slug)
+                for cl, slug in repo.clusters_list_with_agent(s, project_id)
+            ]
 
     return await run_in_threadpool(work)
 
@@ -97,18 +86,10 @@ async def get_cluster(cluster_id: str, project_id: str = Depends(get_project_id)
     def work():
         reader = TraceReader()
         with SyncSessionLocal() as s:
-            cl = s.get(FailureCluster, cluster_id)
-            if not cl or cl.project_id != project_id:
+            cl = repo.cluster_get(s, project_id, cluster_id)
+            if not cl:
                 return None
-            mem = (
-                s.execute(
-                    select(ClusterMember)
-                    .where(ClusterMember.cluster_id == cl.id)
-                    .order_by(desc(ClusterMember.is_medoid), ClusterMember.added_at)
-                )
-                .scalars()
-                .all()
-            )
+            mem = repo.cluster_members(s, cl.id)
             meta = reader.member_meta(project_id, [m.trace_id for m in mem])
             # Drop members whose trace no longer exists in events (wiped, or aged out by
             # ClickHouse TTL retention) so the detail shows real linked traces.
@@ -143,10 +124,10 @@ async def promote_cluster(
 ) -> dict:
     def work():
         with SyncSessionLocal() as s:
-            cl = s.get(FailureCluster, cluster_id)
-            if not cl or cl.project_id != project_id:
+            cl = repo.cluster_get(s, project_id, cluster_id)
+            if not cl:
                 return ("err", "cluster not found")
-            med = _medoid(s, cl.id)
+            med = repo.cluster_medoid(s, cl.id)
             if not med:
                 return ("err", "cluster has no members")
             try:
@@ -172,8 +153,8 @@ async def ignore_cluster(
 ) -> dict:
     def work():
         with SyncSessionLocal() as s:
-            cl = s.get(FailureCluster, cluster_id)
-            if not cl or cl.project_id != project_id:
+            cl = repo.cluster_get(s, project_id, cluster_id)
+            if not cl:
                 return None
             cl.status = "IGNORED"
             s.commit()

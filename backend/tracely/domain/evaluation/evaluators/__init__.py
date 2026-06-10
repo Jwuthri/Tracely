@@ -7,8 +7,11 @@ plugins can register more via `default_registry.register`.
 
 from tracely.domain.evaluation.evaluators.base import (
     CHAIN,
+    CONVERSATION,
     GENERATION,
     RUN,
+    SPAN,
+    STEP_LEVELS,
     TOOL,
     Evaluator,
     EvaluatorRegistry,
@@ -45,7 +48,10 @@ __all__ = [
     "RequiredToolsEvaluator",
     "LLMJudgeEvaluator",
     "CHAIN",
+    "CONVERSATION",
     "GENERATION",
     "RUN",
+    "SPAN",
+    "STEP_LEVELS",
     "TOOL",
 ]

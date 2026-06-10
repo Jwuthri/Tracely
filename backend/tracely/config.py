@@ -44,10 +44,15 @@ class Settings(BaseSettings):
 
     # online evaluation
     eval_latency_budget_ms: int = 60000
-    # optional LLM-as-judge (auto quality eval); skipped if no key is set
+    # LLM access — every chat call goes through LangChain `create_agent` against OpenRouter
+    # (see infrastructure/llm/provider.py). Model ids are OpenRouter-style `provider/model`.
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # judge model + legacy direct-endpoint fallback (used only when no OpenRouter key is set,
+    # so existing deployments keep their judge until they switch keys)
+    llm_judge_model: str = "openai/gpt-5.4-nano"
     llm_judge_api_key: str = ""
     llm_judge_base_url: str = "https://api.openai.com/v1"
-    llm_judge_model: str = "gpt-5.4-nano"
 
     # failure intelligence (embeddings + LangGraph agents) — needs an OpenAI key
     openai_api_key: str = ""
