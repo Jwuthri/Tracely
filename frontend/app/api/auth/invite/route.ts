@@ -21,3 +21,14 @@ export async function POST(req: NextRequest) {
   });
   return NextResponse.json(await r.json(), { status: r.status });
 }
+
+// Revoke a pending invite (soft: backend flips PENDING -> REVOKED, invalidating the token).
+export async function DELETE(req: NextRequest) {
+  const id = req.nextUrl.searchParams.get("id");
+  if (!id) return NextResponse.json({ detail: "missing invite id" }, { status: 400 });
+  const r = await fetch(`${API}/auth/invitations/${id}`, {
+    method: "DELETE",
+    headers: await authHeaders(),
+  });
+  return NextResponse.json(await r.json().catch(() => ({})), { status: r.status });
+}

@@ -62,6 +62,7 @@ class InviteOut(BaseModel):
     role: str
     token: str  # shown once at creation
     expires_at: str | None = None
+    emailed: bool = False  # True if the invite link was emailed (RESEND_API_KEY set); else share manually
 
 
 class InviteSummary(BaseModel):

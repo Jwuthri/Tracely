@@ -84,6 +84,17 @@ class Settings(BaseSettings):
     # Hosted CORS: the browser-facing frontend origin allowed to call the API directly (blank → localhost only).
     frontend_origin: str = ""
 
+    # ── Transactional email (Resend) ──────────────────────────────────────────────
+    # Optional. When RESEND_API_KEY is set, team invites are emailed automatically; when blank the
+    # invite link is only surfaced once in the UI for manual sharing (dev default — no email sent).
+    resend_api_key: str = ""
+    # Sender identity for invite emails. The default uses Resend's shared test domain, which only
+    # delivers to your OWN Resend-account email — verify a domain (resend.com/domains) and set this to
+    # e.g. "Tracely <invites@yourdomain.com>" to reach real teammates.
+    email_from: str = "Tracely <onboarding@resend.dev>"
+    # Public base URL of the frontend; used to build the accept-invite link inside invite emails.
+    app_base_url: str = "http://localhost:3001"
+
     @model_validator(mode="after")
     def _validate_auth(self) -> "Settings":
         if self.auth_mode not in ("dev", "local", "clerk"):

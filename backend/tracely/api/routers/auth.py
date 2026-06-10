@@ -25,6 +25,7 @@ from tracely.api.dto.auth import (
 )
 from tracely.auth import invitations, passwords, provisioning, tokens
 from tracely.auth.principal import Principal, select_membership
+from tracely.infrastructure import mailer
 from tracely.infrastructure.db.models import IngestKey, Invitation, Membership, Project, User
 from tracely.infrastructure.db.session import get_session
 
@@ -158,8 +159,32 @@ async def create_invitation(
         invited_by=principal.user_id,
         token_hash=token_hash,
     )
+    # Best-effort: email the invite link when Resend is configured. The raw token is always returned
+    # so the UI can still surface the link manually (and as a fallback if delivery fails).
+    emailed = False
+    if mailer.email_enabled():
+        project = (
+            await session.execute(select(Project).where(Project.id == principal.project_id))
+        ).scalar_one_or_none()
+        inviter = None
+        if principal.user_id:
+            u = (
+                await session.execute(select(User).where(User.id == principal.user_id))
+            ).scalar_one_or_none()
+            inviter = (u.display_name or u.email) if u else None
+        emailed = await mailer.send_invite_email(
+            to=inv.email,
+            raw_token=raw,
+            project_name=project.name if project else "Tracely",
+            inviter=inviter,
+        )
     return InviteOut(
-        id=inv.id, email=inv.email, role=inv.role, token=raw, expires_at=inv.expires_at.isoformat()
+        id=inv.id,
+        email=inv.email,
+        role=inv.role,
+        token=raw,
+        expires_at=inv.expires_at.isoformat(),
+        emailed=emailed,
     )
 
 

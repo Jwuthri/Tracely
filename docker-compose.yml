@@ -22,8 +22,8 @@ x-app-env: &app-env
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   LLM_JUDGE_API_KEY: ${OPENAI_API_KEY:-}
   # Auth (default "dev" = no human login, ingest key only — the stack runs open out of the box).
-  # Self-host: TRACELY_AUTH_MODE=local SESSION_SECRET=$(openssl rand -hex 32) docker compose up
-  AUTH_MODE: ${TRACELY_AUTH_MODE:-dev}
+  # Self-host: set AUTH_MODE=local and SESSION_SECRET ($(openssl rand -hex 32)) in .env, then docker compose up
+  AUTH_MODE: ${AUTH_MODE:-dev}
   SESSION_SECRET: ${SESSION_SECRET:-}
   SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-604800}
   CLERK_ISSUER: ${CLERK_ISSUER:-}
@@ -31,6 +31,10 @@ x-app-env: &app-env
   CLERK_AUDIENCE: ${CLERK_AUDIENCE:-}
   CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
   FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-}
+  # Transactional email (Resend) — optional; invites are emailed when RESEND_API_KEY is set.
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+  EMAIL_FROM: "${EMAIL_FROM:-Tracely <onboarding@resend.dev>}"
+  APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3001}
 
 services:
   # ── infra ────────────────────────────────────────────────────────────────
@@ -179,7 +183,7 @@ services:
     environment:
       TRACELY_API: http://backend:8000     # server-side fetch uses the compose network
       TRACELY_KEY: tracely_dev_key         # dev-mode fallback only (AUTH_MODE=dev)
-      NEXT_PUBLIC_AUTH_MODE: ${TRACELY_AUTH_MODE:-dev}   # dev | local | clerk (must match backend AUTH_MODE)
+      NEXT_PUBLIC_AUTH_MODE: ${AUTH_MODE:-dev}   # dev | local | clerk (must match backend AUTH_MODE)
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
       NEXT_PUBLIC_CLERK_SIGN_IN_URL: /sign-in

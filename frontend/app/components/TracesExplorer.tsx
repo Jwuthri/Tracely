@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ConvNode } from "../lib/api";
 import { mergeMeta, metaText } from "../lib/meta";
+import { DateRangePicker } from "./DateRangePicker";
 import { TraceTable } from "./TraceTable";
 
 type Filter = "all" | "failing" | "multi";
@@ -15,9 +16,6 @@ const PRESETS: { key: string; label: string; hours: number | null }[] = [
   { key: "7d", label: "7d", hours: 24 * 7 },
   { key: "30d", label: "30d", hours: 24 * 30 },
 ];
-
-const inputCls =
-  "rounded-lg border border-line bg-ink-800 px-2.5 py-1.5 text-[12px] text-fg placeholder:text-fg-faint focus:border-signal/40 focus:outline-none [color-scheme:dark]";
 
 // The /traces landing: time-range + status + text filters over conversation threads, rendered as the
 // hierarchical conv → message → step table. The thread list is server-paginated ("Load more"); status
@@ -37,8 +35,6 @@ export function TracesExplorer({
   const [loading, setLoading] = useState(false);
   const [range, setRange] = useState<Range>({ from: null, to: null });
   const [preset, setPreset] = useState<string>("all");
-  const [fromInput, setFromInput] = useState("");
-  const [toInput, setToInput] = useState("");
 
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
@@ -50,8 +46,6 @@ export function TracesExplorer({
     setHasMore(initialHasMore);
     setRange({ from: null, to: null });
     setPreset("all");
-    setFromInput("");
-    setToInput("");
   }, [initial, initialHasMore]);
 
   const load = useCallback(
@@ -78,21 +72,17 @@ export function TracesExplorer({
       to: null,
     };
     setPreset(p.key);
-    setFromInput("");
-    setToInput("");
     setRange(next);
     void load(next, 0, true);
   }
 
-  function applyCustom(nextFrom: string, nextTo: string) {
-    setFromInput(nextFrom);
-    setToInput(nextTo);
-    // datetime-local values are wall-clock local; toISOString() normalizes them to the UTC the backend
-    // compares against.
-    const next: Range = {
-      from: nextFrom ? new Date(nextFrom).toISOString() : null,
-      to: nextTo ? new Date(nextTo).toISOString() : null,
-    };
+  // The picker hands back ISO bounds (or null/null when cleared). Clearing falls back to All time.
+  function applyCustom(from: string | null, to: string | null) {
+    if (!from && !to) {
+      applyPreset(PRESETS[0]);
+      return;
+    }
+    const next: Range = { from, to };
     setPreset("custom");
     setRange(next);
     void load(next, 0, true);
@@ -129,8 +119,9 @@ export function TracesExplorer({
 
   return (
     <div className="space-y-3">
-      {/* Time-range bar */}
-      <div className="reveal flex flex-wrap items-center gap-2" suppressHydrationWarning>
+      {/* Time-range bar — relative+z so the range-picker popover floats above the table below it
+          (both rows are `reveal`, whose transform traps a plain z-50 in this row's stacking context). */}
+      <div className="reveal relative z-30 flex flex-wrap items-center gap-2" suppressHydrationWarning>
         <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-fg-faint">Range</span>
         <div className="flex items-center gap-1.5">
           {PRESETS.map((p) => (
@@ -149,25 +140,13 @@ export function TracesExplorer({
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-1.5 text-[11px] text-fg-faint">
-          <input
-            type="datetime-local"
-            value={fromInput}
-            onChange={(e) => applyCustom(e.target.value, toInput)}
-            aria-label="From"
-            className={inputCls}
-            suppressHydrationWarning
-          />
-          <span>→</span>
-          <input
-            type="datetime-local"
-            value={toInput}
-            onChange={(e) => applyCustom(fromInput, e.target.value)}
-            aria-label="To"
-            className={inputCls}
-            suppressHydrationWarning
-          />
-        </div>
+        <span className="h-5 w-px bg-line" aria-hidden />
+        <DateRangePicker
+          from={preset === "custom" ? range.from : null}
+          to={preset === "custom" ? range.to : null}
+          disabled={loading}
+          onApply={applyCustom}
+        />
       </div>
 
       {/* Status + text filters (refine the loaded rows) */}

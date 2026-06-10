@@ -87,6 +87,35 @@ async def test_accept_invite_is_single_use(client):
     assert a1.status_code == 200 and a2.status_code == 400
 
 
+async def test_revoke_invitation_invalidates_token(client):
+    reg = await client.post(
+        "/auth/register", json={"email": "owner@x.test", "password": "hunter2-pw"}
+    )
+    owner = reg.json()["token"]
+
+    inv = await client.post(
+        "/auth/invitations",
+        json={"email": "teammate@x.test", "role": "MEMBER"},
+        headers=_bearer(owner),
+    )
+    assert inv.status_code == 200, inv.text
+    invite_id, raw = inv.json()["id"], inv.json()["token"]
+
+    rev = await client.delete(f"/auth/invitations/{invite_id}", headers=_bearer(owner))
+    assert rev.status_code == 200, rev.text
+
+    # the invite now shows as REVOKED in the listing
+    listing = await client.get("/auth/invitations", headers=_bearer(owner))
+    statuses = {i["id"]: i["status"] for i in listing.json()}
+    assert statuses.get(invite_id) == "REVOKED"
+
+    # and the revoked token can no longer be accepted
+    acc = await client.post(
+        "/auth/invitations/accept", json={"token": raw, "password": "newpass-12"}
+    )
+    assert acc.status_code == 400, acc.text
+
+
 async def test_create_workspace_adds_membership_and_own_key(client):
     reg = await client.post(
         "/auth/register",
