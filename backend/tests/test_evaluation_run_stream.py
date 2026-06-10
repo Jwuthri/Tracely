@@ -137,6 +137,40 @@ def _ok_span(trace_id: str) -> dict:
     }
 
 
+def test_evaluate_thread_sequential_chains_across_turns():
+    """A sequential metric's config gains __previous_result__ from the prior turn's result of
+    the SAME metric; batch metrics never do; the first turn has no chain context."""
+    from tracely.domain.evaluation.results import EvalResult
+
+    class _FakeRegistry:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        def dispatch(self, kind, config, score_name, level, ctx):
+            self.calls.append((score_name, dict(config)))
+            n = sum(1 for name, _ in self.calls if name == score_name)
+            return [EvalResult(score_name, "AGENT_RUN", "PASS", value=0.9, comment=f"turn {n}")]
+
+    reader = _FakeReader({"t1": [_ok_span("t1")], "t2": [_ok_span("t2")]}, ["t1", "t2"])
+    registry = _FakeRegistry()
+    svc = EvaluationService(trace_reader=reader, score_writer=_FakeWriter(), registry=registry)  # type: ignore[arg-type]
+    specs = [
+        {"id": "seq", "kind": "llm_judge", "score_name": "custom.seq", "level": "AGENT_RUN",
+         "config": {"prompt": "p", "execution_mode": "sequential"}},
+        {"id": "batch", "kind": "llm_judge", "score_name": "custom.batch", "level": "AGENT_RUN",
+         "config": {"prompt": "p"}},
+    ]
+    svc.evaluate_thread("p", "th-1", specs=specs)
+
+    by_metric: dict[str, list[dict]] = {}
+    for name, config in registry.calls:
+        by_metric.setdefault(name, []).append(config)
+    assert "__previous_result__" not in by_metric["custom.seq"][0]  # first turn: no context
+    chained = by_metric["custom.seq"][1]["__previous_result__"]
+    assert chained == {"value": 0.9, "verdict": "PASS", "reason": "turn 1"}
+    assert all("__previous_result__" not in c for c in by_metric["custom.batch"])
+
+
 def test_evaluate_thread_runs_turns_then_conversation():
     reader = _FakeReader({"t1": [_ok_span("t1")], "t2": [_ok_span("t2")]}, ["t1", "t2"])
     writer = _FakeWriter()

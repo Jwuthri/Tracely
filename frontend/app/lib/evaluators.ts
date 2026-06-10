@@ -8,17 +8,24 @@ import type { EvalScore } from "./api";
 
 export type EvaluatorLevel = "CONVERSATION" | "AGENT_RUN" | "SPAN" | "TOOL" | "GENERATION" | "CHAIN";
 
+export type EvaluatorOutputType = "score" | "number" | "boolean" | "text" | "json" | "category";
+
 export type EvaluatorConfig = {
   prompt?: string;
   threshold?: number;
-  output_type?: "score" | "boolean" | "category" | "text" | "json";
-  categories?: string[];
-  fail_categories?: string[];
+  output_type?: EvaluatorOutputType; // "category" is legacy — superseded by json + enum schemas
+  output_schema?: Record<string, unknown>; // JSON Schema, for output_type "json"
+  execution_mode?: "batch" | "sequential"; // sequential = chain items of this metric
+  categories?: string[]; // legacy (category output type)
+  fail_categories?: string[]; // legacy
   model?: string;
   span_types?: string[];
   check?: string; // structural evaluators
   params?: Record<string, unknown>;
 };
+
+export type JudgeModelOption = { id: string; label: string };
+export type JudgeModels = { default: string; models: JudgeModelOption[] };
 
 export type EvaluatorDef = {
   id: string;
@@ -102,6 +109,12 @@ export async function deleteEvaluator(id: string): Promise<void> {
 export async function listTemplates(): Promise<EvaluatorTemplate[]> {
   const res = await fetch("/api/evaluators/templates", { cache: "no-store" });
   if (!res.ok) return [];
+  return res.json();
+}
+
+export async function listJudgeModels(): Promise<JudgeModels> {
+  const res = await fetch("/api/evaluators/models", { cache: "no-store" });
+  if (!res.ok) return { default: "", models: [] };
   return res.json();
 }
 

@@ -21,6 +21,7 @@ clustering, NOT the embedding rebuild (that's on-demand via `FailureIntelService
 
 from __future__ import annotations
 
+import json
 from typing import Callable
 
 import structlog
@@ -37,6 +38,30 @@ from tracely.services.structural_clustering_service import StructuralClusteringS
 log = structlog.get_logger()
 
 OnResult = Callable[[dict], None]
+
+
+def _chain_payload(score: dict) -> dict:
+    """A persisted score row → the compact context injected into the NEXT item's prompt in
+    sequential mode (json results keep their schema shape; others collapse to value/verdict)."""
+    sv = score.get("string_value")
+    if sv:
+        try:
+            parsed = json.loads(sv)
+            if isinstance(parsed, dict):
+                return parsed
+        except ValueError:
+            pass
+    out = {"value": score.get("value"), "verdict": score.get("verdict") or None, "reason": score.get("comment") or None}
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def _with_previous(spec: dict, chain: dict[str, dict]) -> dict:
+    """A copy of `spec` carrying the previous turn's result of the same metric (no-op when the
+    metric hasn't produced one yet — the first item simply grades without chain context)."""
+    prev = chain.get(spec["score_name"])
+    if prev is None:
+        return spec
+    return {**spec, "config": {**(spec.get("config") or {}), "__previous_result__": prev}}
 
 
 class EvaluationService:
@@ -101,16 +126,33 @@ class EvaluationService:
         on_result: OnResult | None = None,
     ) -> dict:
         """Evaluate a whole conversation row: every turn with the trace/span-level evaluators,
-        then the conversation-level evaluators once across the full thread."""
+        then the conversation-level evaluators once across the full thread.
+
+        Metrics with `config.execution_mode == "sequential"` chain across the turns: each
+        trace's run receives the previous turn's result of the SAME metric (injected as
+        `config.__previous_result__`; within a turn the judge chains its own steps)."""
         if specs is None:
             specs = self.load_enabled_evaluators(project_id)
         trace_specs = [s for s in specs if s["level"] != CONVERSATION]
         conv_specs = [s for s in specs if s["level"] == CONVERSATION]
         total = failures = 0
         if trace_specs:
+            sequential_names = {
+                s["score_name"] for s in trace_specs
+                if str((s.get("config") or {}).get("execution_mode") or "batch") == "sequential"
+            }
+            chain: dict[str, dict] = {}
+
+            def capture(score: dict) -> None:
+                if score["name"] in sequential_names:
+                    chain[score["name"]] = _chain_payload(score)
+                if on_result is not None:
+                    on_result(score)
+
             for tid in self.trace_reader.thread_trace_ids(project_id, thread_id):
+                staged = [_with_previous(s, chain) for s in trace_specs]
                 r = self.evaluate_trace(
-                    project_id, tid, specs=trace_specs, on_result=on_result, skip_conversation=True
+                    project_id, tid, specs=staged, on_result=capture, skip_conversation=True
                 )
                 total += r.get("scores", 0)
                 failures += r.get("failures", 0)

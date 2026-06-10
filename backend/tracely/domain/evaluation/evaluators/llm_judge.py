@@ -11,12 +11,18 @@ answer / tool grounding, thread transcript, or step I/O) is the user message; an
 
 Output types → persisted score shape:
   score (default) → NUMERIC value 0..1, PASS/FAIL via `threshold`
+  number          → NUMERIC value (any range), PASS/FAIL only when `threshold` is set
   boolean         → BOOLEAN 1/0, PASS/FAIL
-  category        → CATEGORICAL string_value (PASS/FAIL only when `fail_categories` is set);
-                    `config.categories` constrain the schema via a Literal field
   text            → TEXT string_value, no verdict
-  json            → rubric-defined object stored as TEXT string_value (+ value/verdict when it
-                    carries a numeric `score` and a `threshold` is configured)
+  json            → the user's `config.output_schema` compiled to a pydantic contract (enums
+                    become Literal constraints) + a mandatory `__score__` (0..1) that lands in
+                    the score's `value` and drives PASS/FAIL via `threshold`; the schema-shaped
+                    object itself is stored as JSON in string_value
+  category        → LEGACY alias (superseded by json + enum schemas); kept for old rows
+
+Execution mode (`config.execution_mode`, default "batch"): "sequential" chains items of the
+SAME metric — each step's prompt carries the previous step's result, and in thread runs each
+turn carries the previous turn's (`config.__previous_result__`, injected by the service).
 """
 
 from __future__ import annotations
@@ -39,6 +45,7 @@ from tracely.domain.evaluation.evaluators.base import (
     default_registry,
 )
 from tracely.domain.evaluation.evaluators.catalog import DEFAULT_JUDGE_PROMPT
+from tracely.domain.evaluation.output_schema import SCORE_KEY, model_from_json_schema, wrap_with_score
 from tracely.domain.evaluation.results import EvalResult, RunContext
 from tracely.domain.evaluation.text import answer_for, content_text, first_io
 from tracely.domain.traces.spans import root_span
@@ -46,7 +53,7 @@ from tracely.infrastructure.llm import provider
 
 log = structlog.get_logger()
 
-OUTPUT_TYPES = ("score", "boolean", "category", "text", "json")
+OUTPUT_TYPES = ("score", "number", "boolean", "category", "text", "json")
 
 _TRUNC_IO = 1500  # per-step input/output excerpt
 _TRUNC_TURN = 800  # per-turn excerpt in the conversation transcript
@@ -61,6 +68,13 @@ class ScoreVerdict(BaseModel):
 
     score: float = Field(description="0..1 quality score: 0 = total failure, 0.5 = mediocre, 1 = flawless")
     reason: str = Field(default="", description="one or two sentences citing the decisive evidence")
+
+
+class NumberVerdict(BaseModel):
+    """Numeric measurement (any range)."""
+
+    value: float = Field(description="the numeric evaluation result")
+    reason: str = Field(default="", description="one or two sentences justifying the number")
 
 
 class PassFailVerdict(BaseModel):
@@ -98,6 +112,32 @@ def _parse_json_object(text: str) -> dict:
     if not isinstance(parsed, dict):
         raise ValueError(f"judge returned non-object JSON: {type(parsed).__name__}")
     return parsed
+
+
+def _result_payload(r: EvalResult) -> dict:
+    """The chained-context view of a result (sequential mode): the schema-shaped object for
+    json outputs, else a compact {value, verdict, reason}."""
+    if r.string_value:
+        try:
+            parsed = json.loads(r.string_value)
+            if isinstance(parsed, dict):
+                return parsed
+        except ValueError:
+            pass
+    payload = {"value": r.value, "verdict": r.verdict or None, "reason": r.comment or None}
+    return {k: v for k, v in payload.items() if v is not None}
+
+
+def _is_sequential(config: dict) -> bool:
+    return str(config.get("execution_mode") or "batch") == "sequential"
+
+
+def _previous_from_config(config: dict) -> dict | None:
+    """The cross-item seed for sequential mode (set by EvaluationService for thread runs)."""
+    if not _is_sequential(config):
+        return None
+    prev = config.get("__previous_result__")
+    return prev if isinstance(prev, dict) else None
 
 
 @default_registry.register
@@ -141,7 +181,7 @@ class LLMJudgeEvaluator(Evaluator):
             f"User request:\n{_clip(user_in, 2000)}\n\n"
             f"Agent answer:\n{_clip(answer, 2000)}{grounding}"
         )
-        result = self._grade(config, body)
+        result = self._grade(config, body, previous=_previous_from_config(config))
         return [result] if result else []
 
     def _run_steps(self, ctx: RunContext, config: dict) -> list[EvalResult]:
@@ -162,6 +202,8 @@ class LLMJudgeEvaluator(Evaluator):
             )
             candidates = candidates[:max_spans]
         user_in = content_text(ctx.root.get("input")) or first_io(ctx.spans, "input")
+        sequential = _is_sequential(config)
+        previous = _previous_from_config(config)
         out: list[EvalResult] = []
         for i, s in enumerate(candidates):
             body = (
@@ -170,10 +212,12 @@ class LLMJudgeEvaluator(Evaluator):
                 f"Step input:\n{_clip(content_text(s.get('input')), _TRUNC_IO)}\n\n"
                 f"Step output:\n{_clip(content_text(s.get('output')), _TRUNC_IO)}"
             )
-            result = self._grade(config, body)
+            result = self._grade(config, body, previous=previous)
             if result:
                 result.target_span_id = s.get("span_id", "")
                 out.append(result)
+                if sequential:
+                    previous = _result_payload(result)
         return out
 
     def _run_conversation(self, ctx: RunContext, config: dict) -> list[EvalResult]:
@@ -206,14 +250,30 @@ class LLMJudgeEvaluator(Evaluator):
 
     # ── grading + output-type handling ───────────────────────────────────────
 
-    def _grade(self, config: dict, body: str) -> EvalResult | None:
+    def _grade(self, config: dict, body: str, previous: dict | None = None) -> EvalResult | None:
         rubric = config.get("prompt") or DEFAULT_JUDGE_PROMPT
         output_type = str(config.get("output_type") or "score").lower()
         if output_type not in OUTPUT_TYPES:
             output_type = "score"
         model = config.get("model") or None
+        if previous:
+            body += (
+                "\n\nPrevious result of this metric (the preceding item in the sequence — use "
+                "it for continuity and comparison):\n"
+                + _clip(json.dumps(previous, ensure_ascii=False), 1500)
+            )
         try:
             if output_type == "json":
+                schema_model = model_from_json_schema(config.get("output_schema"))
+                if schema_model is not None:
+                    verdict = provider.run_structured_agent(
+                        body,
+                        response_format=wrap_with_score(schema_model),
+                        system_prompt=rubric,
+                        model=model,
+                    )
+                    return self._json_result(config, verdict.model_dump())
+                # no usable schema: free-form strict JSON (the rubric defines the shape)
                 text = provider.run_text_agent(
                     body + "\n\nRespond with ONE strict JSON object shaped exactly as your "
                     'instructions describe. Always include a "reason" field.',
@@ -234,9 +294,11 @@ class LLMJudgeEvaluator(Evaluator):
 
     @staticmethod
     def _response_format(output_type: str, config: dict) -> type[BaseModel]:
+        if output_type == "number":
+            return NumberVerdict
         if output_type == "boolean":
             return PassFailVerdict
-        if output_type == "category":
+        if output_type == "category":  # legacy alias — new columns use json + enum schemas
             return _category_model([str(c) for c in (config.get("categories") or [])])
         if output_type == "text":
             return TextVerdict
@@ -244,6 +306,14 @@ class LLMJudgeEvaluator(Evaluator):
 
     def _to_result(self, config: dict, output_type: str, verdict: Any) -> EvalResult:
         reason = str(getattr(verdict, "reason", ""))[:500]
+        if output_type == "number":
+            value = float(verdict.value)
+            v = ""
+            if config.get("threshold") is not None:
+                v = "PASS" if value >= float(config["threshold"]) else "FAIL"
+            return EvalResult(
+                "", self.level, v, data_type="NUMERIC", value=value, comment=reason,
+            )
         if output_type == "boolean":
             ok = bool(verdict.passed)
             return EvalResult(
@@ -269,13 +339,22 @@ class LLMJudgeEvaluator(Evaluator):
         )
 
     def _json_result(self, config: dict, parsed: dict) -> EvalResult:
-        score = parsed.get("score")
-        value = float(score) if isinstance(score, (int, float)) and not isinstance(score, bool) else None
+        """Persist a custom-schema result: the appended `score__` (or a score-ish field in the
+        user's schema) becomes the normalized value driving PASS/FAIL; the schema-shaped object
+        stays clean in string_value; reason/reasoning/summary doubles as the comment teaser."""
+        parsed = dict(parsed)
+        raw_score = parsed.pop(SCORE_KEY, None)
+        if raw_score is None:
+            candidate = parsed.get("score", parsed.get("overall_score"))
+            if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
+                raw_score = candidate
+        value = min(max(float(raw_score), 0.0), 1.0) if raw_score is not None else None
         verdict = ""
         if value is not None and config.get("threshold") is not None:
             verdict = "PASS" if value >= float(config["threshold"]) else "FAIL"
+        comment = str(parsed.get("reason") or parsed.get("reasoning") or parsed.get("summary") or "")[:500]
         return EvalResult(
             "", self.level, verdict, data_type="TEXT", value=value,
             string_value=json.dumps(parsed, ensure_ascii=False)[:4000],
-            comment=str(parsed.get("reason", ""))[:500],
+            comment=comment,
         )

@@ -23,7 +23,7 @@ from tracely.domain.evaluation.generation import generate_evaluator_config
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.db.models import Evaluator
-from tracely.infrastructure.llm.provider import llm_enabled
+from tracely.infrastructure.llm.provider import default_model_id, list_models, llm_enabled
 
 router = APIRouter(prefix="/api")
 
@@ -80,6 +80,14 @@ async def list_evaluators(project_id: str = Depends(get_project_id)) -> list[dic
             return [_evaluator_dict(e) for e in repo.evaluators_list(s, project_id)]
 
     return await run_in_threadpool(work)
+
+
+@router.get("/evaluators/models")
+async def list_judge_models(project_id: str = Depends(get_project_id)) -> dict:
+    """The curated judge-model choices for the Add Column form (verified against OpenRouter
+    when reachable) plus the project default used when a column doesn't pick one."""
+    models = await run_in_threadpool(list_models)
+    return {"default": default_model_id(), "models": models}
 
 
 @router.get("/evaluators/templates")

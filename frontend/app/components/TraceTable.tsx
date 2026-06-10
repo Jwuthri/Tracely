@@ -927,8 +927,33 @@ function scoreKey(s: EvalScore): string | null {
   return s.trace_id ? `tr:${s.trace_id}|${s.name}` : null;
 }
 
+// Classification-style json results should headline their LABEL (intent, risk_level,
+// trajectory_signal…), not the internal normalized score: the first short string field that
+// isn't prose. Returns null when the object has no label-ish field (pure score objects).
+const _PROSE_KEYS = new Set(["reason", "reasoning", "summary", "evidence", "drift_point"]);
+function jsonResultLabel(raw: string): string | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "string" && value && value.length <= 24 && !_PROSE_KEYS.has(key)) {
+        return value;
+      }
+    }
+  } catch {
+    /* not JSON */
+  }
+  return null;
+}
+
 function fmtScoreValue(s: EvalScore): string {
-  if (s.data_type === "NUMERIC" && s.value != null) {
+  if (s.data_type === "BOOLEAN") return ""; // the verdict chip says it all
+  if (s.data_type === "TEXT" && s.string_value) {
+    const label = jsonResultLabel(s.string_value);
+    if (label) return label;
+  }
+  if (s.value != null) {
+    // NUMERIC results, and json results' normalized score
     if (s.name.endsWith("latency_ms")) {
       return s.value < 1000 ? `${Math.round(s.value)}ms` : `${(s.value / 1000).toFixed(2)}s`;
     }
@@ -936,6 +961,15 @@ function fmtScoreValue(s: EvalScore): string {
   }
   if ((s.data_type === "CATEGORICAL" || s.data_type === "TEXT") && s.string_value) return s.string_value;
   return "";
+}
+
+// Pretty-print structured outputs in the detail panel (json results store the object compact).
+function fmtPanelOutput(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
 }
 
 function VerdictChip({ verdict }: { verdict: string }) {
@@ -972,7 +1006,12 @@ function EvalScorePill({ score, evaluator, busy }: { score: EvalScore; evaluator
   const rows: Array<[string, string]> = [];
   if (score.verdict) rows.push(["Verdict", score.verdict]);
   if (score.value != null) rows.push(["Value", String(score.value)]);
-  if (score.string_value) rows.push([score.data_type === "CATEGORICAL" ? "Category" : "Output", score.string_value]);
+  if (score.string_value) {
+    rows.push([
+      score.data_type === "CATEGORICAL" ? "Category" : "Output",
+      fmtPanelOutput(score.string_value),
+    ]);
+  }
   if (score.comment) rows.push(["Reason", score.comment]);
   return (
     // max-w-full + overflow-hidden: the pill can NEVER bleed into the neighboring column —
@@ -997,7 +1036,13 @@ function EvalScorePill({ score, evaluator, busy }: { score: EvalScore; evaluator
                 {rows.map(([k, v]) => (
                   <div key={k} className="flex items-start justify-between gap-4">
                     <span className="shrink-0 text-slate-400">{k}</span>
-                    <span className={clsx("whitespace-pre-wrap break-words text-right font-mono text-[11.5px]", k === "Verdict" ? (v === "FAIL" ? "text-rose-400" : "text-emerald-400") : "text-slate-200")}>
+                    <span
+                      className={clsx(
+                        "whitespace-pre-wrap break-words font-mono text-[11.5px]",
+                        k === "Output" ? "text-left" : "text-right",
+                        k === "Verdict" ? (v === "FAIL" ? "text-rose-400" : "text-emerald-400") : "text-slate-200",
+                      )}
+                    >
                       {v}
                     </span>
                   </div>
@@ -1819,7 +1864,7 @@ export function TraceTable({
           <div className="flex items-center gap-1">
             <button
               onClick={() => setColumnModal({ open: true, editing: null })}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-500"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-signal/40 bg-signal/15 px-3 py-1.5 text-xs font-medium text-signal transition-all hover:bg-signal/25 hover:shadow-glow"
               title="Add an evaluation column"
             >
               <PlusIcon className="h-3.5 w-3.5" />

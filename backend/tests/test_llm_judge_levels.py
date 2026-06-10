@@ -139,7 +139,16 @@ def test_conversation_level_builds_transcript(monkeypatch):
     assert "2 turns" in prompts[0]
 
 
-def test_json_output_with_score_and_threshold(monkeypatch):
+def test_number_output(monkeypatch):
+    _stub_structured(monkeypatch, {"value": 42.5, "reason": "counted"})
+    r = _judge(RUN).run(_ctx([_span()]), {"output_type": "number"})[0]
+    assert (r.data_type, r.value, r.verdict, r.comment) == ("NUMERIC", 42.5, "", "counted")
+    # threshold turns it into a pass/fail check
+    r2 = _judge(RUN).run(_ctx([_span()]), {"output_type": "number", "threshold": 50})[0]
+    assert r2.verdict == "FAIL"
+
+
+def test_json_without_schema_falls_back_to_freeform(monkeypatch):
     payload = {"score": 0.9, "issues": [], "reason": "clean"}
     monkeypatch.setattr(
         provider, "run_text_agent",
@@ -149,6 +158,78 @@ def test_json_output_with_score_and_threshold(monkeypatch):
     r = _judge(RUN).run(_ctx([_span()]), {"output_type": "json", "threshold": 0.5})[0]
     assert r.verdict == "PASS"
     assert json.loads(r.string_value) == payload
+
+
+def test_json_with_schema_enforces_contract_and_extracts_score(monkeypatch):
+    """The schema builder's stored JSON Schema compiles to the structured-output contract:
+    enum fields are Literal-enforced and the appended score__ drives value/verdict."""
+    seen: dict = {}
+
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0):
+        seen["fields"] = dict(response_format.model_fields)
+        return response_format(intent="complaint", reasoning="angry user", score__=0.2)
+
+    monkeypatch.setattr(provider, "run_structured_agent", fake)
+    config = {
+        "output_type": "json",
+        "threshold": 0.5,
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "intent": {"type": "string", "enum": ["question", "complaint", "other"]},
+                "reasoning": {"type": "string"},
+            },
+            "required": ["intent", "reasoning"],
+        },
+    }
+    r = _judge(RUN).run(_ctx([_span()]), config)[0]
+    # the contract carried the user fields + the appended normalized score
+    assert set(seen["fields"]) == {"intent", "reasoning", "score__"}
+    # score__ was popped into value (clamped), drove the verdict, and stayed out of the JSON
+    assert (r.value, r.verdict, r.data_type) == (0.2, "FAIL", "TEXT")
+    assert json.loads(r.string_value) == {"intent": "complaint", "reasoning": "angry user"}
+    assert r.comment == "angry user"
+
+
+def test_sequential_steps_chain_previous_result(monkeypatch):
+    """execution_mode=sequential: step i+1's prompt carries step i's result of this metric."""
+    prompts: list[str] = []
+
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0):
+        prompts.append(prompt)
+        return response_format(score=0.4, reason=f"grade {len(prompts)}")
+
+    monkeypatch.setattr(provider, "run_structured_agent", fake)
+    spans = [
+        _span(span_id="tool-1", type="TOOL", name="lookup"),
+        _span(span_id="tool-2", type="TOOL", name="update"),
+    ]
+    results = _judge(SPAN).run(
+        _ctx(spans), {"execution_mode": "sequential", "span_types": ["TOOL"], "threshold": 0.6}
+    )
+    assert len(results) == 2
+    assert "Previous result of this metric" not in prompts[0]  # first item has no chain context
+    assert "Previous result of this metric" in prompts[1]
+    assert "grade 1" in prompts[1]  # the first grade's reason rode along
+    # batch mode never chains
+    prompts.clear()
+    _judge(SPAN).run(_ctx(spans), {"span_types": ["TOOL"]})
+    assert all("Previous result of this metric" not in p for p in prompts)
+
+
+def test_trace_level_previous_result_seed(monkeypatch):
+    """Thread runs seed cross-turn chaining via config.__previous_result__."""
+    prompts: list[str] = []
+
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0):
+        prompts.append(prompt)
+        return response_format(score=1.0, reason="ok")
+
+    monkeypatch.setattr(provider, "run_structured_agent", fake)
+    config = {"execution_mode": "sequential", "__previous_result__": {"value": 0.3, "verdict": "FAIL"}}
+    _judge(RUN).run(_ctx([_span()]), config)
+    assert "Previous result of this metric" in prompts[0]
+    assert '"verdict": "FAIL"' in prompts[0]
 
 
 def test_no_key_skips_entirely(monkeypatch):

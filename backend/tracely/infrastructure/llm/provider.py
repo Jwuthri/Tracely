@@ -14,11 +14,35 @@ Heavy imports are lazy so the worker/API start even when the LLM stack isn't exe
 
 from __future__ import annotations
 
+import time
 from typing import Any, TypeVar
+
+import structlog
 
 from tracely.config import settings
 
+log = structlog.get_logger()
+
 T = TypeVar("T")
+
+# The judge-model choices offered in the column UI. Curated (a 300-model dropdown is not a
+# selector) and verified against the live OpenRouter catalog when a key is configured —
+# unavailable ids are dropped, labels upgraded to OpenRouter's display names.
+_CURATED_MODELS: list[tuple[str, str]] = [
+    ("openai/gpt-5.4-nano", "GPT-5.4 Nano — fast & cheap"),
+    ("openai/gpt-5.4-mini", "GPT-5.4 Mini"),
+    ("openai/gpt-5.1", "GPT-5.1"),
+    ("openai/gpt-5-mini", "GPT-5 Mini"),
+    ("anthropic/claude-haiku-4.5", "Claude Haiku 4.5"),
+    ("anthropic/claude-fable-5", "Claude Fable 5"),
+    ("anthropic/claude-opus-4.6", "Claude Opus 4.6"),
+    ("google/gemini-3.5-flash", "Gemini 3.5 Flash"),
+    ("google/gemini-3.1-pro-preview", "Gemini 3.1 Pro"),
+    ("meta-llama/llama-4-maverick", "Llama 4 Maverick"),
+    ("mistralai/mistral-large-2512", "Mistral Large 3"),
+]
+_MODELS_TTL_S = 3600
+_models_cache: dict[str, Any] = {"ts": 0.0, "by_id": None}
 
 
 def llm_enabled() -> bool:
@@ -29,6 +53,64 @@ def llm_enabled() -> bool:
 def _normalize_model(model: str) -> str:
     """OpenRouter ids are `provider/model`; bare OpenAI-style ids get the `openai/` prefix."""
     return model if "/" in model else f"openai/{model}"
+
+
+def default_model_id() -> str:
+    """The judge model used when an evaluator doesn't pick one (normalized OpenRouter id)."""
+    return _normalize_model(settings.llm_judge_model.strip())
+
+
+def _openrouter_model_names() -> dict[str, str]:
+    """`{model_id: display_name}` from OpenRouter's /models, cached for an hour. On a failed
+    refresh the last-known catalog keeps serving (with a 60s retry cooldown so outages don't
+    stack 10s-timeout fetches on every modal open). Empty when no key is configured — callers
+    fall back to the static curated labels."""
+    now = time.monotonic()
+    if _models_cache["by_id"] is not None and now - _models_cache["ts"] < _MODELS_TTL_S:
+        return _models_cache["by_id"]
+    if not settings.openrouter_api_key:
+        return {}
+    try:
+        import httpx
+
+        resp = httpx.get(
+            f"{settings.openrouter_base_url.rstrip('/')}/models",
+            headers={"Authorization": f"Bearer {settings.openrouter_api_key}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        by_id = {
+            str(m.get("id")): str(m.get("name") or m.get("id"))
+            for m in resp.json().get("data", [])
+            if m.get("id")
+        }
+        _models_cache.update(ts=now, by_id=by_id)
+        return by_id
+    except Exception as exc:
+        log.warning("openrouter_models_fetch_failed", error=str(exc))
+        # serve stale (or nothing) and retry in 60s instead of on every request
+        _models_cache["ts"] = now - _MODELS_TTL_S + 60
+        return _models_cache["by_id"] or {}
+
+
+def list_models() -> list[dict[str, str]]:
+    """The curated judge-model choices for the evaluator UI: `[{id, label}, …]`. Verified
+    against the live OpenRouter catalog when reachable; the static list otherwise — narrowed to
+    `openai/*` when only the legacy direct OpenAI-compatible endpoint is configured (other
+    providers' ids can't be served there)."""
+    curated = _CURATED_MODELS
+    if not settings.openrouter_api_key:
+        curated = [(mid, label) for mid, label in curated if mid.startswith("openai/")]
+    available = _openrouter_model_names()
+    if available:
+        out = [
+            {"id": mid, "label": available.get(mid, label)}
+            for mid, label in curated
+            if mid in available
+        ]
+        if out:
+            return out
+    return [{"id": mid, "label": label} for mid, label in curated]
 
 
 def get_chat_model(model: str | None = None, temperature: float = 0.0):

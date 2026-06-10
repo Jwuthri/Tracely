@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type SVGProps } from "react";
 import {
   createEvaluator,
   generateEvaluator,
+  listJudgeModels,
   listTemplates,
   updateEvaluator,
   type EvaluatorConfig,
@@ -12,12 +13,15 @@ import {
   type EvaluatorDraft,
   type EvaluatorLevel,
   type EvaluatorTemplate,
+  type JudgeModels,
 } from "../lib/evaluators";
+import { OutputSchemaBuilder } from "./OutputSchemaBuilder";
 
 // ── Add Evaluation Column ───────────────────────────────────────────────────────
 // The TurnWise-style wizard: Browse Library (one click) · Manual (form) · Use AI
-// (describe → draft → review in the form). Editing an existing column jumps straight
-// to the form. Creation never runs anything — columns evaluate on ingest + via Run.
+// (describe → draft → review in the form). JSON Object outputs get a dedicated schema
+// step (the OutputSchemaBuilder). Editing an existing column jumps straight to the form.
+// Creation never runs anything — columns evaluate on ingest + via Run.
 
 const svg = (p: SVGProps<SVGSVGElement>) => ({
   xmlns: "http://www.w3.org/2000/svg",
@@ -45,23 +49,52 @@ const XIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...svg(p)}><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
 );
 
-type Step = "type" | "library" | "config";
+type Step = "type" | "library" | "config" | "schema";
 
 const LEVEL_OPTIONS: { value: EvaluatorLevel; label: string; hint: string }[] = [
   { value: "CONVERSATION", label: "Conversation", hint: "one grade per thread" },
   { value: "AGENT_RUN", label: "Message", hint: "one grade per turn" },
   { value: "SPAN", label: "Step", hint: "one grade per tool call / generation" },
 ];
+
+// Color palette matching the table's level badge / row depth system.
+const LEVEL_COLORS: Record<string, { active: string; dot: string; lborder: string; icon: string }> = {
+  CONVERSATION: {
+    active:  "border-blue-500/50 bg-blue-500/12 text-blue-300",
+    dot:     "bg-blue-400",
+    lborder: "border-l-blue-500",
+    icon:    "bg-blue-500/15 text-blue-400",
+  },
+  AGENT_RUN: {
+    active:  "border-green-500/50 bg-green-500/12 text-green-300",
+    dot:     "bg-green-400",
+    lborder: "border-l-green-500",
+    icon:    "bg-green-500/15 text-green-400",
+  },
+  SPAN: {
+    active:  "border-purple-500/50 bg-purple-500/12 text-purple-300",
+    dot:     "bg-purple-400",
+    lborder: "border-l-purple-500",
+    icon:    "bg-purple-500/15 text-purple-400",
+  },
+};
+const STEP_LABELS: Record<Step, string> = {
+  type:    "Choose type",
+  library: "Template library",
+  config:  "Configure",
+  schema:  "Output schema",
+};
+const STEP_ORDER: Step[] = ["type", "library", "config", "schema"];
 // Step-flavored levels all live in the S group; the segmented control canonicalizes to SPAN
 // unless the evaluator already uses a narrower step level.
 const S_LEVELS = new Set<EvaluatorLevel>(["SPAN", "TOOL", "GENERATION", "CHAIN"]);
 
 const OUTPUT_OPTIONS = [
   { value: "score", label: "Score (0–1 + threshold)" },
+  { value: "number", label: "Number" },
   { value: "boolean", label: "Pass / Fail" },
-  { value: "category", label: "Category" },
   { value: "text", label: "Text" },
-  { value: "json", label: "JSON object" },
+  { value: "json", label: "JSON Object" },
 ] as const;
 
 type FormState = {
@@ -70,20 +103,24 @@ type FormState = {
   kind: "llm_judge" | "structural";
   level: EvaluatorLevel;
   prompt: string;
-  model: string;
+  model: string; // "" = project default
   outputType: (typeof OUTPUT_OPTIONS)[number]["value"];
+  executionMode: "batch" | "sequential";
   threshold: string;
-  categories: string;
-  failCategories: string;
+  outputSchema?: Record<string, unknown>;
   paramsJson: string; // structural evaluators only
   enabled: boolean;
   scoreName?: string; // set when installing a template (stable identity)
+  // The config this form was hydrated from (template / AI draft / edited row). Save spreads it
+  // first, so keys the form doesn't surface — structural `check`, judge `span_types`,
+  // `max_spans` — survive installs and edits instead of being silently dropped.
+  sourceConfig?: EvaluatorConfig;
 };
 
 const EMPTY_FORM: FormState = {
   name: "", description: "", kind: "llm_judge", level: "AGENT_RUN", prompt: "", model: "",
-  outputType: "score", threshold: "0.6", categories: "", failCategories: "", paramsJson: "",
-  enabled: true,
+  outputType: "score", executionMode: "batch", threshold: "0.6", outputSchema: undefined,
+  paramsJson: "", enabled: true,
 };
 
 function formFromConfig(
@@ -91,17 +128,33 @@ function formFromConfig(
   config: EvaluatorConfig,
   scoreName?: string,
 ): FormState {
+  // legacy category configs surface as json + enum so they're editable in the new builder
+  const outputType = config.output_type === "category" ? "json" : config.output_type;
+  const legacySchema =
+    config.output_type === "category" && (config.categories ?? []).length > 0
+      ? {
+          type: "object",
+          properties: {
+            category: { type: "string", enum: config.categories },
+            reason: { type: "string", description: "Why this category fits" },
+          },
+          required: ["category", "reason"],
+        }
+      : undefined;
   return {
     ...EMPTY_FORM,
     ...base,
     prompt: config.prompt ?? "",
     model: config.model ?? "",
-    outputType: (config.output_type as FormState["outputType"]) ?? "score",
-    threshold: config.threshold != null ? String(config.threshold) : "0.6",
-    categories: (config.categories ?? []).join(", "),
-    failCategories: (config.fail_categories ?? []).join(", "),
+    outputType: (outputType as FormState["outputType"]) ?? "score",
+    executionMode: config.execution_mode === "sequential" ? "sequential" : "batch",
+    // no-threshold configs stay threshold-less (informational metrics keep their no-verdict
+    // semantics through install/edit round-trips) — only brand-new forms default to 0.6
+    threshold: config.threshold != null ? String(config.threshold) : "",
+    outputSchema: (config.output_schema as Record<string, unknown> | undefined) ?? legacySchema,
     paramsJson: config.check ? JSON.stringify(config.params ?? {}, null, 2) : "",
     scoreName,
+    sourceConfig: config,
   };
 }
 
@@ -115,25 +168,26 @@ function configFromForm(f: FormState, previous?: EvaluatorConfig): EvaluatorConf
   const config: EvaluatorConfig = { ...(previous ?? {}) };
   delete config.check;
   delete config.params;
+  delete config.categories; // legacy — superseded by json + enum schemas
+  delete config.fail_categories;
   config.prompt = f.prompt.trim();
   config.output_type = f.outputType;
+  config.execution_mode = f.executionMode;
   if (f.model.trim()) config.model = f.model.trim();
   else delete config.model;
-  if (f.outputType === "score" || f.outputType === "json") {
+  if (f.outputType === "score" || f.outputType === "number" || f.outputType === "json") {
     const t = parseFloat(f.threshold);
-    if (!Number.isNaN(t)) config.threshold = Math.min(Math.max(t, 0), 1);
+    // blank = deliberately no threshold (informational metric, no PASS/FAIL)
+    if (f.threshold.trim() !== "" && !Number.isNaN(t)) {
+      config.threshold = f.outputType === "number" ? t : Math.min(Math.max(t, 0), 1);
+    } else {
+      delete config.threshold;
+    }
   } else {
     delete config.threshold;
   }
-  if (f.outputType === "category") {
-    config.categories = f.categories.split(",").map((s) => s.trim()).filter(Boolean);
-    const fails = f.failCategories.split(",").map((s) => s.trim()).filter(Boolean);
-    if (fails.length) config.fail_categories = fails;
-    else delete config.fail_categories;
-  } else {
-    delete config.categories;
-    delete config.fail_categories;
-  }
+  if (f.outputType === "json" && f.outputSchema) config.output_schema = f.outputSchema;
+  else delete config.output_schema;
   return config;
 }
 
@@ -156,16 +210,22 @@ export function AddColumnModal({
   const [aiOpen, setAiOpen] = useState(false);
   const [aiText, setAiText] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
-  // Library
+  // Library + model choices
   const [templates, setTemplates] = useState<EvaluatorTemplate[] | null>(null);
+  const [judgeModels, setJudgeModels] = useState<JudgeModels | null>(null);
 
-  // (Re)seed on open: editing jumps straight to the form.
+  // (Re)seed on open: editing jumps straight to the form. Templates refetch every open so
+  // `installed` flags stay truthful after a save; models refetch until a non-empty list lands.
   useEffect(() => {
     if (!open) return;
     setError("");
     setAiOpen(false);
     setAiText("");
     setBusy(false);
+    setTemplates(null);
+    if (judgeModels === null || judgeModels.models.length === 0) {
+      void listJudgeModels().then(setJudgeModels).catch(() => {});
+    }
     if (editing) {
       setForm(formFromConfig(
         {
@@ -179,6 +239,7 @@ export function AddColumnModal({
       setForm(EMPTY_FORM);
       setStep("type");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing]);
 
   useEffect(() => {
@@ -234,7 +295,7 @@ export function AddColumnModal({
     }
   }
 
-  async function save() {
+  function submitConfig() {
     if (!form.name.trim()) {
       setError("Name is required.");
       return;
@@ -243,10 +304,28 @@ export function AddColumnModal({
       setError("Evaluation prompt is required.");
       return;
     }
+    setError("");
+    if (form.kind === "llm_judge" && form.outputType === "json") {
+      setStep("schema");
+      return;
+    }
+    void save();
+  }
+
+  function schemaPropertyCount(schema: Record<string, unknown> | undefined): number {
+    const props = schema && typeof schema === "object" ? (schema as { properties?: object }).properties : undefined;
+    return props ? Object.keys(props).length : 0;
+  }
+
+  async function save() {
+    if (form.kind === "llm_judge" && form.outputType === "json" && schemaPropertyCount(form.outputSchema) === 0) {
+      setError("Define at least one named field in the output schema.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      const config = configFromForm(form, editing?.config);
+      const config = configFromForm(form, editing?.config ?? form.sourceConfig);
       const saved = editing
         ? await updateEvaluator(editing.id, {
             name: form.name.trim(),
@@ -275,91 +354,131 @@ export function AddColumnModal({
 
   const isStructural = form.kind === "structural";
   const levelSegment: EvaluatorLevel = S_LEVELS.has(form.level) ? "SPAN" : form.level;
+  const levelColors = LEVEL_COLORS[levelSegment] ?? LEVEL_COLORS.AGENT_RUN;
+  const saveLabel = editing ? "Save Changes" : "Create Column";
+  const defaultModelLabel = judgeModels?.default ? `Default — ${judgeModels.default}` : "Default judge model";
+
+  // Breadcrumb: for the "library" path show type→library→config; for direct skip just show the relevant steps.
+  const visibleSteps: Step[] = editing
+    ? ["config", ...(form.outputType === "json" ? ["schema" as Step] : [])]
+    : step === "library" || (step === "config" && !editing)
+    ? ["type", "library", "config", ...(form.outputType === "json" ? ["schema" as Step] : [])]
+    : ["type", "config", ...(form.outputType === "json" ? ["schema" as Step] : [])];
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-[2px] sm:p-8" onClick={onClose}>
+    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm sm:p-8" onClick={onClose}>
       <div
-        className="mt-4 w-full max-w-xl rounded-xl border border-slate-700 bg-slate-900 shadow-2xl shadow-black/50"
+        className={clsx(
+          "mt-4 w-full max-w-xl rounded-xl border border-slate-700 bg-slate-900 shadow-2xl shadow-black/60",
+          "border-l-4 transition-colors duration-300",
+          levelColors.lborder,
+        )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-700/80 px-5 py-4">
-          <h2 className="text-[15px] font-semibold text-slate-100">
-            {editing ? "Edit Evaluation Column" : "Add Evaluation Column"}
-          </h2>
-          <button onClick={onClose} className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-800 hover:text-white" aria-label="Close">
+        <div className="flex items-center justify-between border-b border-slate-700/60 px-5 py-4">
+          <div>
+            <h2 className="text-[14px] font-semibold tracking-tight text-slate-100">
+              {editing ? "Edit Evaluation Column" : "Add Evaluation Column"}
+            </h2>
+            {/* Step breadcrumb */}
+            <div className="mt-1 flex items-center gap-1">
+              {visibleSteps.map((s, i) => (
+                <span key={s} className="flex items-center gap-1">
+                  {i > 0 && <span className="text-slate-700">›</span>}
+                  <span className={clsx(
+                    "text-[10.5px]",
+                    s === step ? "font-medium text-slate-300" : "text-slate-600",
+                  )}>
+                    {STEP_LABELS[s]}
+                  </span>
+                </span>
+              ))}
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200" aria-label="Close">
             <XIcon className="h-4 w-4" />
           </button>
         </div>
 
         <div className="max-h-[75vh] overflow-y-auto p-5">
           {step === "type" && (
-            <div className="space-y-4">
-              <p className="text-[13px] text-slate-400">Choose how you want to create your evaluation metric.</p>
+            <div className="space-y-3">
+              {/* Library card — full-width primary action */}
               <button
                 onClick={() => setStep("library")}
-                className="flex w-full items-center gap-3 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] p-4 text-left transition-colors hover:border-emerald-500/50 hover:bg-emerald-500/10"
+                className="group flex w-full items-center gap-4 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.05] p-4 text-left transition-all hover:border-emerald-500/50 hover:bg-emerald-500/[0.09]"
               >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400">
-                  <BookIcon className="h-4.5 w-4.5" />
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 transition-colors group-hover:bg-emerald-500/25">
+                  <BookIcon className="h-5 w-5" />
                 </span>
-                <span>
-                  <span className="block text-[13.5px] font-medium text-slate-100">Browse Library</span>
-                  <span className="block text-[12px] text-slate-400">Choose from pre-built evaluation metrics</span>
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-semibold text-slate-100">Browse Library</span>
+                  <span className="block text-[11.5px] text-slate-400">Install a pre-built metric in one click</span>
                 </span>
+                <span className="ml-auto text-slate-600 transition-colors group-hover:text-slate-400">›</span>
               </button>
 
-              <div className="flex items-center gap-3 text-[11px] uppercase tracking-wider text-slate-600">
-                <span className="h-px flex-1 bg-slate-700/70" />
-                or create your own
-                <span className="h-px flex-1 bg-slate-700/70" />
+              {/* Divider */}
+              <div className="flex items-center gap-3">
+                <span className="h-px flex-1 bg-slate-800" />
+                <span className="text-[10px] font-medium uppercase tracking-widest text-slate-600">or create your own</span>
+                <span className="h-px flex-1 bg-slate-800" />
               </div>
 
+              {/* Manual + AI cards */}
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => { setForm(EMPTY_FORM); setStep("config"); }}
-                  className="flex flex-col items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/40 p-5 text-center transition-colors hover:border-slate-500 hover:bg-slate-800"
+                  className="group flex flex-col items-center gap-2.5 rounded-lg border border-sky-500/20 bg-sky-500/[0.04] p-5 text-center transition-all hover:border-sky-500/40 hover:bg-sky-500/[0.08]"
                 >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/15 text-blue-400">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-sky-500/15 text-sky-400 transition-colors group-hover:bg-sky-500/25">
                     <CodeIcon className="h-5 w-5" />
                   </span>
-                  <span className="text-[13px] font-medium text-slate-100">Manual</span>
-                  <span className="text-[11.5px] leading-snug text-slate-400">Define prompt and output format</span>
+                  <span>
+                    <span className="block text-[12.5px] font-semibold text-slate-100">Manual</span>
+                    <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">Write prompt + output format</span>
+                  </span>
                 </button>
                 <button
                   onClick={() => setAiOpen((o) => !o)}
                   className={clsx(
-                    "flex flex-col items-center gap-2 rounded-lg border p-5 text-center transition-colors",
+                    "group flex flex-col items-center gap-2.5 rounded-lg border p-5 text-center transition-all",
                     aiOpen
-                      ? "border-violet-500/60 bg-violet-500/10"
-                      : "border-slate-700 bg-slate-800/40 hover:border-slate-500 hover:bg-slate-800",
+                      ? "border-violet-500/50 bg-violet-500/10"
+                      : "border-violet-500/20 bg-violet-500/[0.04] hover:border-violet-500/40 hover:bg-violet-500/[0.08]",
                   )}
                 >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-500/15 text-violet-400">
+                  <span className={clsx(
+                    "flex h-10 w-10 items-center justify-center rounded-lg text-violet-400 transition-colors",
+                    aiOpen ? "bg-violet-500/25" : "bg-violet-500/15 group-hover:bg-violet-500/25",
+                  )}>
                     <SparklesIcon className="h-5 w-5" />
                   </span>
-                  <span className="text-[13px] font-medium text-slate-100">Use AI</span>
-                  <span className="text-[11.5px] leading-snug text-slate-400">Describe and let AI create it</span>
+                  <span>
+                    <span className="block text-[12.5px] font-semibold text-slate-100">Use AI</span>
+                    <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">Describe → AI drafts it</span>
+                  </span>
                 </button>
               </div>
 
               {aiOpen && (
-                <div className="space-y-3 rounded-lg border border-slate-700 bg-slate-800/40 p-4">
-                  <label className="block text-[12px] font-medium text-slate-300">Describe your metric</label>
+                <div className="space-y-3 rounded-lg border border-violet-500/20 bg-violet-500/[0.04] p-4">
+                  <label className="block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">Describe your metric</label>
                   <textarea
                     value={aiText}
                     onChange={(e) => setAiText(e.target.value)}
                     rows={4}
                     placeholder="e.g., Check if the assistant's response is helpful and addresses the user's question. I want to evaluate accuracy, completeness, and tone."
-                    className="w-full resize-y rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-[12.5px] text-slate-200 placeholder:text-slate-600 focus:border-violet-500/50 focus:outline-none"
+                    className="w-full resize-y rounded-lg border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-[12.5px] text-slate-200 placeholder:text-slate-600 focus:border-violet-500/50 focus:outline-none"
                   />
                   <div className="flex items-center justify-end gap-2">
-                    <button onClick={() => setAiOpen(false)} className="rounded-lg px-3 py-1.5 text-[12.5px] text-slate-400 transition-colors hover:bg-slate-800 hover:text-white">
+                    <button onClick={() => setAiOpen(false)} className="rounded-lg px-3 py-1.5 text-[12px] text-slate-500 transition-colors hover:text-slate-300">
                       Cancel
                     </button>
                     <button
                       onClick={() => void runGenerate()}
                       disabled={aiBusy || !aiText.trim()}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3.5 py-1.5 text-[12.5px] font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3.5 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
                     >
                       {aiBusy ? (
                         <span className="h-3 w-3 animate-spin rounded-full border-2 border-violet-300/40 border-t-white" />
@@ -376,47 +495,57 @@ export function AddColumnModal({
           )}
 
           {step === "library" && (
-            <div className="space-y-5">
+            <div className="space-y-4">
               {templates === null ? (
-                <div className="flex items-center gap-2 py-8 text-[13px] text-slate-500">
-                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-700 border-t-slate-400" />
+                <div className="flex items-center gap-2 py-8 text-[12.5px] text-slate-600">
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-800 border-t-slate-500" />
                   Loading library…
                 </div>
               ) : (
-                grouped.map((g) => (
-                  <div key={g.key} className="space-y-2">
-                    <div className="text-[10.5px] font-medium uppercase tracking-wider text-slate-500">{g.label}</div>
-                    {g.items.map((t) => (
-                      <button
-                        key={t.score_name}
-                        onClick={() => pickTemplate(t)}
-                        disabled={t.installed}
-                        className={clsx(
-                          "flex w-full items-start justify-between gap-3 rounded-lg border p-3 text-left transition-colors",
-                          t.installed
-                            ? "cursor-default border-slate-800 bg-slate-800/20 opacity-60"
-                            : "border-slate-700 bg-slate-800/40 hover:border-slate-500 hover:bg-slate-800",
-                        )}
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-[13px] font-medium text-slate-100">{t.name}</span>
-                          <span className="mt-0.5 block text-[11.5px] leading-snug text-slate-400">{t.description}</span>
-                        </span>
-                        <span className="flex shrink-0 items-center gap-1.5">
-                          {t.kind === "llm_judge" && (
-                            <span className="rounded border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-wider text-violet-300">LLM</span>
+                grouped.map((g) => {
+                  // Use the level color for the group header dot
+                  const glc = g.key === "C" ? LEVEL_COLORS.CONVERSATION : g.key === "M" ? LEVEL_COLORS.AGENT_RUN : LEVEL_COLORS.SPAN;
+                  return (
+                    <div key={g.key} className="space-y-1.5">
+                      <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-slate-600">
+                        <span className={clsx("h-1.5 w-1.5 rounded-full", glc.dot)} />
+                        {g.label}
+                      </div>
+                      {g.items.map((t) => (
+                        <button
+                          key={t.score_name}
+                          onClick={() => pickTemplate(t)}
+                          disabled={t.installed}
+                          className={clsx(
+                            "flex w-full items-start justify-between gap-3 rounded-lg border p-3 text-left transition-all",
+                            t.installed
+                              ? "cursor-default border-slate-800/60 bg-slate-800/20 opacity-50"
+                              : "border-slate-700/60 bg-slate-800/20 hover:border-slate-600 hover:bg-slate-800/50",
                           )}
-                          {t.installed && (
-                            <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-wider text-emerald-300">Installed</span>
-                          )}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                ))
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate text-[12.5px] font-medium text-slate-200">{t.name}</span>
+                            <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">{t.description}</span>
+                          </span>
+                          <span className="flex shrink-0 items-center gap-1.5">
+                            {t.config?.output_type === "json" && (
+                              <span className="rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-sky-400">Schema</span>
+                            )}
+                            {t.kind === "llm_judge" && (
+                              <span className="rounded border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-violet-400">LLM</span>
+                            )}
+                            {t.installed && (
+                              <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-emerald-400">Installed</span>
+                            )}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })
               )}
-              <div className="flex justify-start pt-1">
-                <button onClick={() => setStep("type")} className="rounded-lg border border-slate-700 px-3.5 py-1.5 text-[12.5px] text-slate-300 transition-colors hover:bg-slate-800">
+              <div className="flex justify-start border-t border-slate-800 pt-4">
+                <button onClick={() => setStep("type")} className="rounded-lg border border-slate-700/80 px-3.5 py-1.5 text-[12px] text-slate-500 transition-colors hover:border-slate-600 hover:text-slate-300">
                   Back
                 </button>
               </div>
@@ -424,100 +553,125 @@ export function AddColumnModal({
           )}
 
           {step === "config" && (
-            <div className="space-y-4">
+            <div className="space-y-5">
+              {/* Level selector — color-coded to match table's level badge system */}
               <div>
-                <label className="mb-1.5 block text-[12px] font-medium text-slate-300">Evaluation Level</label>
+                <label className="mb-2 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">Evaluation Level</label>
                 <div className="grid grid-cols-3 gap-2">
-                  {LEVEL_OPTIONS.map((o) => (
-                    <button
-                      key={o.value}
-                      onClick={() => setForm((f) => ({ ...f, level: o.value }))}
-                      title={o.hint}
-                      className={clsx(
-                        "rounded-lg border px-3 py-2 text-[12.5px] font-medium transition-colors",
-                        levelSegment === o.value
-                          ? "border-blue-500/60 bg-blue-500/15 text-blue-300"
-                          : "border-slate-700 bg-slate-800/40 text-slate-400 hover:border-slate-500 hover:text-slate-200",
-                      )}
-                    >
-                      {o.label}
-                    </button>
-                  ))}
+                  {LEVEL_OPTIONS.map((o) => {
+                    const lc = LEVEL_COLORS[o.value] ?? LEVEL_COLORS.AGENT_RUN;
+                    const active = levelSegment === o.value;
+                    return (
+                      <button
+                        key={o.value}
+                        onClick={() =>
+                          setForm((f) =>
+                            o.value === "SPAN" && S_LEVELS.has(f.level) ? f : { ...f, level: o.value },
+                          )
+                        }
+                        title={o.hint}
+                        className={clsx(
+                          "flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-[12px] font-medium transition-all",
+                          active
+                            ? lc.active
+                            : "border-slate-700/80 bg-slate-800/30 text-slate-500 hover:border-slate-600 hover:text-slate-300",
+                        )}
+                      >
+                        {active && <span className={clsx("h-1.5 w-1.5 rounded-full", lc.dot)} />}
+                        {o.label}
+                      </button>
+                    );
+                  })}
                 </div>
                 {S_LEVELS.has(form.level) && form.level !== "SPAN" && (
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    Currently scoped to <span className="font-mono">{form.level}</span> steps only.
+                  <p className="mt-1.5 text-[10.5px] text-slate-600">
+                    Scoped to <span className="font-mono text-slate-500">{form.level}</span> steps only.
                   </p>
                 )}
               </div>
 
-              <div>
-                <label className="mb-1.5 block text-[12px] font-medium text-slate-300">Metric Name</label>
-                <input
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="e.g., Helpfulness Score"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-[12.5px] text-slate-200 placeholder:text-slate-600 focus:border-blue-500/50 focus:outline-none"
-                />
+              {/* Name + description */}
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">Metric Name</label>
+                  <input
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="e.g., Helpfulness Score"
+                    className="w-full rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-[12.5px] text-slate-200 placeholder:text-slate-700 focus:border-slate-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 flex items-center gap-1.5 text-[10.5px] font-medium uppercase tracking-wider text-slate-500">
+                    Description
+                    <span className="rounded bg-slate-800 px-1 py-0.5 text-[9px] font-normal normal-case tracking-normal text-slate-600">optional</span>
+                  </label>
+                  <input
+                    value={form.description}
+                    onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                    placeholder="Brief description of what this metric evaluates"
+                    className="w-full rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-[12.5px] text-slate-200 placeholder:text-slate-700 focus:border-slate-500 focus:outline-none"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="mb-1.5 block text-[12px] font-medium text-slate-300">
-                  Description <span className="font-normal text-slate-500">(optional)</span>
-                </label>
-                <input
-                  value={form.description}
-                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                  placeholder="Brief description of what this metric evaluates"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-[12.5px] text-slate-200 placeholder:text-slate-600 focus:border-blue-500/50 focus:outline-none"
-                />
-              </div>
+              {/* Separator */}
+              <div className="border-t border-slate-800" />
 
               {isStructural ? (
                 <div>
-                  <label className="mb-1.5 block text-[12px] font-medium text-slate-300">
-                    Parameters <span className="font-normal text-slate-500">(structural check: {editing?.config?.check ?? form.scoreName ?? "built-in"})</span>
+                  <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">
+                    Parameters
+                    <span className="ml-1.5 font-mono normal-case tracking-normal text-slate-600">({editing?.config?.check ?? form.scoreName ?? "built-in"})</span>
                   </label>
                   <textarea
                     value={form.paramsJson}
                     onChange={(e) => setForm((f) => ({ ...f, paramsJson: e.target.value }))}
                     rows={4}
                     spellCheck={false}
-                    className="w-full resize-y rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 font-mono text-[12px] text-slate-200 focus:border-blue-500/50 focus:outline-none"
+                    className="w-full resize-y rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 font-mono text-[12px] text-slate-200 focus:border-slate-500 focus:outline-none"
                   />
                 </div>
               ) : (
                 <>
                   <div>
-                    <label className="mb-1.5 block text-[12px] font-medium text-slate-300">Evaluation Prompt</label>
+                    <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">Evaluation Prompt</label>
                     <textarea
                       value={form.prompt}
                       onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))}
                       rows={5}
                       placeholder="You are evaluating the quality of an AI assistant's response. Consider…"
-                      className="w-full resize-y rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-[12.5px] leading-relaxed text-slate-200 placeholder:text-slate-600 focus:border-blue-500/50 focus:outline-none"
+                      className="w-full resize-y rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-[12.5px] leading-relaxed text-slate-200 placeholder:text-slate-700 focus:border-slate-500 focus:outline-none"
                     />
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      The trace content (request, answer, tool results / transcript / step I/O) is appended automatically.
+                    <p className="mt-1.5 text-[10.5px] text-slate-600">
+                      Trace content (request, answer, tool results / transcript / step I/O) is appended automatically.
                     </p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="mb-1.5 block text-[12px] font-medium text-slate-300">Model</label>
-                      <input
+                      <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">Model</label>
+                      <select
                         value={form.model}
                         onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
-                        placeholder="default judge model"
-                        className="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 font-mono text-[12px] text-slate-200 placeholder:text-slate-600 focus:border-blue-500/50 focus:outline-none"
-                      />
+                        className="w-full rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-[12.5px] text-slate-200 focus:border-slate-500 focus:outline-none"
+                      >
+                        <option value="">{defaultModelLabel}</option>
+                        {(judgeModels?.models ?? []).map((m) => (
+                          <option key={m.id} value={m.id}>{m.label}</option>
+                        ))}
+                        {form.model && !(judgeModels?.models ?? []).some((m) => m.id === form.model) && (
+                          <option value={form.model}>{form.model}</option>
+                        )}
+                      </select>
                     </div>
                     <div>
-                      <label className="mb-1.5 block text-[12px] font-medium text-slate-300">Output Type</label>
+                      <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">Output Type</label>
                       <select
                         value={form.outputType}
                         onChange={(e) => setForm((f) => ({ ...f, outputType: e.target.value as FormState["outputType"] }))}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-[12.5px] text-slate-200 focus:border-blue-500/50 focus:outline-none"
+                        className="w-full rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-[12.5px] text-slate-200 focus:border-slate-500 focus:outline-none"
                       >
                         {OUTPUT_OPTIONS.map((o) => (
                           <option key={o.value} value={o.value}>{o.label}</option>
@@ -526,65 +680,110 @@ export function AddColumnModal({
                     </div>
                   </div>
 
-                  {(form.outputType === "score" || form.outputType === "json") && (
+                  {(form.outputType === "score" || form.outputType === "number" || form.outputType === "json") && (
                     <div>
-                      <label className="mb-1.5 block text-[12px] font-medium text-slate-300">
-                        Pass threshold <span className="font-normal text-slate-500">(0–1{form.outputType === "json" ? ", applied to a `score` field when present" : ""})</span>
+                      <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">
+                        Pass threshold{" "}
+                        <span className="font-normal normal-case tracking-normal text-slate-600">
+                          {form.outputType === "number"
+                            ? "(PASS when ≥ this value)"
+                            : form.outputType === "json"
+                              ? "(0–1, on normalized score)"
+                              : "(0–1)"}
+                        </span>
                       </label>
                       <input
                         value={form.threshold}
                         onChange={(e) => setForm((f) => ({ ...f, threshold: e.target.value }))}
                         inputMode="decimal"
-                        className="w-32 rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 font-mono text-[12px] text-slate-200 focus:border-blue-500/50 focus:outline-none"
+                        placeholder="none"
+                        title="Leave empty for an informational metric (no PASS/FAIL)"
+                        className="w-32 rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 font-mono text-[12px] text-slate-200 placeholder:text-slate-700 focus:border-slate-500 focus:outline-none"
                       />
                     </div>
                   )}
 
-                  {form.outputType === "category" && (
+                  <div>
+                    <label className="mb-2 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">Execution Mode</label>
                     <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="mb-1.5 block text-[12px] font-medium text-slate-300">Categories</label>
-                        <input
-                          value={form.categories}
-                          onChange={(e) => setForm((f) => ({ ...f, categories: e.target.value }))}
-                          placeholder="question, complaint, other"
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-[12px] text-slate-200 placeholder:text-slate-600 focus:border-blue-500/50 focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1.5 block text-[12px] font-medium text-slate-300">
-                          Failing categories <span className="font-normal text-slate-500">(optional)</span>
-                        </label>
-                        <input
-                          value={form.failCategories}
-                          onChange={(e) => setForm((f) => ({ ...f, failCategories: e.target.value }))}
-                          placeholder="complaint"
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-[12px] text-slate-200 placeholder:text-slate-600 focus:border-blue-500/50 focus:outline-none"
-                        />
-                      </div>
+                      {(["batch", "sequential"] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => setForm((f) => ({ ...f, executionMode: mode }))}
+                          className={clsx(
+                            "flex flex-col items-center rounded-lg border px-3 py-2.5 transition-all",
+                            form.executionMode === mode
+                              ? levelColors.active
+                              : "border-slate-700/80 bg-slate-800/30 text-slate-500 hover:border-slate-600 hover:text-slate-300",
+                          )}
+                        >
+                          <span className="text-[12px] font-semibold capitalize">{mode}</span>
+                          <span className="mt-0.5 text-[10px] text-current opacity-60">
+                            {mode === "batch" ? "Independent evaluation" : "Chain results"}
+                          </span>
+                        </button>
+                      ))}
                     </div>
-                  )}
+                    {form.executionMode === "sequential" && (
+                      <p className="mt-1.5 text-[10.5px] text-slate-600">
+                        {form.level === "CONVERSATION"
+                          ? "No effect at conversation level — single grade per thread."
+                          : "Steps chain within each run; turns chain across the thread when run at conversation level."}
+                      </p>
+                    )}
+                  </div>
                 </>
               )}
 
-              <label className="flex cursor-pointer items-center gap-2 text-[12.5px] text-slate-300">
+              <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-slate-800 bg-slate-800/30 px-3 py-2.5 text-[12px] text-slate-400 transition-colors hover:border-slate-700 hover:text-slate-300">
                 <input
                   type="checkbox"
                   checked={form.enabled}
                   onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))}
-                  className="accent-blue-500"
+                  className="accent-cyan-500"
                 />
                 Run automatically on new traces
               </label>
 
               {error && <p className="text-[12px] text-rose-400">{error}</p>}
 
-              <div className="flex items-center justify-between border-t border-slate-700/80 pt-4">
+              <div className="flex items-center justify-between border-t border-slate-800 pt-4">
                 <button
                   onClick={() => (editing ? onClose() : setStep("type"))}
-                  className="rounded-lg border border-slate-700 px-3.5 py-1.5 text-[12.5px] text-slate-300 transition-colors hover:bg-slate-800"
+                  className="rounded-lg border border-slate-700/80 px-3.5 py-1.5 text-[12px] text-slate-500 transition-colors hover:border-slate-600 hover:text-slate-300"
                 >
                   {editing ? "Cancel" : "Back"}
+                </button>
+                <button
+                  onClick={submitConfig}
+                  disabled={busy}
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-[12.5px] font-medium text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+                >
+                  {busy && <span className="h-3 w-3 animate-spin rounded-full border-2 border-blue-300/40 border-t-white" />}
+                  {form.kind === "llm_judge" && form.outputType === "json"
+                    ? (editing ? "Next: Edit Schema" : "Next: Define Schema")
+                    : saveLabel}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === "schema" && (
+            <div className="space-y-4">
+              <OutputSchemaBuilder
+                schema={form.outputSchema}
+                onChange={(schema) => setForm((f) => ({ ...f, outputSchema: schema }))}
+              />
+
+              {error && <p className="text-[12px] text-rose-400">{error}</p>}
+
+              <div className="flex items-center justify-between border-t border-slate-800 pt-4">
+                <button
+                  onClick={() => setStep("config")}
+                  className="rounded-lg border border-slate-700/80 px-3.5 py-1.5 text-[12px] text-slate-500 transition-colors hover:border-slate-600 hover:text-slate-300"
+                >
+                  Back
                 </button>
                 <button
                   onClick={() => void save()}
@@ -592,7 +791,7 @@ export function AddColumnModal({
                   className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-[12.5px] font-medium text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
                 >
                   {busy && <span className="h-3 w-3 animate-spin rounded-full border-2 border-blue-300/40 border-t-white" />}
-                  {editing ? "Save Changes" : "Create Column"}
+                  {saveLabel}
                 </button>
               </div>
             </div>

@@ -114,9 +114,12 @@ def evaluator_delete(s: Session, project_id: str, evaluator_id: str) -> bool:
 def evaluator_enabled_specs(
     s: Session, project_id: str, evaluator_ids: list[str] | None = None
 ) -> list[dict]:
-    """The runner's view of a project's enabled evaluators (optionally narrowed by id)."""
-    q = select(Evaluator).where(
-        Evaluator.project_id == project_id, Evaluator.enabled.is_(True)
+    """The runner's view of a project's enabled evaluators (optionally narrowed by id),
+    creation-ordered so sequential chaining is deterministic."""
+    q = (
+        select(Evaluator)
+        .where(Evaluator.project_id == project_id, Evaluator.enabled.is_(True))
+        .order_by(Evaluator.created_at)
     )
     if evaluator_ids:
         q = q.where(Evaluator.id.in_(evaluator_ids))

@@ -153,6 +153,80 @@ async def test_evaluators_are_project_scoped(client, sync_db, make_workspace):
     assert stolen.status_code == 404
 
 
+async def test_models_endpoint_static_fallback(client, sync_db, monkeypatch):
+    from tracely.config import settings
+    from tracely.infrastructure.llm import provider
+
+    monkeypatch.setattr(settings, "openrouter_api_key", "test-key")
+    monkeypatch.setattr(provider, "_openrouter_model_names", lambda: {})
+    tok = await _owner_token(client)
+    r = await client.get("/api/evaluators/models", headers=_bearer(tok))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["default"].startswith("openai/")
+    ids = [m["id"] for m in body["models"]]
+    assert "openai/gpt-5.4-nano" in ids
+    assert len(ids) >= 8 and all(m["label"] for m in body["models"])
+
+
+async def test_models_endpoint_legacy_key_offers_only_openai(client, sync_db, monkeypatch):
+    """With only the legacy direct endpoint configured, non-openai OpenRouter ids can't be
+    served — the selector narrows instead of offering models that would always fail."""
+    from tracely.config import settings
+
+    monkeypatch.setattr(settings, "openrouter_api_key", "")
+    monkeypatch.setattr(settings, "llm_judge_api_key", "legacy-key")
+    tok = await _owner_token(client)
+    r = await client.get("/api/evaluators/models", headers=_bearer(tok))
+    ids = [m["id"] for m in r.json()["models"]]
+    assert ids and all(i.startswith("openai/") for i in ids)
+
+
+async def test_models_endpoint_filters_to_available(client, sync_db, monkeypatch):
+    from tracely.infrastructure.llm import provider
+
+    monkeypatch.setattr(
+        provider, "_openrouter_model_names",
+        lambda: {"openai/gpt-5.4-nano": "OpenAI: GPT-5.4 Nano"},
+    )
+    tok = await _owner_token(client)
+    r = await client.get("/api/evaluators/models", headers=_bearer(tok))
+    assert r.json()["models"] == [{"id": "openai/gpt-5.4-nano", "label": "OpenAI: GPT-5.4 Nano"}]
+
+
+async def test_generate_json_draft_builds_schema(client, sync_db, monkeypatch):
+    from tracely.config import settings
+    from tracely.domain.evaluation.generation import GeneratedEvaluatorDraft, GeneratedSchemaField
+    from tracely.infrastructure.llm import provider
+
+    monkeypatch.setattr(settings, "openrouter_api_key", "test-key")
+    monkeypatch.setattr(
+        provider, "run_structured_agent",
+        lambda prompt, *, response_format, system_prompt=None, model=None, temperature=0.0:
+            GeneratedEvaluatorDraft(
+                name="Intent classifier",
+                description="Classifies the user's intent.",
+                level="AGENT_RUN",
+                output_type="json",
+                prompt="Classify the intent.",
+                schema_fields=[
+                    GeneratedSchemaField(name="intent", type="enum", enum_values=["a", "b"], required=True),
+                    GeneratedSchemaField(name="bad name!", type="string"),  # dropped: not an identifier
+                    GeneratedSchemaField(name="reasoning", type="string", required=True),
+                ],
+            ),
+    )
+    tok = await _owner_token(client)
+    r = await client.post(
+        "/api/evaluators/generate", headers=_bearer(tok), json={"description": "classify intent"}
+    )
+    assert r.status_code == 200, r.text
+    schema = r.json()["config"]["output_schema"]
+    assert schema["properties"]["intent"]["enum"] == ["a", "b"]
+    assert "bad name!" not in schema["properties"]
+    assert schema["required"] == ["intent", "reasoning"]
+
+
 async def test_generate_without_llm_key_is_503(client, sync_db, monkeypatch):
     from tracely.config import settings
 
