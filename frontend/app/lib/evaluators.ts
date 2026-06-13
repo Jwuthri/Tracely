@@ -16,6 +16,7 @@ export type EvaluatorConfig = {
   output_type?: EvaluatorOutputType; // "category" is legacy — superseded by json + enum schemas
   output_schema?: Record<string, unknown>; // JSON Schema, for output_type "json"
   execution_mode?: "batch" | "sequential"; // sequential = chain items of this metric
+  depends_on?: string[]; // score_names of evaluators whose results are injected as context
   categories?: string[]; // legacy (category output type)
   fail_categories?: string[]; // legacy
   model?: string;

@@ -6,11 +6,9 @@ model handed to `create_agent(response_format=…)`, so the judge's reply is val
 including ENUM properties, which become `Literal[...]` constraints the model cannot escape
 (TurnWise dropped enum constraints at runtime; we enforce them).
 
-`wrap_with_score` adds the TurnWise-style mandatory normalized-score field: every
-custom-schema evaluation also yields a 0–1 score, popped off into the score row's `value` so
-the user-visible JSON keeps their schema clean while verdicts/analytics stay uniform. (The
-field is named `score__` — pydantic forbids leading underscores, so TurnWise's `__score__`
-becomes the trailing-dunder twin; collision risk with user fields is nil.)
+The output is exactly what the user defined — nothing is appended. A column that wants to drive
+PASS/FAIL and gates simply includes a numeric `score` field (and a `reason` string for the
+explanation); see `LLMJudgeEvaluator._json_result`.
 """
 
 from __future__ import annotations
@@ -18,15 +16,6 @@ from __future__ import annotations
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, create_model
-
-# The normalized-score field appended to every custom schema (pydantic forbids `__score__`).
-SCORE_KEY = "score__"
-
-SCORE_FIELD_DESCRIPTION = (
-    "Overall evaluation score between 0 and 1. "
-    "0.0 = worst/failure, 0.5 = average/neutral, 1.0 = best/perfect. "
-    "For boolean-style judgments: 1.0 for positive, 0.0 for negative."
-)
 
 _PRIMITIVES: dict[str, type] = {
     "string": str,
@@ -92,16 +81,3 @@ def model_from_json_schema(
     except Exception:
         # invalid field names / exotic schemas — not a structured-output contract
         return None
-
-
-def wrap_with_score(base_model: type[BaseModel]) -> type[BaseModel]:
-    """Rebuild `base_model` with a mandatory `score__: float (0..1)` appended, so every
-    custom-schema evaluation also produces the normalized score that drives verdicts."""
-    if SCORE_KEY in base_model.model_fields:
-        return base_model
-    fields: dict[str, Any] = {
-        field_name: (info.annotation, info)
-        for field_name, info in base_model.model_fields.items()
-    }
-    fields[SCORE_KEY] = (float, Field(ge=0, le=1, description=SCORE_FIELD_DESCRIPTION))
-    return create_model(f"Scored{base_model.__name__}", **fields)

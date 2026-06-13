@@ -160,14 +160,16 @@ def test_json_without_schema_falls_back_to_freeform(monkeypatch):
     assert json.loads(r.string_value) == payload
 
 
-def test_json_with_schema_enforces_contract_and_extracts_score(monkeypatch):
-    """The schema builder's stored JSON Schema compiles to the structured-output contract:
-    enum fields are Literal-enforced and the appended score__ drives value/verdict."""
+def test_json_with_schema_enforces_user_contract(monkeypatch):
+    """The schema builder's stored JSON Schema compiles to the structured-output contract with
+    EXACTLY the user's fields — nothing appended. Enum fields are Literal-enforced; a user-defined
+    numeric `score` drives value/verdict and a `reasoning` field becomes the comment, while every
+    field (score included) stays in string_value."""
     seen: dict = {}
 
     def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0):
         seen["fields"] = dict(response_format.model_fields)
-        return response_format(intent="complaint", reasoning="angry user", score__=0.2)
+        return response_format(intent="complaint", score=0.2, reasoning="the user is upset")
 
     monkeypatch.setattr(provider, "run_structured_agent", fake)
     config = {
@@ -177,18 +179,19 @@ def test_json_with_schema_enforces_contract_and_extracts_score(monkeypatch):
             "type": "object",
             "properties": {
                 "intent": {"type": "string", "enum": ["question", "complaint", "other"]},
+                "score": {"type": "number"},
                 "reasoning": {"type": "string"},
             },
-            "required": ["intent", "reasoning"],
+            "required": ["intent", "score", "reasoning"],
         },
     }
     r = _judge(RUN).run(_ctx([_span()]), config)[0]
-    # the contract carried the user fields + the appended normalized score
-    assert set(seen["fields"]) == {"intent", "reasoning", "score__"}
-    # score__ was popped into value (clamped), drove the verdict, and stayed out of the JSON
+    # the contract carried only the user's fields — no envelope
+    assert set(seen["fields"]) == {"intent", "score", "reasoning"}
+    # the user-defined score drove value/verdict; reasoning became the comment; all fields kept
     assert (r.value, r.verdict, r.data_type) == (0.2, "FAIL", "TEXT")
-    assert json.loads(r.string_value) == {"intent": "complaint", "reasoning": "angry user"}
-    assert r.comment == "angry user"
+    assert json.loads(r.string_value) == {"intent": "complaint", "score": 0.2, "reasoning": "the user is upset"}
+    assert r.comment == "the user is upset"
 
 
 def test_sequential_steps_chain_previous_result(monkeypatch):

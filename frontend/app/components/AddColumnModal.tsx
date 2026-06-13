@@ -2,9 +2,11 @@
 
 import clsx from "clsx";
 import { useEffect, useMemo, useState, type SVGProps } from "react";
+import { createPortal } from "react-dom";
 import {
   createEvaluator,
   generateEvaluator,
+  listEvaluators,
   listJudgeModels,
   listTemplates,
   updateEvaluator,
@@ -48,6 +50,9 @@ const SparklesIcon = (p: SVGProps<SVGSVGElement>) => (
 const XIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...svg(p)}><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
 );
+const ChevronR = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...svg(p)}><path d="m9 18 6-6-6-6" /></svg>
+);
 
 type Step = "type" | "library" | "config" | "schema";
 
@@ -58,24 +63,21 @@ const LEVEL_OPTIONS: { value: EvaluatorLevel; label: string; hint: string }[] = 
 ];
 
 // Color palette matching the table's level badge / row depth system.
-const LEVEL_COLORS: Record<string, { active: string; dot: string; lborder: string; icon: string }> = {
+const LEVEL_COLORS: Record<string, { active: string; dot: string; lborder: string }> = {
   CONVERSATION: {
     active:  "border-blue-500/50 bg-blue-500/12 text-blue-300",
     dot:     "bg-blue-400",
     lborder: "border-l-blue-500",
-    icon:    "bg-blue-500/15 text-blue-400",
   },
   AGENT_RUN: {
     active:  "border-green-500/50 bg-green-500/12 text-green-300",
     dot:     "bg-green-400",
     lborder: "border-l-green-500",
-    icon:    "bg-green-500/15 text-green-400",
   },
   SPAN: {
     active:  "border-purple-500/50 bg-purple-500/12 text-purple-300",
     dot:     "bg-purple-400",
     lborder: "border-l-purple-500",
-    icon:    "bg-purple-500/15 text-purple-400",
   },
 };
 const STEP_LABELS: Record<Step, string> = {
@@ -84,7 +86,6 @@ const STEP_LABELS: Record<Step, string> = {
   config:  "Configure",
   schema:  "Output schema",
 };
-const STEP_ORDER: Step[] = ["type", "library", "config", "schema"];
 // Step-flavored levels all live in the S group; the segmented control canonicalizes to SPAN
 // unless the evaluator already uses a narrower step level.
 const S_LEVELS = new Set<EvaluatorLevel>(["SPAN", "TOOL", "GENERATION", "CHAIN"]);
@@ -94,8 +95,19 @@ const OUTPUT_OPTIONS = [
   { value: "number", label: "Number" },
   { value: "boolean", label: "Pass / Fail" },
   { value: "text", label: "Text" },
-  { value: "json", label: "JSON Object" },
+  { value: "json", label: "JSON Object (+ custom fields)" },
 ] as const;
+
+// Which step span types a Step (SPAN) judge grades — stored as `config.span_types` and honored
+// by the backend `_run_steps` filter + the table's per-row blanking. Matches the ingest
+// vocabulary (otel/types.py); REASONING is collapsed to THINKING at ingestion.
+const SPAN_TYPE_OPTIONS = [
+  { value: "TOOL", label: "Tool" },
+  { value: "GENERATION", label: "Generation" },
+  { value: "CHAIN", label: "Chain" },
+  { value: "THINKING", label: "Thinking" },
+] as const;
+const DEFAULT_SPAN_TYPES = ["TOOL", "GENERATION"];
 
 type FormState = {
   name: string;
@@ -106,21 +118,23 @@ type FormState = {
   model: string; // "" = project default
   outputType: (typeof OUTPUT_OPTIONS)[number]["value"];
   executionMode: "batch" | "sequential";
+  dependsOn: string[]; // score_names of evaluators whose results are injected as context
   threshold: string;
+  spanTypes: string[]; // SPAN-level judges: which step types to grade (config.span_types)
   outputSchema?: Record<string, unknown>;
   paramsJson: string; // structural evaluators only
   enabled: boolean;
   scoreName?: string; // set when installing a template (stable identity)
   // The config this form was hydrated from (template / AI draft / edited row). Save spreads it
-  // first, so keys the form doesn't surface — structural `check`, judge `span_types`,
-  // `max_spans` — survive installs and edits instead of being silently dropped.
+  // first, so keys the form doesn't surface — structural `check`, judge `max_spans` — survive
+  // installs and edits instead of being silently dropped.
   sourceConfig?: EvaluatorConfig;
 };
 
 const EMPTY_FORM: FormState = {
   name: "", description: "", kind: "llm_judge", level: "AGENT_RUN", prompt: "", model: "",
-  outputType: "score", executionMode: "batch", threshold: "0.6", outputSchema: undefined,
-  paramsJson: "", enabled: true,
+  outputType: "score", executionMode: "batch", dependsOn: [], threshold: "0.6",
+  spanTypes: DEFAULT_SPAN_TYPES, outputSchema: undefined, paramsJson: "", enabled: true,
 };
 
 function formFromConfig(
@@ -133,12 +147,12 @@ function formFromConfig(
   const legacySchema =
     config.output_type === "category" && (config.categories ?? []).length > 0
       ? {
+          // legacy category → a single enum field; the user can add a score/reason if they want
           type: "object",
           properties: {
             category: { type: "string", enum: config.categories },
-            reason: { type: "string", description: "Why this category fits" },
           },
-          required: ["category", "reason"],
+          required: ["category"],
         }
       : undefined;
   return {
@@ -148,6 +162,8 @@ function formFromConfig(
     model: config.model ?? "",
     outputType: (outputType as FormState["outputType"]) ?? "score",
     executionMode: config.execution_mode === "sequential" ? "sequential" : "batch",
+    dependsOn: config.depends_on ?? [],
+    spanTypes: (config.span_types ?? []).length ? config.span_types! : DEFAULT_SPAN_TYPES,
     // no-threshold configs stay threshold-less (informational metrics keep their no-verdict
     // semantics through install/edit round-trips) — only brand-new forms default to 0.6
     threshold: config.threshold != null ? String(config.threshold) : "",
@@ -188,6 +204,12 @@ function configFromForm(f: FormState, previous?: EvaluatorConfig): EvaluatorConf
   }
   if (f.outputType === "json" && f.outputSchema) config.output_schema = f.outputSchema;
   else delete config.output_schema;
+  // Step (SPAN) judges grade a chosen set of step types; the backend honors span_types only at
+  // SPAN level, so only persist it there (and drop it if the metric moved to a coarser level).
+  if (S_LEVELS.has(f.level)) config.span_types = f.spanTypes;
+  else delete config.span_types;
+  if (f.dependsOn.length > 0) config.depends_on = f.dependsOn;
+  else delete config.depends_on;
   return config;
 }
 
@@ -210,9 +232,10 @@ export function AddColumnModal({
   const [aiOpen, setAiOpen] = useState(false);
   const [aiText, setAiText] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
-  // Library + model choices
+  // Library + model choices + existing evaluators (for depends_on)
   const [templates, setTemplates] = useState<EvaluatorTemplate[] | null>(null);
   const [judgeModels, setJudgeModels] = useState<JudgeModels | null>(null);
+  const [allEvaluators, setAllEvaluators] = useState<EvaluatorDef[] | null>(null);
 
   // (Re)seed on open: editing jumps straight to the form. Templates refetch every open so
   // `installed` flags stay truthful after a save; models refetch until a non-empty list lands.
@@ -223,6 +246,8 @@ export function AddColumnModal({
     setAiText("");
     setBusy(false);
     setTemplates(null);
+    setAllEvaluators(null);
+    void listEvaluators().then(setAllEvaluators).catch(() => setAllEvaluators([]));
     if (judgeModels === null || judgeModels.models.length === 0) {
       void listJudgeModels().then(setJudgeModels).catch(() => {});
     }
@@ -263,6 +288,7 @@ export function AddColumnModal({
   }, [templates]);
 
   if (!open) return null;
+  if (typeof window === "undefined") return null;
 
   function pickTemplate(t: EvaluatorTemplate) {
     if (t.installed) return;
@@ -304,6 +330,10 @@ export function AddColumnModal({
       setError("Evaluation prompt is required.");
       return;
     }
+    if (form.kind === "llm_judge" && S_LEVELS.has(form.level) && form.spanTypes.length === 0) {
+      setError("Select at least one step type to grade.");
+      return;
+    }
     setError("");
     if (form.kind === "llm_judge" && form.outputType === "json") {
       setStep("schema");
@@ -319,7 +349,7 @@ export function AddColumnModal({
 
   async function save() {
     if (form.kind === "llm_judge" && form.outputType === "json" && schemaPropertyCount(form.outputSchema) === 0) {
-      setError("Define at least one named field in the output schema.");
+      setError("Define at least one output field, or switch to the Score / Pass-Fail output type.");
       return;
     }
     setBusy(true);
@@ -365,140 +395,143 @@ export function AddColumnModal({
     ? ["type", "library", "config", ...(form.outputType === "json" ? ["schema" as Step] : [])]
     : ["type", "config", ...(form.outputType === "json" ? ["schema" as Step] : [])];
 
-  return (
-    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm sm:p-8" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/75 p-4 backdrop-blur-sm sm:p-8" onClick={onClose}>
       <div
         className={clsx(
-          "mt-4 w-full max-w-xl rounded-xl border border-slate-700 bg-slate-900 shadow-2xl shadow-black/60",
+          "mt-4 w-full max-w-xl overflow-hidden rounded-xl border border-line bg-ink-900 shadow-2xl shadow-black/70",
           "border-l-4 transition-colors duration-300",
           levelColors.lborder,
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-700/60 px-5 py-4">
-          <div>
-            <h2 className="text-[14px] font-semibold tracking-tight text-slate-100">
+        <div className="border-b border-line px-5 py-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-[13.5px] font-semibold tracking-tight text-fg">
               {editing ? "Edit Evaluation Column" : "Add Evaluation Column"}
             </h2>
-            {/* Step breadcrumb */}
-            <div className="mt-1 flex items-center gap-1">
-              {visibleSteps.map((s, i) => (
-                <span key={s} className="flex items-center gap-1">
-                  {i > 0 && <span className="text-slate-700">›</span>}
-                  <span className={clsx(
-                    "text-[10.5px]",
-                    s === step ? "font-medium text-slate-300" : "text-slate-600",
-                  )}>
-                    {STEP_LABELS[s]}
-                  </span>
-                </span>
-              ))}
-            </div>
+            <button onClick={onClose} className="rounded-md p-1 text-fg-faint transition-colors hover:bg-ink-700 hover:text-fg-muted" aria-label="Close">
+              <XIcon className="h-3.5 w-3.5" />
+            </button>
           </div>
-          <button onClick={onClose} className="rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200" aria-label="Close">
-            <XIcon className="h-4 w-4" />
-          </button>
+          {/* Step breadcrumb */}
+          <div className="mt-1 flex items-center gap-1">
+            {visibleSteps.map((s, i) => (
+              <span key={s} className="flex items-center gap-1">
+                {i > 0 && <span className="text-[10px] text-line-bright">›</span>}
+                <span className={clsx(
+                  "text-[10.5px]",
+                  s === step ? "text-fg-muted" : "text-fg-faint/70",
+                )}>
+                  {STEP_LABELS[s]}
+                </span>
+              </span>
+            ))}
+          </div>
         </div>
 
         <div className="max-h-[75vh] overflow-y-auto p-5">
           {step === "type" && (
-            <div className="space-y-3">
-              {/* Library card — full-width primary action */}
+            <div className="space-y-4">
+              <p className="text-[12.5px] text-fg-muted">Choose how you want to create your evaluation metric.</p>
+
+              {/* Browse Library — primary full-width card */}
               <button
                 onClick={() => setStep("library")}
-                className="group flex w-full items-center gap-4 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.05] p-4 text-left transition-all hover:border-emerald-500/50 hover:bg-emerald-500/[0.09]"
+                className="group flex w-full items-center gap-3 rounded-lg border border-line-bright/60 bg-ink-700/50 p-4 text-left transition-colors hover:border-emerald-500/40 hover:bg-ink-600/50"
               >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 transition-colors group-hover:bg-emerald-500/25">
-                  <BookIcon className="h-5 w-5" />
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400">
+                  <BookIcon className="h-4.5 w-4.5" />
                 </span>
                 <span className="min-w-0">
-                  <span className="block text-[13px] font-semibold text-slate-100">Browse Library</span>
-                  <span className="block text-[11.5px] text-slate-400">Install a pre-built metric in one click</span>
+                  <span className="block text-[13px] font-medium text-fg">Browse Library</span>
+                  <span className="block text-[11.5px] text-fg-muted">Choose from pre-built evaluation metrics</span>
                 </span>
-                <span className="ml-auto text-slate-600 transition-colors group-hover:text-slate-400">›</span>
+                <ChevronR className="ml-auto h-4 w-4 shrink-0 text-fg-faint transition-colors group-hover:text-fg-muted" />
               </button>
 
-              {/* Divider */}
-              <div className="flex items-center gap-3">
-                <span className="h-px flex-1 bg-slate-800" />
-                <span className="text-[10px] font-medium uppercase tracking-widest text-slate-600">or create your own</span>
-                <span className="h-px flex-1 bg-slate-800" />
+              <div className="flex items-center gap-3 text-[10px] uppercase tracking-widest text-fg-faint">
+                <span className="h-px flex-1 bg-line" />
+                or create your own
+                <span className="h-px flex-1 bg-line" />
               </div>
 
               {/* Manual + AI cards */}
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => { setForm(EMPTY_FORM); setStep("config"); }}
-                  className="group flex flex-col items-center gap-2.5 rounded-lg border border-sky-500/20 bg-sky-500/[0.04] p-5 text-center transition-all hover:border-sky-500/40 hover:bg-sky-500/[0.08]"
+                  className="group flex flex-col items-center gap-2.5 rounded-lg border border-line bg-ink-700/40 p-5 text-center transition-colors hover:border-line-bright hover:bg-ink-600/50"
                 >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-sky-500/15 text-sky-400 transition-colors group-hover:bg-sky-500/25">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-info/15 text-info">
                     <CodeIcon className="h-5 w-5" />
                   </span>
                   <span>
-                    <span className="block text-[12.5px] font-semibold text-slate-100">Manual</span>
-                    <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">Write prompt + output format</span>
+                    <span className="block text-[12.5px] font-medium text-fg">Manual</span>
+                    <span className="mt-0.5 block text-[11px] leading-snug text-fg-muted">Define prompt and output format</span>
                   </span>
                 </button>
                 <button
                   onClick={() => setAiOpen((o) => !o)}
                   className={clsx(
-                    "group flex flex-col items-center gap-2.5 rounded-lg border p-5 text-center transition-all",
+                    "group flex flex-col items-center gap-2.5 rounded-lg border p-5 text-center transition-colors",
                     aiOpen
-                      ? "border-violet-500/50 bg-violet-500/10"
-                      : "border-violet-500/20 bg-violet-500/[0.04] hover:border-violet-500/40 hover:bg-violet-500/[0.08]",
+                      ? "border-violet-500/50 bg-violet-500/[0.07]"
+                      : "border-line bg-ink-700/40 hover:border-line-bright hover:bg-ink-600/50",
                   )}
                 >
-                  <span className={clsx(
-                    "flex h-10 w-10 items-center justify-center rounded-lg text-violet-400 transition-colors",
-                    aiOpen ? "bg-violet-500/25" : "bg-violet-500/15 group-hover:bg-violet-500/25",
-                  )}>
+                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-500/15 text-violet-400">
                     <SparklesIcon className="h-5 w-5" />
                   </span>
                   <span>
-                    <span className="block text-[12.5px] font-semibold text-slate-100">Use AI</span>
-                    <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">Describe → AI drafts it</span>
+                    <span className="block text-[12.5px] font-medium text-fg">Use AI</span>
+                    <span className="mt-0.5 block text-[11px] leading-snug text-fg-muted">Describe and let AI create it</span>
                   </span>
                 </button>
               </div>
 
               {aiOpen && (
-                <div className="space-y-3 rounded-lg border border-violet-500/20 bg-violet-500/[0.04] p-4">
-                  <label className="block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">Describe your metric</label>
+                <div className="space-y-3 rounded-lg border border-violet-500/20 bg-ink-900/60 p-4">
+                  <label className="block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">Describe your metric</label>
                   <textarea
+                    autoFocus
                     value={aiText}
                     onChange={(e) => setAiText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && aiText.trim()) void runGenerate(); }}
                     rows={4}
                     placeholder="e.g., Check if the assistant's response is helpful and addresses the user's question. I want to evaluate accuracy, completeness, and tone."
-                    className="w-full resize-y rounded-lg border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-[12.5px] text-slate-200 placeholder:text-slate-600 focus:border-violet-500/50 focus:outline-none"
+                    className="w-full resize-y rounded-lg border border-line bg-ink-900/80 px-3 py-2 text-[12.5px] text-fg placeholder:text-fg-faint/60 focus:border-violet-500/40 focus:outline-none"
                   />
-                  <div className="flex items-center justify-end gap-2">
-                    <button onClick={() => setAiOpen(false)} className="rounded-lg px-3 py-1.5 text-[12px] text-slate-500 transition-colors hover:text-slate-300">
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => void runGenerate()}
-                      disabled={aiBusy || !aiText.trim()}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3.5 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
-                    >
-                      {aiBusy ? (
-                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-violet-300/40 border-t-white" />
-                      ) : (
-                        <SparklesIcon className="h-3.5 w-3.5" />
-                      )}
-                      Generate
-                    </button>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-fg-faint/60">⌘ Enter to generate</span>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setAiOpen(false)} className="px-3 py-1.5 text-[11.5px] text-fg-faint transition-colors hover:text-fg-muted">
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => void runGenerate()}
+                        disabled={aiBusy || !aiText.trim()}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3.5 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+                      >
+                        {aiBusy ? (
+                          <span className="h-3 w-3 animate-spin rounded-full border-2 border-violet-300/40 border-t-white" />
+                        ) : (
+                          <SparklesIcon className="h-3.5 w-3.5" />
+                        )}
+                        Generate
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
-              {error && <p className="text-[12px] text-rose-400">{error}</p>}
+              {error && <p className="text-[12px] text-fail">{error}</p>}
             </div>
           )}
 
           {step === "library" && (
             <div className="space-y-4">
               {templates === null ? (
-                <div className="flex items-center gap-2 py-8 text-[12.5px] text-slate-600">
-                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-800 border-t-slate-500" />
+                <div className="flex items-center gap-2 py-8 text-[12.5px] text-fg-faint">
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-line border-t-fg-faint" />
                   Loading library…
                 </div>
               ) : (
@@ -507,7 +540,7 @@ export function AddColumnModal({
                   const glc = g.key === "C" ? LEVEL_COLORS.CONVERSATION : g.key === "M" ? LEVEL_COLORS.AGENT_RUN : LEVEL_COLORS.SPAN;
                   return (
                     <div key={g.key} className="space-y-1.5">
-                      <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-slate-600">
+                      <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-fg-faint">
                         <span className={clsx("h-1.5 w-1.5 rounded-full", glc.dot)} />
                         {g.label}
                       </div>
@@ -519,13 +552,13 @@ export function AddColumnModal({
                           className={clsx(
                             "flex w-full items-start justify-between gap-3 rounded-lg border p-3 text-left transition-all",
                             t.installed
-                              ? "cursor-default border-slate-800/60 bg-slate-800/20 opacity-50"
-                              : "border-slate-700/60 bg-slate-800/20 hover:border-slate-600 hover:bg-slate-800/50",
+                              ? "cursor-default border-line-soft bg-ink-700/30 opacity-50"
+                              : "border-line bg-ink-700/30 hover:border-line-bright hover:bg-ink-700/50",
                           )}
                         >
                           <span className="min-w-0">
-                            <span className="block truncate text-[12.5px] font-medium text-slate-200">{t.name}</span>
-                            <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">{t.description}</span>
+                            <span className="block truncate text-[12.5px] font-medium text-fg">{t.name}</span>
+                            <span className="mt-0.5 block text-[11px] leading-snug text-fg-faint">{t.description}</span>
                           </span>
                           <span className="flex shrink-0 items-center gap-1.5">
                             {t.config?.output_type === "json" && (
@@ -544,8 +577,8 @@ export function AddColumnModal({
                   );
                 })
               )}
-              <div className="flex justify-start border-t border-slate-800 pt-4">
-                <button onClick={() => setStep("type")} className="rounded-lg border border-slate-700/80 px-3.5 py-1.5 text-[12px] text-slate-500 transition-colors hover:border-slate-600 hover:text-slate-300">
+              <div className="sticky bottom-0 z-10 -mx-5 -mb-5 mt-1 flex justify-start border-t border-line bg-ink-900/95 px-5 py-3 backdrop-blur-sm">
+                <button onClick={() => setStep("type")} className="rounded-lg border border-line px-3.5 py-1.5 text-[12px] text-fg-faint transition-colors hover:border-line-bright hover:text-fg-muted">
                   Back
                 </button>
               </div>
@@ -556,7 +589,7 @@ export function AddColumnModal({
             <div className="space-y-5">
               {/* Level selector — color-coded to match table's level badge system */}
               <div>
-                <label className="mb-2 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">Evaluation Level</label>
+                <label className="mb-2 block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">Evaluation Level</label>
                 <div className="grid grid-cols-3 gap-2">
                   {LEVEL_OPTIONS.map((o) => {
                     const lc = LEVEL_COLORS[o.value] ?? LEVEL_COLORS.AGENT_RUN;
@@ -565,16 +598,25 @@ export function AddColumnModal({
                       <button
                         key={o.value}
                         onClick={() =>
-                          setForm((f) =>
-                            o.value === "SPAN" && S_LEVELS.has(f.level) ? f : { ...f, level: o.value },
-                          )
+                          setForm((f) => {
+                            if (o.value === "SPAN" && S_LEVELS.has(f.level)) return f;
+                            // dropping cross-group deps: conversation and trace-level metrics
+                            // run in separate passes, so deps can't cross that boundary
+                            const nextIsConv = o.value === "CONVERSATION";
+                            const byName = new Map((allEvaluators ?? []).map((e) => [e.score_name, e]));
+                            const dependsOn = f.dependsOn.filter((n) => {
+                              const dep = byName.get(n);
+                              return dep ? (dep.level === "CONVERSATION") === nextIsConv : false;
+                            });
+                            return { ...f, level: o.value, dependsOn };
+                          })
                         }
                         title={o.hint}
                         className={clsx(
                           "flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-[12px] font-medium transition-all",
                           active
                             ? lc.active
-                            : "border-slate-700/80 bg-slate-800/30 text-slate-500 hover:border-slate-600 hover:text-slate-300",
+                            : "border-line bg-ink-700/40 text-fg-faint hover:border-line-bright hover:text-fg-muted",
                         )}
                       >
                         {active && <span className={clsx("h-1.5 w-1.5 rounded-full", lc.dot)} />}
@@ -584,78 +626,117 @@ export function AddColumnModal({
                   })}
                 </div>
                 {S_LEVELS.has(form.level) && form.level !== "SPAN" && (
-                  <p className="mt-1.5 text-[10.5px] text-slate-600">
-                    Scoped to <span className="font-mono text-slate-500">{form.level}</span> steps only.
+                  <p className="mt-1.5 text-[10.5px] text-fg-faint">
+                    Scoped to <span className="font-mono text-fg-faint">{form.level}</span> steps only.
                   </p>
+                )}
+                {form.kind === "llm_judge" && levelSegment === "SPAN" && (
+                  <div className="mt-3">
+                    <label className="mb-2 block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">
+                      Step types to grade
+                    </label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {SPAN_TYPE_OPTIONS.map((o) => {
+                        const active = form.spanTypes.includes(o.value);
+                        return (
+                          <button
+                            key={o.value}
+                            type="button"
+                            onClick={() =>
+                              setForm((f) => ({
+                                ...f,
+                                level: "SPAN", // span_types only applies at SPAN level
+                                spanTypes: active
+                                  ? f.spanTypes.filter((t) => t !== o.value)
+                                  : [...f.spanTypes, o.value],
+                              }))
+                            }
+                            className={clsx(
+                              "flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-[12px] font-medium transition-all",
+                              active
+                                ? levelColors.active
+                                : "border-line bg-ink-700/40 text-fg-faint hover:border-line-bright hover:text-fg-muted",
+                            )}
+                          >
+                            {active && <span className={clsx("h-1.5 w-1.5 rounded-full", levelColors.dot)} />}
+                            {o.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-1.5 text-[10.5px] text-fg-faint">
+                      The judge runs once per matching step. Pick only <span className="font-mono">Tool</span> to grade tool calls exclusively.
+                    </p>
+                  </div>
                 )}
               </div>
 
               {/* Name + description */}
               <div className="space-y-3">
                 <div>
-                  <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">Metric Name</label>
+                  <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">Metric Name</label>
                   <input
                     value={form.name}
                     onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                     placeholder="e.g., Helpfulness Score"
-                    className="w-full rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-[12.5px] text-slate-200 placeholder:text-slate-700 focus:border-slate-500 focus:outline-none"
+                    className="w-full rounded-lg border border-line bg-ink-900/60 px-3 py-2 text-[12.5px] text-fg placeholder:text-fg-faint/60 focus:border-signal/40 focus:outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="mb-1.5 flex items-center gap-1.5 text-[10.5px] font-medium uppercase tracking-wider text-slate-500">
+                  <label className="mb-1.5 flex items-center gap-1.5 text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">
                     Description
-                    <span className="rounded bg-slate-800 px-1 py-0.5 text-[9px] font-normal normal-case tracking-normal text-slate-600">optional</span>
+                    <span className="rounded bg-ink-700 px-1 py-0.5 text-[9px] font-normal normal-case tracking-normal text-fg-faint">optional</span>
                   </label>
                   <input
                     value={form.description}
                     onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                     placeholder="Brief description of what this metric evaluates"
-                    className="w-full rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-[12.5px] text-slate-200 placeholder:text-slate-700 focus:border-slate-500 focus:outline-none"
+                    className="w-full rounded-lg border border-line bg-ink-900/60 px-3 py-2 text-[12.5px] text-fg placeholder:text-fg-faint/60 focus:border-signal/40 focus:outline-none"
                   />
                 </div>
               </div>
 
               {/* Separator */}
-              <div className="border-t border-slate-800" />
+              <div className="border-t border-line" />
 
               {isStructural ? (
                 <div>
-                  <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">
+                  <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">
                     Parameters
-                    <span className="ml-1.5 font-mono normal-case tracking-normal text-slate-600">({editing?.config?.check ?? form.scoreName ?? "built-in"})</span>
+                    <span className="ml-1.5 font-mono normal-case tracking-normal text-fg-faint">({editing?.config?.check ?? form.scoreName ?? "built-in"})</span>
                   </label>
                   <textarea
                     value={form.paramsJson}
                     onChange={(e) => setForm((f) => ({ ...f, paramsJson: e.target.value }))}
                     rows={4}
                     spellCheck={false}
-                    className="w-full resize-y rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 font-mono text-[12px] text-slate-200 focus:border-slate-500 focus:outline-none"
+                    className="w-full resize-y rounded-lg border border-line bg-ink-900/60 px-3 py-2 font-mono text-[12px] text-fg focus:border-signal/40 focus:outline-none"
                   />
                 </div>
               ) : (
                 <>
                   <div>
-                    <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">Evaluation Prompt</label>
+                    <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">Evaluation Prompt</label>
                     <textarea
                       value={form.prompt}
                       onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))}
                       rows={5}
                       placeholder="You are evaluating the quality of an AI assistant's response. Consider…"
-                      className="w-full resize-y rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-[12.5px] leading-relaxed text-slate-200 placeholder:text-slate-700 focus:border-slate-500 focus:outline-none"
+                      className="w-full resize-y rounded-lg border border-line bg-ink-900/60 px-3 py-2 text-[12.5px] leading-relaxed text-fg placeholder:text-fg-faint/60 focus:border-signal/40 focus:outline-none"
                     />
-                    <p className="mt-1.5 text-[10.5px] text-slate-600">
+                    <p className="mt-1.5 text-[10.5px] text-fg-faint">
                       Trace content (request, answer, tool results / transcript / step I/O) is appended automatically.
                     </p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">Model</label>
+                      <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">Model</label>
                       <select
                         value={form.model}
                         onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
-                        className="w-full rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-[12.5px] text-slate-200 focus:border-slate-500 focus:outline-none"
+                        className="w-full rounded-lg border border-line bg-ink-900/60 px-3 py-2 text-[12.5px] text-fg focus:border-signal/40 focus:outline-none"
                       >
                         <option value="">{defaultModelLabel}</option>
                         {(judgeModels?.models ?? []).map((m) => (
@@ -667,11 +748,11 @@ export function AddColumnModal({
                       </select>
                     </div>
                     <div>
-                      <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">Output Type</label>
+                      <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">Output Type</label>
                       <select
                         value={form.outputType}
                         onChange={(e) => setForm((f) => ({ ...f, outputType: e.target.value as FormState["outputType"] }))}
-                        className="w-full rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-[12.5px] text-slate-200 focus:border-slate-500 focus:outline-none"
+                        className="w-full rounded-lg border border-line bg-ink-900/60 px-3 py-2 text-[12.5px] text-fg focus:border-signal/40 focus:outline-none"
                       >
                         {OUTPUT_OPTIONS.map((o) => (
                           <option key={o.value} value={o.value}>{o.label}</option>
@@ -682,13 +763,13 @@ export function AddColumnModal({
 
                   {(form.outputType === "score" || form.outputType === "number" || form.outputType === "json") && (
                     <div>
-                      <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">
+                      <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">
                         Pass threshold{" "}
-                        <span className="font-normal normal-case tracking-normal text-slate-600">
+                        <span className="font-normal normal-case tracking-normal text-fg-faint">
                           {form.outputType === "number"
                             ? "(PASS when ≥ this value)"
                             : form.outputType === "json"
-                              ? "(0–1, on normalized score)"
+                              ? "(0–1, on your score field)"
                               : "(0–1)"}
                         </span>
                       </label>
@@ -698,13 +779,13 @@ export function AddColumnModal({
                         inputMode="decimal"
                         placeholder="none"
                         title="Leave empty for an informational metric (no PASS/FAIL)"
-                        className="w-32 rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 font-mono text-[12px] text-slate-200 placeholder:text-slate-700 focus:border-slate-500 focus:outline-none"
+                        className="w-32 rounded-lg border border-line bg-ink-900/60 px-3 py-2 font-mono text-[12px] text-fg placeholder:text-fg-faint/60 focus:border-signal/40 focus:outline-none"
                       />
                     </div>
                   )}
 
                   <div>
-                    <label className="mb-2 block text-[10.5px] font-medium uppercase tracking-wider text-slate-500">Execution Mode</label>
+                    <label className="mb-2 block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">Execution Mode</label>
                     <div className="grid grid-cols-2 gap-3">
                       {(["batch", "sequential"] as const).map((mode) => (
                         <button
@@ -715,7 +796,7 @@ export function AddColumnModal({
                             "flex flex-col items-center rounded-lg border px-3 py-2.5 transition-all",
                             form.executionMode === mode
                               ? levelColors.active
-                              : "border-slate-700/80 bg-slate-800/30 text-slate-500 hover:border-slate-600 hover:text-slate-300",
+                              : "border-line bg-ink-700/40 text-fg-faint hover:border-line-bright hover:text-fg-muted",
                           )}
                         >
                           <span className="text-[12px] font-semibold capitalize">{mode}</span>
@@ -726,17 +807,81 @@ export function AddColumnModal({
                       ))}
                     </div>
                     {form.executionMode === "sequential" && (
-                      <p className="mt-1.5 text-[10.5px] text-slate-600">
+                      <p className="mt-1.5 text-[10.5px] text-fg-faint">
                         {form.level === "CONVERSATION"
                           ? "No effect at conversation level — single grade per thread."
                           : "Steps chain within each run; turns chain across the thread when run at conversation level."}
                       </p>
                     )}
                   </div>
+
+                  {/* Depends On — only useful for llm_judge; structural evals have no prompt to inject into.
+                      Restricted to the same dispatch group: conversation-level metrics run as a separate
+                      pass from trace/step-level ones, so a cross-group dependency would never see its
+                      prerequisite's result. */}
+                  {(() => {
+                    const isConv = form.level === "CONVERSATION";
+                    const candidates = (allEvaluators ?? []).filter(
+                      (e) =>
+                        e.kind === "llm_judge" &&
+                        e.id !== editing?.id &&
+                        (e.level === "CONVERSATION") === isConv,
+                    );
+                    if (candidates.length === 0) return null;
+                    return (
+                      <div>
+                        <label className="mb-1 block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">
+                          Depends On{" "}
+                          <span className="rounded bg-ink-700 px-1 py-0.5 text-[9px] font-normal normal-case tracking-normal text-fg-faint">optional</span>
+                        </label>
+                        <p className="mb-2 text-[10.5px] text-fg-faint">
+                          Run after these metrics and inject their results as context into the evaluation prompt.
+                        </p>
+                        <div className="space-y-1 rounded-lg border border-line bg-ink-900/40 p-2">
+                          {candidates.map((e) => {
+                            const checked = form.dependsOn.includes(e.score_name);
+                            const lc =
+                              e.level === "CONVERSATION"
+                                ? LEVEL_COLORS.CONVERSATION
+                                : e.level === "AGENT_RUN"
+                                  ? LEVEL_COLORS.AGENT_RUN
+                                  : LEVEL_COLORS.SPAN;
+                            return (
+                              <label
+                                key={e.id}
+                                className={clsx(
+                                  "flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 transition-colors",
+                                  checked ? "bg-ink-700/60" : "hover:bg-ink-700/30",
+                                )}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() =>
+                                    setForm((f) => ({
+                                      ...f,
+                                      dependsOn: checked
+                                        ? f.dependsOn.filter((n) => n !== e.score_name)
+                                        : [...f.dependsOn, e.score_name],
+                                    }))
+                                  }
+                                  className="accent-cyan-500"
+                                />
+                                <span className="min-w-0 flex-1 truncate text-[12px] text-fg-muted">{e.name}</span>
+                                <span className={clsx("shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider border", lc.active)}>
+                                  {e.level === "CONVERSATION" ? "Conv" : e.level === "AGENT_RUN" ? "Msg" : "Step"}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </>
               )}
 
-              <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-slate-800 bg-slate-800/30 px-3 py-2.5 text-[12px] text-slate-400 transition-colors hover:border-slate-700 hover:text-slate-300">
+              <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-line bg-ink-700/40 px-3 py-2.5 text-[12px] text-fg-muted transition-colors hover:border-line-bright hover:text-fg-muted">
                 <input
                   type="checkbox"
                   checked={form.enabled}
@@ -746,12 +891,12 @@ export function AddColumnModal({
                 Run automatically on new traces
               </label>
 
-              {error && <p className="text-[12px] text-rose-400">{error}</p>}
+              {error && <p className="text-[12px] text-fail">{error}</p>}
 
-              <div className="flex items-center justify-between border-t border-slate-800 pt-4">
+              <div className="sticky bottom-0 z-10 -mx-5 -mb-5 mt-1 flex items-center justify-between border-t border-line bg-ink-900/95 px-5 py-3 backdrop-blur-sm">
                 <button
                   onClick={() => (editing ? onClose() : setStep("type"))}
-                  className="rounded-lg border border-slate-700/80 px-3.5 py-1.5 text-[12px] text-slate-500 transition-colors hover:border-slate-600 hover:text-slate-300"
+                  className="rounded-lg border border-line px-3.5 py-1.5 text-[12px] text-fg-faint transition-colors hover:border-line-bright hover:text-fg-muted"
                 >
                   {editing ? "Cancel" : "Back"}
                 </button>
@@ -776,12 +921,12 @@ export function AddColumnModal({
                 onChange={(schema) => setForm((f) => ({ ...f, outputSchema: schema }))}
               />
 
-              {error && <p className="text-[12px] text-rose-400">{error}</p>}
+              {error && <p className="text-[12px] text-fail">{error}</p>}
 
-              <div className="flex items-center justify-between border-t border-slate-800 pt-4">
+              <div className="sticky bottom-0 z-10 -mx-5 -mb-5 mt-1 flex items-center justify-between border-t border-line bg-ink-900/95 px-5 py-3 backdrop-blur-sm">
                 <button
                   onClick={() => setStep("config")}
-                  className="rounded-lg border border-slate-700/80 px-3.5 py-1.5 text-[12px] text-slate-500 transition-colors hover:border-slate-600 hover:text-slate-300"
+                  className="rounded-lg border border-line px-3.5 py-1.5 text-[12px] text-fg-faint transition-colors hover:border-line-bright hover:text-fg-muted"
                 >
                   Back
                 </button>
@@ -798,6 +943,7 @@ export function AddColumnModal({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

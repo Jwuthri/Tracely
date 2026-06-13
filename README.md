@@ -61,7 +61,7 @@ make migrate       # ClickHouse DDL + Alembic (Postgres)
 make seed          # default project + ingest key → tracely_dev_key
 make backend       # FastAPI  :8000  (OpenAPI at /docs)   ┐
 make workers       # Celery ingestion/eval worker          ├ three terminals
-make frontend      # Next.js  :3000                        ┘
+make frontend      # Next.js  :3001                        ┘
 make seed-demo     # rich demo conversations   ·   make seed-regression   (red→green CI gate)
 make send-trace    # a single sample OTLP trace
 make test          # backend unit tests (no infra)
@@ -71,6 +71,18 @@ make test          # backend unit tests (no infra)
 
 A pre-defined deployment for the whole stack — the three app services plus Postgres/pgvector, ClickHouse, Redis, and MinIO — lives in **[`deploy/railway/`](deploy/railway/README.md)**: add the four database templates, point three Railway services at the `deploy/railway/*.json` config files, wire the env from [`.env.railway.example`](deploy/railway/.env.railway.example), and deploy. Supports `local` (email/password) and `clerk` auth modes.
 
+## Environment variables (key ones)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `AUTH_MODE` | `dev` | Auth mode: `dev` (open, no login) · `local` (email/password, self-host) · `clerk` (Clerk hosted SaaS). |
+| `SESSION_SECRET` | — | Required when `AUTH_MODE=local`: HS256 signing key for JWTs (≥32 chars). |
+| `CLERK_ISSUER` | — | Required when `AUTH_MODE=clerk`: Clerk issuer URL. |
+| `OPENROUTER_API_KEY` | — | Enables LLM-as-judge evaluators (OpenRouter; any model). Skipped gracefully if absent. |
+| `OPENAI_API_KEY` | — | Alternative LLM backend for judges + failure intelligence embeddings. |
+| `TRACELY_BACKEND_PORT` | `8000` | Backend listen port (Docker compose override). |
+| `TRACELY_WEB_PORT` | `3001` | Frontend listen port (Docker compose override). |
+
 ## Ingest from your agent
 
 Point any OTLP/HTTP exporter at `POST {endpoint}/v1/traces` with `Authorization: Bearer tracely_dev_key`. Tracely reads standard `gen_ai.*` / OpenInference attributes plus first-class hints — `tracely.agent.id` (auto-registered), `tracely.agent.version`, `tracely.conversation.id` / `turn.*` / `step.*`, `tracely.observation.type`, and `tracely.env` (`prod|staging|ci|dev`, the gating axis). The [`tracely-sdk`](sdk/README.md) is the ergonomic path and also ships the `tracely gate` / `tracely replay` CI commands.
@@ -79,14 +91,24 @@ Point any OTLP/HTTP exporter at `POST {endpoint}/v1/traces` with `Authorization:
 
 | Folder | What's inside |
 |---|---|
-| [`backend/`](backend/README.md) | The `tracely` package: FastAPI API + the shared domain (OTLP mapping, ClickHouse/Postgres/S3, registry, evaluators, failure intelligence, regression, gate, Celery tasks). |
+| [`backend/`](backend/README.md) | The `tracely` package: FastAPI API + the shared domain (OTLP mapping, ClickHouse/Postgres/S3, registry, evaluators, failure intelligence, regression, gate, auth, Celery tasks). |
 | [`workers/`](workers/README.md) | The deployable Celery worker runtime (imports the backend's tasks). |
-| [`frontend/`](frontend/README.md) | The Next.js web app — the hierarchical trace explorer, clusters, cases, gates, trends. |
+| [`frontend/`](frontend/README.md) | The Next.js web app — the hierarchical trace explorer, clusters, cases, gates, trends, settings, and auth flows. |
 | [`sdk/`](sdk/README.md) | The Python SDK (instrument agents over OTLP, hermetic record-replay) + the `tracely` CI gate CLI. |
 | [`docs/`](docs/README.md) | The **SDK documentation site** (Nextra / Next.js + MDX) — how it works, instrumentation guide, full API reference, hermetic replay, CI gate. `make docs` → :3002. |
 | [`scripts/`](scripts/README.md) | Dev/demo helpers (raw-OTLP sender, gate shim). |
 | [`design/`](design/README.md) | The full design dossier — reverse-engineered Langfuse + the Tracely architecture, eval, regression, CI/CD, and failure-intelligence designs. |
 
-## What's next
+## What's shipped
 
-The near-term execution plan is in **[design/part2-tracely/11-prd-next-steps.md](design/part2-tracely/11-prd-next-steps.md)** — make evaluators first-class & editable (close the Observe→Detect loop), take the trace explorer to GA, and add real projects/auth. The long-term roadmap is in [10-mvp-and-roadmap.md](design/part2-tracely/10-mvp-and-roadmap.md).
+The core **trace → detect → cluster → regression → gate** loop is end-to-end:
+
+- **Ingest:** any OTLP/HTTP source, first-class agent semantics, blob-first durability.
+- **Evaluate:** DB-backed evaluators as **TurnWise-style table columns** — CRUD from the UI, run on every ingest. Multi-output LLM-as-judge (score / number / boolean / text / JSON with custom schema) at conversation / run / span granularity. Batch and sequential (chained) execution modes.
+- **Auth:** three modes — `dev` (open), `local` (email/password + invite flow, self-host), `clerk` (hosted SaaS). Team management, API keys, and invitations.
+- **Triage:** structural + semantic failure clustering, suggested evaluators, promote-to-case.
+- **Regression:** hermetic fixture bundles, fail-to-pass contracts, CI replay.
+- **Gate:** PR blocking via `tracely replay` / `tracely gate`, GitHub status + comment.
+- **Trends:** daily traces/failures/gate pass-rate dashboard.
+
+The near-term execution plan is in **[design/part2-tracely/11-prd-next-steps.md](design/part2-tracely/11-prd-next-steps.md)** and the long-term roadmap is in [10-mvp-and-roadmap.md](design/part2-tracely/10-mvp-and-roadmap.md).

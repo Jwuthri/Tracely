@@ -115,21 +115,38 @@ def evaluator_enabled_specs(
     s: Session, project_id: str, evaluator_ids: list[str] | None = None
 ) -> list[dict]:
     """The runner's view of a project's enabled evaluators (optionally narrowed by id),
-    creation-ordered so sequential chaining is deterministic."""
-    q = (
-        select(Evaluator)
-        .where(Evaluator.project_id == project_id, Evaluator.enabled.is_(True))
-        .order_by(Evaluator.created_at)
-    )
-    if evaluator_ids:
-        q = q.where(Evaluator.id.in_(evaluator_ids))
-    return [
+    creation-ordered so sequential chaining is deterministic.
+
+    When narrowed by `evaluator_ids`, the selection is expanded to also include any enabled
+    evaluators it `config.depends_on` (transitively, by `score_name`): a dependent can't be
+    graded without its prerequisites' results, so they're pulled into the run and topo-sorted
+    to execute first (see `evaluation_service._topo_sort`). Disabled dependencies aren't run —
+    the dependent simply grades without that context."""
+    all_specs = [
         {
             "id": r.id, "kind": r.kind, "config": r.config or {},
             "score_name": r.score_name, "level": r.level,
         }
-        for r in s.execute(q).scalars()
+        for r in s.execute(
+            select(Evaluator)
+            .where(Evaluator.project_id == project_id, Evaluator.enabled.is_(True))
+            .order_by(Evaluator.created_at)
+        ).scalars()
     ]
+    if not evaluator_ids:
+        return all_specs
+    by_name = {spec["score_name"]: spec for spec in all_specs}
+    wanted = set(evaluator_ids)
+    selected_ids = {spec["id"] for spec in all_specs if spec["id"] in wanted}
+    frontier = [spec for spec in all_specs if spec["id"] in selected_ids]
+    while frontier:  # transitively pull in dependencies so prerequisites run too
+        spec = frontier.pop()
+        for dep_name in (spec["config"].get("depends_on") or []):
+            dep = by_name.get(dep_name)
+            if dep and dep["id"] not in selected_ids:
+                selected_ids.add(dep["id"])
+                frontier.append(dep)
+    return [spec for spec in all_specs if spec["id"] in selected_ids]  # creation-ordered
 
 
 def _slug_score_name(name: str) -> str:

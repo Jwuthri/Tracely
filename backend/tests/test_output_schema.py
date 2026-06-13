@@ -5,11 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from tracely.domain.evaluation.output_schema import (
-    SCORE_KEY,
-    model_from_json_schema,
-    wrap_with_score,
-)
+from tracely.domain.evaluation.output_schema import model_from_json_schema
 
 _BUILDER_DEFAULT = {
     "type": "object",
@@ -82,14 +78,3 @@ def test_non_identifier_field_names_still_compile():
     })
     assert model is not None
     assert model(**{"not a valid identifier": "x"}).model_dump()["not a valid identifier"] == "x"
-
-
-def test_wrap_with_score_appends_required_bounded_field():
-    base = model_from_json_schema(_BUILDER_DEFAULT)
-    wrapped = wrap_with_score(base)
-    inst = wrapped(score=0.5, reasoning="r", **{SCORE_KEY: 0.9})
-    assert inst.model_dump()[SCORE_KEY] == 0.9
-    with pytest.raises(ValidationError):
-        wrapped(score=0.5, reasoning="r")  # score__ required
-    with pytest.raises(ValidationError):
-        wrapped(score=0.5, reasoning="r", **{SCORE_KEY: 1.7})  # bounded 0..1

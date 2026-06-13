@@ -13,11 +13,12 @@ Output types → persisted score shape:
   score (default) → NUMERIC value 0..1, PASS/FAIL via `threshold`
   number          → NUMERIC value (any range), PASS/FAIL only when `threshold` is set
   boolean         → BOOLEAN 1/0, PASS/FAIL
-  text            → TEXT string_value, no verdict
+  text            → TEXT string_value (+ optional reason), no verdict
   json            → the user's `config.output_schema` compiled to a pydantic contract (enums
-                    become Literal constraints) + a mandatory `__score__` (0..1) that lands in
-                    the score's `value` and drives PASS/FAIL via `threshold`; the schema-shaped
-                    object itself is stored as JSON in string_value
+                    become Literal constraints). Exactly the user's fields — nothing appended. A
+                    numeric `score` field (if present) drives the 0..1 `value` + PASS/FAIL via
+                    `threshold`; a `reason`/`reasoning`/`summary` field becomes the comment. With
+                    neither, the column is informational (no value, no verdict).
   category        → LEGACY alias (superseded by json + enum schemas); kept for old rows
 
 Execution mode (`config.execution_mode`, default "batch"): "sequential" chains items of the
@@ -45,7 +46,7 @@ from tracely.domain.evaluation.evaluators.base import (
     default_registry,
 )
 from tracely.domain.evaluation.evaluators.catalog import DEFAULT_JUDGE_PROMPT
-from tracely.domain.evaluation.output_schema import SCORE_KEY, model_from_json_schema, wrap_with_score
+from tracely.domain.evaluation.output_schema import model_from_json_schema
 from tracely.domain.evaluation.results import EvalResult, RunContext
 from tracely.domain.evaluation.text import answer_for, content_text, first_io
 from tracely.domain.traces.spans import root_span
@@ -88,6 +89,7 @@ class TextVerdict(BaseModel):
     """Free-text observation."""
 
     text: str = Field(description="the observation — a short, specific paragraph")
+    reason: str = Field(default="", description="one sentence on why this observation matters")
 
 
 def _category_model(categories: list[str]) -> type[BaseModel]:
@@ -116,16 +118,55 @@ def _parse_json_object(text: str) -> dict:
 
 def _result_payload(r: EvalResult) -> dict:
     """The chained-context view of a result (sequential mode): the schema-shaped object for
-    json outputs, else a compact {value, verdict, reason}."""
+    json outputs (with the score/verdict/reason envelope re-attached), else a compact
+    {value, verdict, reason}."""
     if r.string_value:
         try:
             parsed = json.loads(r.string_value)
             if isinstance(parsed, dict):
-                return parsed
+                out = dict(parsed)
+                if r.value is not None:
+                    out.setdefault("score", r.value)
+                if r.verdict:
+                    out.setdefault("verdict", r.verdict)
+                if r.comment:
+                    out.setdefault("reason", r.comment)
+                return out
         except ValueError:
             pass
     payload = {"value": r.value, "verdict": r.verdict or None, "reason": r.comment or None}
     return {k: v for k, v in payload.items() if v is not None}
+
+
+def _deps_all(config: dict) -> dict:
+    """All dependency results, flattened to `{score_name: payload | [payloads]}` — for
+    trace/conversation grades (one item, so every dependency result applies)."""
+    raw = config.get("__dependencies__") or {}
+    out: dict = {}
+    for name, records in raw.items():
+        if not isinstance(records, list) or not records:
+            continue
+        payloads = [rec.get("payload") for rec in records]
+        out[name] = payloads[0] if len(payloads) == 1 else payloads
+    return out
+
+
+def _deps_for_span(config: dict, span_id: str) -> dict:
+    """The dependency results that apply to ONE step: each dependency's result for this exact
+    `span_id`, falling back to a trace/conversation-level result (recorded under span_id "")
+    that applies to every step. So a step-level composite lines up step N's prerequisite
+    verdicts, while a dependency on a per-turn metric is shared across the run's steps."""
+    raw = config.get("__dependencies__") or {}
+    out: dict = {}
+    for name, records in raw.items():
+        if not isinstance(records, list):
+            continue
+        match = [rec for rec in records if rec.get("span_id") == span_id]
+        if not match:  # trace/conversation-level dependency → applies to every step
+            match = [rec for rec in records if not rec.get("span_id")]
+        if match:
+            out[name] = match[0].get("payload") if len(match) == 1 else [m.get("payload") for m in match]
+    return out
 
 
 def _is_sequential(config: dict) -> bool:
@@ -212,7 +253,9 @@ class LLMJudgeEvaluator(Evaluator):
                 f"Step input:\n{_clip(content_text(s.get('input')), _TRUNC_IO)}\n\n"
                 f"Step output:\n{_clip(content_text(s.get('output')), _TRUNC_IO)}"
             )
-            result = self._grade(config, body, previous=previous)
+            result = self._grade(
+                config, body, previous=previous, deps=_deps_for_span(config, s.get("span_id", ""))
+            )
             if result:
                 result.target_span_id = s.get("span_id", "")
                 out.append(result)
@@ -250,7 +293,9 @@ class LLMJudgeEvaluator(Evaluator):
 
     # ── grading + output-type handling ───────────────────────────────────────
 
-    def _grade(self, config: dict, body: str, previous: dict | None = None) -> EvalResult | None:
+    def _grade(
+        self, config: dict, body: str, previous: dict | None = None, deps: dict | None = None
+    ) -> EvalResult | None:
         rubric = config.get("prompt") or DEFAULT_JUDGE_PROMPT
         output_type = str(config.get("output_type") or "score").lower()
         if output_type not in OUTPUT_TYPES:
@@ -262,13 +307,24 @@ class LLMJudgeEvaluator(Evaluator):
                 "it for continuity and comparison):\n"
                 + _clip(json.dumps(previous, ensure_ascii=False), 1500)
             )
+        if deps is None:  # trace/conversation grades use every dependency result
+            deps = _deps_all(config)
+        if deps:
+            dep_lines = "\n".join(
+                f"- {name}: {_clip(json.dumps(v, ensure_ascii=False), 600)}"
+                for name, v in deps.items()
+            )
+            body += (
+                "\n\nResults from prerequisite evaluations (use these as additional context):\n"
+                + dep_lines
+            )
         try:
             if output_type == "json":
                 schema_model = model_from_json_schema(config.get("output_schema"))
                 if schema_model is not None:
                     verdict = provider.run_structured_agent(
                         body,
-                        response_format=wrap_with_score(schema_model),
+                        response_format=schema_model,
                         system_prompt=rubric,
                         model=model,
                     )
@@ -276,7 +332,7 @@ class LLMJudgeEvaluator(Evaluator):
                 # no usable schema: free-form strict JSON (the rubric defines the shape)
                 text = provider.run_text_agent(
                     body + "\n\nRespond with ONE strict JSON object shaped exactly as your "
-                    'instructions describe. Always include a "reason" field.',
+                    "instructions describe.",
                     system_prompt=rubric,
                     model=model,
                 )
@@ -329,6 +385,7 @@ class LLMJudgeEvaluator(Evaluator):
         if output_type == "text":
             return EvalResult(
                 "", self.level, "", data_type="TEXT", string_value=str(verdict.text)[:2000],
+                comment=reason,
             )
         # default: score
         score_val = min(max(float(verdict.score), 0.0), 1.0)
@@ -339,22 +396,21 @@ class LLMJudgeEvaluator(Evaluator):
         )
 
     def _json_result(self, config: dict, parsed: dict) -> EvalResult:
-        """Persist a custom-schema result: the appended `score__` (or a score-ish field in the
-        user's schema) becomes the normalized value driving PASS/FAIL; the schema-shaped object
-        stays clean in string_value; reason/reasoning/summary doubles as the comment teaser."""
+        """Persist a custom-schema result — exactly the user's fields, nothing appended. If the
+        schema carries a numeric `score`/`overall_score`, it drives the normalized 0..1 `value`
+        (PASS/FAIL via `threshold`); a `reason`/`reasoning`/`summary` string becomes the comment.
+        With neither, the column is informational (no value, no verdict). All fields stay in
+        string_value so the user sees exactly what they defined."""
         parsed = dict(parsed)
-        raw_score = parsed.pop(SCORE_KEY, None)
-        if raw_score is None:
-            candidate = parsed.get("score", parsed.get("overall_score"))
-            if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
-                raw_score = candidate
+        candidate = parsed.get("score", parsed.get("overall_score"))
+        raw_score = candidate if isinstance(candidate, (int, float)) and not isinstance(candidate, bool) else None
+        reason = parsed.get("reason") or parsed.get("reasoning") or parsed.get("summary")
         value = min(max(float(raw_score), 0.0), 1.0) if raw_score is not None else None
         verdict = ""
         if value is not None and config.get("threshold") is not None:
             verdict = "PASS" if value >= float(config["threshold"]) else "FAIL"
-        comment = str(parsed.get("reason") or parsed.get("reasoning") or parsed.get("summary") or "")[:500]
         return EvalResult(
             "", self.level, verdict, data_type="TEXT", value=value,
             string_value=json.dumps(parsed, ensure_ascii=False)[:4000],
-            comment=comment,
+            comment=str(reason or "")[:500],
         )

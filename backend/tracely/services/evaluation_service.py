@@ -64,6 +64,44 @@ def _with_previous(spec: dict, chain: dict[str, dict]) -> dict:
     return {**spec, "config": {**(spec.get("config") or {}), "__previous_result__": prev}}
 
 
+def _topo_sort(specs: list[dict]) -> list[dict]:
+    """Reorder specs so `depends_on` dependencies run before their dependents.
+    Falls back to original order when a cycle is detected (logged as a warning)."""
+    from collections import deque
+    by_name = {s["score_name"]: s for s in specs}
+    dependents: dict[str, list[str]] = {s["score_name"]: [] for s in specs}
+    in_degree: dict[str, int] = {}
+    for s in specs:
+        deps = [d for d in ((s.get("config") or {}).get("depends_on") or []) if d in by_name]
+        in_degree[s["score_name"]] = len(deps)
+        for dep in deps:
+            dependents[dep].append(s["score_name"])
+    queue = deque(s for s in specs if in_degree[s["score_name"]] == 0)
+    ordered: list[dict] = []
+    while queue:
+        spec = queue.popleft()
+        ordered.append(spec)
+        for dep_name in dependents[spec["score_name"]]:
+            in_degree[dep_name] -= 1
+            if in_degree[dep_name] == 0:
+                queue.append(by_name[dep_name])
+    if len(ordered) != len(specs):
+        log.warning("eval_dependency_cycle", evaluators=[s["score_name"] for s in specs])
+        return specs
+    return ordered
+
+
+def _inject_dependencies(spec: dict, completed: dict[str, list[dict]]) -> dict:
+    """Return a copy of spec with its declared dependencies' results injected as
+    `config.__dependencies__` — `{score_name: [{span_id, payload}, ...]}`. Only deps that have
+    already produced results are included; the evaluator resolves the per-span slice it needs."""
+    depends_on = (spec.get("config") or {}).get("depends_on") or []
+    deps = {name: completed[name] for name in depends_on if name in completed}
+    if not deps:
+        return spec
+    return {**spec, "config": {**(spec.get("config") or {}), "__dependencies__": deps}}
+
+
 class EvaluationService:
     """Online evaluation orchestrator. Stateless across calls; lazy-constructs the trace
     reader / score writer / structural clusterer."""
@@ -177,12 +215,30 @@ class EvaluationService:
         return len(results)
 
     def _dispatch_specs(self, specs: list[dict], ctx: RunContext) -> list[EvalResult]:
+        specs = _topo_sort(specs)
+        # Each completed evaluator's results, kept per `span_id` so a dependent grading at step
+        # level can line up THIS step's prerequisite verdicts (a trace/conversation result lands
+        # under span_id "" — see `_inject_dependencies` / the judge's per-span resolution).
+        completed: dict[str, list[dict]] = {}
         results: list[EvalResult] = []
         for spec in specs:
+            spec = _inject_dependencies(spec, completed)
             try:
-                results.extend(self.registry.dispatch(
+                new_results = self.registry.dispatch(
                     spec["kind"], spec["config"], spec["score_name"], spec["level"], ctx
-                ))
+                )
+                results.extend(new_results)
+                if new_results:
+                    completed[spec["score_name"]] = [
+                        {
+                            "span_id": r.target_span_id,
+                            "payload": _chain_payload({
+                                "string_value": r.string_value, "value": r.value,
+                                "verdict": r.verdict, "comment": r.comment,
+                            }),
+                        }
+                        for r in new_results
+                    ]
             except Exception as exc:  # one bad evaluator must not sink the rest
                 log.warning(
                     "evaluator_failed", evaluator=spec.get("score_name", "?"), error=str(exc)

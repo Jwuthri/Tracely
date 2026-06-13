@@ -32,9 +32,11 @@ And produces exactly one output type:
 - "number": a raw numeric measurement (counts, magnitudes — when 0..1 doesn't fit).
 - "text": a short free-text observation (no pass/fail).
 - "json": a structured object — USE THIS for classifications and multi-dimensional analyses.
-  Define 2-6 schema_fields: classifications get an "enum" field with the allowed labels;
-  multi-dimensional grades get a few number fields; ALWAYS include a string "reasoning" field.
-  Field names must be snake_case identifiers.
+  Define 1-6 schema_fields that capture the signal: classifications get an "enum" field with the
+  allowed labels; multi-dimensional grades get a few named number sub-scores. If the column
+  should drive PASS/FAIL and gates, include a numeric "score" field (0-1) and a "reason" string;
+  otherwise leave them out for an informational column. Field names must be snake_case
+  identifiers.
 
 Write the grading rubric like a strict senior reviewer would: second person, specific, naming
 the failure modes to look for, and concrete about what earns a high vs low grade. Do NOT
@@ -93,16 +95,6 @@ def _schema_from_fields(fields: list[GeneratedSchemaField]) -> dict[str, Any] | 
     return {"type": "object", "properties": properties, "required": required}
 
 
-_DEFAULT_JSON_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "score": {"type": "number", "description": "Score from 0 to 1"},
-        "reasoning": {"type": "string", "description": "Explanation for the score"},
-    },
-    "required": ["score", "reasoning"],
-}
-
-
 def generate_evaluator_config(description: str) -> dict[str, Any]:
     """Returns a normalized draft `{name, description, kind, level, config{prompt, output_type,
     threshold?, output_schema?}}`. Raises on transport errors (caller maps to HTTP 502)."""
@@ -121,13 +113,19 @@ def generate_evaluator_config(description: str) -> dict[str, Any]:
         "prompt": draft.prompt.strip(),
         "output_type": output_type,
     }
+    if output_type == "json":
+        schema = _schema_from_fields(draft.schema_fields or [])
+        if schema is not None:
+            config["output_schema"] = schema
+        else:
+            # no usable fields → an empty object isn't a metric; fall back to a plain 0-1 score
+            output_type = "score"
+            config["output_type"] = "score"
     if output_type == "score":
         try:
             config["threshold"] = min(max(float(draft.threshold if draft.threshold is not None else 0.6), 0.0), 1.0)
         except (TypeError, ValueError):
             config["threshold"] = 0.6
-    if output_type == "json":
-        config["output_schema"] = _schema_from_fields(draft.schema_fields or []) or _DEFAULT_JSON_SCHEMA
     return {
         "name": draft.name.strip()[:120] or "Custom metric",
         "description": draft.description.strip()[:400],

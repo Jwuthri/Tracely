@@ -3,10 +3,12 @@
 import { useEffect, useRef, useState, type SVGProps } from "react";
 
 // ── Output Schema builder (the JSON Object output type) ────────────────────────
-// TurnWise-style row editor: each row is one property of the evaluation output object.
-// `enum` is a pseudo-type that compiles to `type: "string"` + `enum: [...]` — and unlike
-// TurnWise, the backend enforces it at grading time (Literal constraint). Defaults to the
-// canonical score + reasoning shape. Emits a flat JSON Schema on every change.
+// TurnWise-style row editor: each row is one property of the evaluation output. Nothing is
+// appended by the platform — the column returns exactly these fields. To make the column drive
+// PASS/FAIL and gates, the user adds a numeric `score` (0–1) field; a `reason` string carries
+// the explanation. `enum` is a pseudo-type that compiles to `type: "string"` + `enum: [...]` —
+// and unlike TurnWise, the backend enforces it at grading time (Literal constraint). Emits a
+// flat JSON Schema on every change.
 
 const svg = (p: SVGProps<SVGSVGElement>) => ({
   xmlns: "http://www.w3.org/2000/svg",
@@ -47,9 +49,12 @@ const FIELD_TYPES: { value: SchemaFieldRow["type"]; label: string }[] = [
   { value: "object", label: "Object" },
 ];
 
+// Nothing is added implicitly — the builder starts with the fields a typical metric wants
+// (a 0–1 `score` and a `reason`), fully editable and removable, so the user defines exactly the
+// output shape.
 const DEFAULT_ROWS: SchemaFieldRow[] = [
-  { id: "1", name: "score", type: "number", description: "Score from 0 to 1", required: true, enumValues: "" },
-  { id: "2", name: "reasoning", type: "string", description: "Explanation for the score", required: true, enumValues: "" },
+  { id: "1", name: "score", type: "number", description: "0–1 score — drives PASS/FAIL and gates", required: true, enumValues: "" },
+  { id: "2", name: "reason", type: "string", description: "Why this score", required: true, enumValues: "" },
 ];
 
 export function buildJsonSchema(rows: SchemaFieldRow[]): Record<string, unknown> {
@@ -102,7 +107,7 @@ export function rowsFromJsonSchema(schema: Record<string, unknown> | undefined):
 }
 
 const INPUT =
-  "rounded-lg border border-slate-700 bg-slate-900/80 px-2.5 py-1.5 text-[12px] text-slate-200 placeholder:text-slate-600 focus:border-blue-500/50 focus:outline-none";
+  "rounded-lg border border-line bg-ink-900/80 px-2.5 py-1.5 text-[12px] text-fg placeholder:text-fg-faint/60 focus:border-signal/40 focus:outline-none";
 
 export function OutputSchemaBuilder({
   schema,
@@ -136,13 +141,19 @@ export function OutputSchemaBuilder({
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-[13px] font-medium text-slate-200">Output Schema</h3>
-        <p className="text-[11.5px] text-slate-500">Define the structure of the evaluation output. Enum fields are strictly enforced — the judge cannot return a label outside the list.</p>
+        <h3 className="text-[13px] font-medium text-fg">Output fields</h3>
+        <p className="text-[11.5px] text-fg-faint">
+          Define exactly the fields this metric returns — nothing is added automatically. Include a
+          numeric <span className="font-mono text-fg-muted">score</span> (0–1) to drive PASS/FAIL
+          and gates, and a <span className="font-mono text-fg-muted">reason</span> for the
+          explanation. Enum fields are strictly enforced — the judge cannot return a label outside
+          the list.
+        </p>
       </div>
 
       <div className="space-y-2">
         {rows.map((row) => (
-          <div key={row.id} className="space-y-2 rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+          <div key={row.id} className="space-y-2 rounded-lg border border-line bg-ink-700/50 p-3">
             <div className="flex items-center gap-2">
               <input
                 value={row.name}
@@ -159,7 +170,7 @@ export function OutputSchemaBuilder({
                   <option key={t.value} value={t.value}>{t.label}</option>
                 ))}
               </select>
-              <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-[11px] text-slate-400">
+              <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-[11px] text-fg-muted">
                 <input
                   type="checkbox"
                   checked={row.required}
@@ -170,7 +181,7 @@ export function OutputSchemaBuilder({
               </label>
               <button
                 onClick={() => update(rows.filter((r) => r.id !== row.id))}
-                className="shrink-0 rounded-md p-1.5 text-slate-500 transition-colors hover:bg-rose-500/10 hover:text-rose-400"
+                className="shrink-0 rounded-md p-1.5 text-fg-faint transition-colors hover:bg-fail/10 hover:text-fail"
                 title="Remove field"
               >
                 <TrashIcon className="h-3.5 w-3.5" />
@@ -198,15 +209,15 @@ export function OutputSchemaBuilder({
         onClick={() => update([...rows, {
           id: String(nextId.current++), name: "", type: "string", description: "", required: false, enumValues: "",
         }])}
-        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-700 px-3 py-2 text-[12.5px] text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-200"
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-line px-3 py-2 text-[12.5px] text-fg-muted transition-colors hover:border-line-bright hover:text-fg"
       >
         <PlusIcon className="h-3.5 w-3.5" />
         Add Field
       </button>
 
       <div>
-        <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">Schema preview</div>
-        <pre className="max-h-56 overflow-auto rounded-lg border border-slate-700/70 bg-slate-950/60 p-3 font-mono text-[11px] leading-relaxed text-slate-300">
+        <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-fg-faint">Schema preview</div>
+        <pre className="max-h-56 overflow-auto rounded-lg border border-line bg-ink/60 p-3 font-mono text-[11px] leading-relaxed text-fg-muted">
           {JSON.stringify(buildJsonSchema(rows), null, 2)}
         </pre>
       </div>

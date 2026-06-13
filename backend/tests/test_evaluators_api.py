@@ -223,7 +223,9 @@ async def test_generate_json_draft_builds_schema(client, sync_db, monkeypatch):
     assert r.status_code == 200, r.text
     schema = r.json()["config"]["output_schema"]
     assert schema["properties"]["intent"]["enum"] == ["a", "b"]
-    assert "bad name!" not in schema["properties"]
+    assert "bad name!" not in schema["properties"]  # dropped: not an identifier
+    # nothing is reserved anymore — the user/AI defines every field, including reasoning
+    assert "reasoning" in schema["properties"]
     assert schema["required"] == ["intent", "reasoning"]
 
 
