@@ -19,6 +19,7 @@ from tracely.infrastructure.db.models import (
     Agent,
     CaseReplay,
     ClusterMember,
+    ConversationAgent,
     EvaluationCase,
     Evaluator,
     FailureCluster,
@@ -552,3 +553,42 @@ def rolling_summary_delete_for_thread(s: Session, project_id: str, thread_id: st
         s.delete(r)
     s.commit()
     return len(rows)
+
+
+# ── conversation agents (user-declared catalog) ───────────────────────────────
+
+
+def conversation_agents_get(
+    s: Session, project_id: str, thread_id: str
+) -> ConversationAgent | None:
+    return (
+        s.execute(
+            select(ConversationAgent).where(
+                ConversationAgent.project_id == project_id,
+                ConversationAgent.thread_id == thread_id,
+            )
+        ).scalars().first()
+    )
+
+
+def conversation_agents_upsert(
+    s: Session, project_id: str, *, thread_id: str, agents: list, meta: dict | None = None
+) -> ConversationAgent:
+    """Insert or replace a conversation's declared agent catalog (latest wins per thread)."""
+    row = conversation_agents_get(s, project_id, thread_id)
+    if row is None:
+        row = ConversationAgent(
+            id=str(uuid4()),
+            project_id=project_id,
+            thread_id=thread_id,
+            agents=agents or [],
+            meta=meta or {},
+        )
+        s.add(row)
+    else:
+        row.agents = agents or []
+        if meta is not None:
+            row.meta = meta
+    s.commit()
+    s.refresh(row)
+    return row

@@ -104,6 +104,28 @@ BEDROCK_TOOLS = [
 SYSTEM = "You are a customer-support agent. Use the tools to look up real data before answering; be concise."
 QUESTION = "Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-01) back in stock?"
 
+# Follow-up turns for MULTI-TURN examples: the same conversation, several turns, so the rolling
+# summary accumulates across them. Each reads as a coherent next message from the same customer.
+FOLLOWUPS = [
+    "Thanks! Can you also check on my other order, ORD-5588?",
+    "Is the item in that order (the Ceramic Mug, SKU-MUG-09) in stock?",
+    "Got it. Between the coat and the mug, which one is cheaper?",
+]
+
+# The DECLARED agent catalog a user sends with the conversation via `tracely.trace(agents=AGENTS)`.
+# Shape: [{name, description, tools: {tool_name: {name, description, parameters}}}] — surfaced in the
+# Conversation Agents panel and usable in evaluation (@LIST_AGENT).
+AGENTS = [
+    {
+        "name": "Support Agent",
+        "description": "Handles customer order and inventory inquiries by calling backend tools.",
+        "tools": {
+            n: {"name": n, "description": _DESCRIPTIONS[n], "parameters": _PARAMETERS[n]}
+            for n in TOOL_IMPLS
+        },
+    }
+]
+
 
 def run_tool(name: str, args: dict) -> dict:
     """Dispatch a model-requested tool call to the raw fake-DB impls (no span)."""

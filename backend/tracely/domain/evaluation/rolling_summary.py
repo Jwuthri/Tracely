@@ -30,6 +30,7 @@ ROLE_USER = "user"
 ROLE_ASSISTANT = "assistant"
 ROLE_TOOL = "tool"
 ROLE_SYSTEM = "system"
+ROLE_PREV_SUMMARY = "prev_summary"  # the compacted older-history item's role
 
 # component / item types
 T_THINKING = "thinking"
@@ -81,21 +82,28 @@ def components_token_total(components: list[Component]) -> int:
     return sum(estimate_tokens(c.content) for c in components)
 
 
-def summary_token_total(items: list[dict]) -> int:
-    """Total estimated tokens across accumulated summary items — drives the 20k budget compaction."""
-    return sum(estimate_tokens(it.get("content") or "") for it in items)
-
-
 def compacted_item(content: str) -> dict:
-    """A single `summary`-type item standing in for a compacted block of older items."""
-    return {
-        "role": ROLE_SYSTEM,
-        "type": T_SUMMARY,
-        "content": content,
-        "tool_call_id": None,
-        "tool_name": None,
-        "tool_arguments": None,
-    }
+    """The compacted older-history block — one item with the `prev_summary` role (not a wrapper
+    key). Sits at the front of the list ahead of the verbatim recent items."""
+    return {"role": ROLE_PREV_SUMMARY, "type": T_SUMMARY, "content": content}
+
+
+def as_summary_items(stored: object) -> list[dict]:
+    """Normalize a stored summary to the canonical FLAT list of items. Accepts the list, a legacy
+    `{prev_summary, items}` object (the compacted string becomes a leading prev_summary item), or
+    None — so reads never break across shape changes."""
+    if isinstance(stored, list):
+        return list(stored)
+    if isinstance(stored, dict):
+        items = list(stored.get("items") or [])
+        prev = stored.get("prev_summary")
+        return ([compacted_item(prev)] + items) if prev else items
+    return []
+
+
+def summary_token_total(items: object) -> int:
+    """Total estimated tokens across the summary's items — drives the 20k budget compaction."""
+    return sum(estimate_tokens(it.get("content") or "") for it in as_summary_items(items))
 
 
 def _clip(s: str, n: int = _ITEM_CLIP) -> str:
@@ -211,10 +219,10 @@ def _line(item: dict) -> str:
     return f"[{role}:{itype}] {content}"
 
 
-def format_summary_as_history(items: list[dict], max_chars: int = _HISTORY_CLIP) -> str:
-    """Render accumulated summary items into the `@HISTORY` string ([role]/[role:type] lines).
-    `max_chars > 0` clips the result; `max_chars <= 0` returns the full text (used for @HISTORY,
-    which now relies on the 20k-token budget compaction to bound size instead of a hard clip)."""
-    lines = [_line(it) for it in items if (it.get("content") or "").strip()]
+def format_summary_as_history(items: object, max_chars: int = 0) -> str:
+    """Render the summary's items into the `@HISTORY` string: a leading prev_summary block (if any)
+    then [role]/[role:type] lines for the verbatim items. `max_chars > 0` clips; `<= 0` returns the
+    full text (the 20k compaction already bounds size). Tolerates the legacy object shape."""
+    lines = [_line(it) for it in as_summary_items(items) if (it.get("content") or "").strip()]
     text = "\n".join(lines)
     return _clip(text, max_chars) if max_chars and max_chars > 0 else text

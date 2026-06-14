@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tracely.api.auth import get_principal, require_role
 from tracely.api.dto.auth import (
     AcceptInviteIn,
+    ChangePasswordIn,
     CreateProjectIn,
     InviteIn,
     InviteOut,
@@ -107,6 +108,25 @@ async def register(
         workspace_name=body.workspace_name,
     )
     return SessionOut(token=tokens.issue_session(user.id), user_id=user.id, project_id=project.id)
+
+
+@local_router.post("/auth/change-password")
+async def change_password(
+    body: ChangePasswordIn,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Change the signed-in local user's password (verifies the current one first)."""
+    if not principal.user_id:
+        raise HTTPException(400, "not signed in")
+    user = await queries.get_user(session, principal.user_id)
+    if not user or not user.password_hash:
+        raise HTTPException(404, "no local password for this account")
+    if not passwords.verify_password(body.current_password, user.password_hash):
+        raise HTTPException(401, "current password is incorrect")
+    user.password_hash = passwords.hash_password(body.new_password)
+    await session.commit()
+    return {"ok": True}
 
 
 @local_router.post("/auth/login", response_model=SessionOut)

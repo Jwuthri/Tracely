@@ -18,7 +18,7 @@ import json
 import os
 
 import tracely_sdk as tracely
-from _fake_db import OPENAI_TOOLS, QUESTION, SYSTEM, observed_tools
+from _fake_db import AGENTS, FOLLOWUPS, OPENAI_TOOLS, QUESTION, SYSTEM, observed_tools
 
 from pathlib import Path
 
@@ -72,17 +72,24 @@ def main() -> None:
                 )
         return "(loop limit hit)"
 
-    with tracely.trace(
-        agent="support-agent",
-        conversation=os.path.basename(__file__),
-        user="ada@example.com",
-        example=os.path.basename(__file__),
-    ):
-        print("agent:", support_agent(QUESTION))
+    # Multi-turn: one conversation, several turns (so the rolling summary accumulates). The agent
+    # catalog is declared once on the first turn via `agents=AGENTS`.
+    conv = os.path.basename(__file__)
+    for i, question in enumerate([QUESTION, *FOLLOWUPS]):
+        with tracely.trace(
+            agent="support-agent",
+            conversation=conv,
+            turn=i,
+            user="ada@example.com",
+            example=conv,
+            agents=AGENTS if i == 0 else None,
+        ):
+            print(f"agent (turn {i}):", support_agent(question))
 
     tracely.flush()
     print(
-        "sent — open Tracely → Traces: each generation + tool round-trip is captured, no span code."
+        f"sent — open Tracely → Traces: a {1 + len(FOLLOWUPS)}-turn conversation, each turn a trace; "
+        "the rolling summary accumulates across turns and the declared agents show in the Agents panel."
     )
 
 

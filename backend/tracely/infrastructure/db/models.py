@@ -379,3 +379,28 @@ class RollingSummary(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class ConversationAgent(Base):
+    """The user-declared agent/tool catalog for a conversation, sent via the SDK
+    (`tracely.trace(..., agents=[...])`) as a `tracely.agents` span attribute and captured at ingest.
+    One row per (project, thread); `agents` is the declared list
+    `[{name, description, tools: {tool_name: {name, description, parameters}}}]`. Distinct from the
+    `agents` REGISTRY table (those are observed agent ids); this is optional, richer, user-supplied
+    metadata surfaced in the Conversation Agents panel and `@LIST_AGENT`."""
+
+    __tablename__ = "conversation_agents"
+    __table_args__ = (
+        UniqueConstraint("project_id", "thread_id", name="uq_conversation_agents_project_thread"),
+        Index("ix_conversation_agents_project_thread", "project_id", "thread_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    thread_id: Mapped[str] = mapped_column(String(64))
+    agents: Mapped[list] = mapped_column(JSON, default=list)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

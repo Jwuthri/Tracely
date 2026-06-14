@@ -229,6 +229,41 @@ def _group_turns(thread_spans: list[dict]) -> list[tuple[str, list[dict]]]:
     return [(tid, by_trace[tid]) for tid in order]
 
 
+def _format_agent_catalog(agents: list[dict]) -> str | None:
+    """Render the user-declared agent catalog (name / description / tools + params) for @LIST_AGENT —
+    richer than the spans-derived view (`_format_agents`), since it carries descriptions and tool
+    parameters the traces don't. `tools` may be a dict-of-tools or a list."""
+    if not agents:
+        return None
+    lines: list[str] = []
+    for ag in agents:
+        if not isinstance(ag, dict):
+            continue
+        name = ag.get("name") or "agent"
+        desc = ag.get("description") or ""
+        lines.append(f"- {name}" + (f": {desc}" if desc else ""))
+        raw = ag.get("tools")
+        items = (
+            list(raw.items())
+            if isinstance(raw, dict)
+            else [(t.get("name", ""), t) for t in raw if isinstance(t, dict)]
+            if isinstance(raw, list)
+            else []
+        )
+        for key, tdef in items:
+            tdef = tdef if isinstance(tdef, dict) else {}
+            tname = tdef.get("name") or key
+            tdesc = tdef.get("description") or ""
+            params = tdef.get("parameters")
+            pstr = (
+                " (params: " + ", ".join(map(str, params.keys())) + ")"
+                if isinstance(params, dict) and params
+                else ""
+            )
+            lines.append(f"    • {tname}" + (f" — {tdesc}" if tdesc else "") + pstr)
+    return "\n".join(lines) or None
+
+
 def _format_agents(spans: list[dict]) -> str | None:
     by_agent: dict[str, set[str]] = {}
     for s in spans:
@@ -367,6 +402,7 @@ def build_context(
     metric_previous_result: dict | None = None,
     wanted_vars: list[str] | None = None,
     history_override: str | None = None,
+    declared_agents: list[dict] | None = None,
 ) -> EvaluationContext:
     """Build the `EvaluationContext` for ONE evaluated item from already-fetched span dicts.
 
@@ -422,7 +458,8 @@ def build_context(
     if need("LAST_ASSISTANT_MSG"):
         ctx.last_assistant_msg = _clip(answers[-1], _MSG_CLIP) if answers else None
     if need("LIST_AGENT"):
-        ctx.agents = _format_agents(thread_spans)
+        # prefer the user-declared catalog (richer) when present, else derive from spans
+        ctx.agents = _format_agent_catalog(declared_agents) if declared_agents else _format_agents(thread_spans)
 
     if cl == CL_CONVERSATION:
         return ctx

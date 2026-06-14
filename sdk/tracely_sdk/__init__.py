@@ -61,6 +61,7 @@ __all__ = [
     "set_io",
     "set_usage",
     "set_metadata",
+    "set_agents",
     "error",
     "flush",
     "run_in_thread",
@@ -122,6 +123,12 @@ class TracelyContextSpanProcessor(SpanProcessor):
                     f"tracely.metadata.{k}",
                     v if isinstance(v, (str, int, float, bool)) else json.dumps(v, default=str),
                 )
+        # Conversation agent catalog (declared by the user) — stamped as one JSON attribute. The
+        # backend extracts it per conversation (and strips it before ClickHouse) for the Agents
+        # panel + @LIST_AGENT. Typically set once on the first turn; the redundancy is harmless.
+        agents = ctx.get("agents")
+        if agents:
+            span.set_attribute("tracely.agents", json.dumps(agents, default=str))
 
     def on_end(self, span: Any) -> None:
         pass
@@ -411,12 +418,18 @@ def trace(
     user: str | None = None,
     trace_name: str | None = None,
     env: str | None = None,
+    agents: list[dict] | None = None,
     **metadata: Any,
 ) -> _Trace:
     """Open a run context: set `agent`/`conversation`/`turn`/`user`/`trace_name`/`env` (+ arbitrary
     `metadata`) once, and every span started inside — including zero-touch provider spans from the
     auto-instrumentors — inherits them via the context processor (R9/R4). Use as a context manager
-    or a (sync/async) decorator. Nested `trace()`s merge over the enclosing one."""
+    or a (sync/async) decorator. Nested `trace()`s merge over the enclosing one.
+
+    `agents` declares the conversation's agent catalog — a list of
+    `{name, description, tools: {tool_name: {name, description, parameters}}}` — surfaced in the
+    Conversation Agents panel and usable in evaluation (`@LIST_AGENT`). Set it once on the first
+    turn (or every turn; the backend keeps the latest per conversation)."""
     return _Trace(
         {
             "agent": agent,
@@ -425,6 +438,7 @@ def trace(
             "user": user,
             "trace_name": trace_name,
             "env": env,
+            "agents": agents,
             "metadata": {k: v for k, v in metadata.items()},
         }
     )
@@ -722,6 +736,16 @@ def set_metadata(span: Span, **kv: Any) -> None:
             f"tracely.metadata.{k}",
             v if isinstance(v, (str, int, float, bool)) else json.dumps(v, default=str),
         )
+
+
+def set_agents(span: Span, agents: list[dict]) -> None:
+    """Declare the conversation's agent catalog on a span: a list of
+    `{name, description, tools: {tool_name: {name, description, parameters}}}`. Surfaced in the
+    Conversation Agents panel and usable in evaluation (`@LIST_AGENT`). Prefer
+    `tracely.trace(..., agents=[...])`, which flows it onto every span; use this to set it on one
+    specific (e.g. the root) span."""
+    if agents:
+        span.set_attribute("tracely.agents", json.dumps(agents, default=str))
 
 
 def set_usage(

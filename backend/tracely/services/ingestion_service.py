@@ -8,6 +8,7 @@ with a long-lived service object — it's one fire-and-forget action).
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections import defaultdict
 
@@ -17,6 +18,7 @@ from tracely.config import settings
 from tracely.infrastructure.blob import s3 as blobstore
 from tracely.infrastructure.clickhouse.client import get_client, insert_rows
 from tracely.infrastructure.clickhouse.events_schema import EVENT_COLUMNS, to_rows
+from tracely.infrastructure.db import repositories
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.registry import agents as registry
 from tracely.otel import parse_otlp_traces, parse_otlp_traces_json
@@ -53,6 +55,8 @@ class IngestionService:
         # agent-less traces -> fallback agent (inherits within a trace)
         self._attribute_default_agent(events)
         self._resolve_registry_ids(project_id, events)
+        # user-declared agent catalog (SDK `tracely.agents`) -> Postgres, stripped from ClickHouse
+        self._extract_agent_definitions(project_id, events)
 
         client = get_client()
         insert_rows(client, "events", EVENT_COLUMNS, to_rows(events))
@@ -87,6 +91,39 @@ class IngestionService:
                 if not e.get("agent_slug"):
                     e["agent_slug"] = trace_agent
                     e.setdefault("metadata", {})["tracely.agent.id"] = trace_agent
+
+    @staticmethod
+    def _extract_agent_definitions(project_id: str, events: list[dict]) -> None:
+        """Pull the user-declared agent catalog (`tracely.agents`, JSON) off the spans and upsert it
+        per conversation into Postgres `conversation_agents`. The attribute is STRIPPED from every
+        span's metadata so the (potentially large) catalog isn't duplicated into ClickHouse. Latest
+        write wins per thread; malformed JSON is ignored. Best-effort — never blocks ingest."""
+        by_thread: dict[str, list] = {}
+        for ev in events:
+            meta = ev.get("metadata")
+            if not meta:
+                continue
+            raw = meta.pop("tracely.agents", None)  # strip even if we can't parse it
+            if not raw:
+                continue
+            try:
+                agents = json.loads(raw) if isinstance(raw, str) else raw
+            except (ValueError, TypeError):
+                continue
+            if isinstance(agents, list) and agents:
+                thread = ev.get("conversation_id") or ev.get("trace_id") or ""
+                if thread:
+                    by_thread[thread] = agents  # last span wins (all carry the same catalog)
+        if not by_thread:
+            return
+        try:
+            with SyncSessionLocal() as session:
+                for thread, agents in by_thread.items():
+                    repositories.conversation_agents_upsert(
+                        session, project_id, thread_id=thread, agents=agents
+                    )
+        except Exception as exc:  # never fail ingest on the optional catalog
+            log.warning("conversation_agents_upsert_failed", project_id=project_id, error=str(exc))
 
     @staticmethod
     def _resolve_registry_ids(project_id: str, events: list[dict]) -> None:

@@ -323,6 +323,21 @@ class LLMJudgeEvaluator(Evaluator):
         except Exception:  # a cache miss/error must never block a grade
             return None
 
+    def _declared_agents(self, ctx: RunContext, wanted: list[str]) -> list[dict] | None:
+        """The user-declared agent catalog for `@LIST_AGENT`, when one was sent for this thread —
+        a richer (description + tool params) substitute for the spans-derived agent list."""
+        names = {w.split(".", 1)[0] for w in (wanted or [])}
+        if "LIST_AGENT" not in names:
+            return None
+        try:
+            from tracely.services.conversation_agents_service import ConversationAgentsService
+
+            return ConversationAgentsService.for_thread(
+                ctx.project_id, ctx.thread_id or ctx.trace_id
+            )
+        except Exception:
+            return None
+
     def _run_advanced(self, ctx: RunContext, config: dict) -> list[EvalResult]:
         """Advanced judge: resolve the user's `@VARIABLE` template against the trace/thread, then
         grade. Mirrors the basic per-level dispatch — but the user controls the context. Uses
@@ -332,8 +347,11 @@ class LLMJudgeEvaluator(Evaluator):
         wanted = config.get("template_variables") or extract_template_variables(template)
         thread_spans = ctx.thread_spans or ctx.spans
         history_override = self._history_override(ctx, wanted)
+        declared_agents = self._declared_agents(ctx, wanted)
         if self.level in STEP_LEVELS:
-            return self._run_advanced_steps(ctx, config, template, wanted, thread_spans, history_override)
+            return self._run_advanced_steps(
+                ctx, config, template, wanted, thread_spans, history_override, declared_agents
+            )
         context = build_context(
             self.level,
             thread_spans=thread_spans,
@@ -341,6 +359,7 @@ class LLMJudgeEvaluator(Evaluator):
             metric_previous_result=_previous_from_config(config),
             wanted_vars=wanted,
             history_override=history_override,
+            declared_agents=declared_agents,
         )
         result = self._grade_resolved(config, template, context)
         return [result] if result else []
@@ -353,6 +372,7 @@ class LLMJudgeEvaluator(Evaluator):
         wanted: list[str],
         thread_spans: list[dict],
         history_override: str | None = None,
+        declared_agents: list[dict] | None = None,
     ) -> list[EvalResult]:
         """One advanced grade per qualifying step (reusing the basic candidate selection + cap),
         threading the previous result into `@METRIC_PREVIOUS_RESULT` in sequential mode."""
@@ -368,6 +388,7 @@ class LLMJudgeEvaluator(Evaluator):
                 metric_previous_result=previous,
                 wanted_vars=wanted,
                 history_override=history_override,
+                declared_agents=declared_agents,
             )
             result = self._grade_resolved(config, template, context)
             if result:

@@ -45,7 +45,7 @@ if [[ $WIPE -eq 1 ]]; then
   curl -s 'http://localhost:8123/' --data-binary 'TRUNCATE TABLE tracely.events' >/dev/null || true
   curl -s 'http://localhost:8123/' --data-binary 'TRUNCATE TABLE tracely.scores' >/dev/null || true
   docker exec tracely-postgres-1 psql -U tracely -d tracely -q -c \
-    "TRUNCATE TABLE agents, agent_versions, case_replays, cluster_members, evaluation_cases, evaluation_suite_cases, evaluation_suites, failure_clusters, failure_embeddings, gate_cases, gate_runs RESTART IDENTITY CASCADE;" \
+    "TRUNCATE TABLE agents, agent_versions, case_replays, cluster_members, conversation_agents, evaluation_cases, evaluation_suite_cases, evaluation_suites, failure_clusters, failure_embeddings, gate_cases, gate_runs, meta_analyses, rolling_summaries RESTART IDENTITY CASCADE;" \
     >/dev/null 2>&1 || true
   echo "  done"
 fi
@@ -71,6 +71,7 @@ EXAMPLES=(
   dropin_openai.py
   dropin_anthropic.py
   manual_spans.py
+  seed_multiturn.py
 )
 
 ran=0; skipped=0; failed=0

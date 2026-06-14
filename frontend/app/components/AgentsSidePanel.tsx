@@ -1,32 +1,36 @@
 "use client";
 
-// Right-side drawer listing the agents that took part in a conversation and the tools each used.
-// Optional metadata derived from the thread's spans — when traces carry only a single default
-// agent it shows that one agent (often with no tools). Rendered via a portal so it escapes the
-// table/timeline overflow containers.
+// Right-side drawer listing a conversation's agents. Two sources:
+//   • DECLARED — the rich catalog the user sent via the SDK (tracely.trace(agents=[...])): name,
+//     description, and tools with parameters. Annotated with how often each tool actually ran.
+//   • OBSERVED — agents derived from the trace spans (agent id + tools used), the fallback when
+//     nothing was declared.
+// Rendered via a portal so it escapes the table/timeline overflow containers.
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
-type Tool = { name: string; count: number };
-type ConvAgent = {
-  agent_id: string;
-  name: string;
-  slug: string;
-  tools: Tool[];
-  span_count: number;
-  tool_call_count: number;
-};
+type DeclaredTool = { name: string; description: string; parameters: Record<string, unknown>; count: number };
+type DeclaredAgent = { name: string; description: string; tools: DeclaredTool[] };
+type ObservedTool = { name: string; count: number };
+type ObservedAgent = { agent_id: string; name: string; slug: string; tools: ObservedTool[]; span_count: number };
+type AgentsData = { declared: DeclaredAgent[]; observed: ObservedAgent[] };
 
 export function AgentsSidePanel({ threadId, onClose }: { threadId: string; onClose: () => void }) {
-  const [agents, setAgents] = useState<ConvAgent[] | null>(null);
+  const [data, setData] = useState<AgentsData | null>(null);
 
   useEffect(() => {
     let live = true;
     fetch(`/api/sessions/${encodeURIComponent(threadId)}/agents`)
-      .then((r) => (r.ok ? r.json() : { agents: [] }))
-      .then((d) => live && setAgents(Array.isArray(d?.agents) ? d.agents : []))
-      .catch(() => live && setAgents([]));
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!live) return;
+        setData({
+          declared: Array.isArray(d?.declared) ? d.declared : [],
+          observed: Array.isArray(d?.observed) ? d.observed : [],
+        });
+      })
+      .catch(() => live && setData({ declared: [], observed: [] }));
     return () => {
       live = false;
     };
@@ -37,6 +41,8 @@ export function AgentsSidePanel({ threadId, onClose }: { threadId: string; onClo
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const empty = data && data.declared.length === 0 && data.observed.length === 0;
 
   return createPortal(
     <>
@@ -59,61 +65,133 @@ export function AgentsSidePanel({ threadId, onClose }: { threadId: string; onClo
         </header>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          {agents === null ? (
+          {data === null ? (
             <div className="space-y-3">
               <div className="h-24 animate-pulse rounded-lg bg-white/[0.03]" />
               <div className="h-24 animate-pulse rounded-lg bg-white/[0.03]" />
             </div>
-          ) : agents.length === 0 ? (
+          ) : empty ? (
             <p className="mt-8 text-center text-[13px] text-fg-faint">
               No agents found for this conversation.
+              <br />
+              <span className="text-[11.5px]">
+                Declare them via <code className="font-mono">tracely.trace(agents=[…])</code> in the SDK.
+              </span>
             </p>
           ) : (
-            <div className="space-y-3">
-              {agents.map((a) => (
-                <div key={a.agent_id || a.name} className="rounded-lg border border-line bg-white/[0.02] p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-[13.5px] font-semibold text-fg">{a.name}</div>
-                      {a.slug && a.slug !== a.name && (
-                        <div className="truncate font-mono text-[10.5px] text-fg-faint">{a.slug}</div>
-                      )}
-                    </div>
-                    <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">
-                      {a.span_count} span{a.span_count === 1 ? "" : "s"}
-                    </span>
-                  </div>
-
-                  <div className="mt-3">
-                    <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-fg-faint">
-                      Tools {a.tools.length > 0 && <span className="text-fg-muted">· {a.tools.length}</span>}
-                    </div>
-                    {a.tools.length === 0 ? (
-                      <p className="text-[12px] text-fg-faint">No tools observed.</p>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        {a.tools.map((t) => (
-                          <span
-                            key={t.name}
-                            title={t.count ? `${t.count} call${t.count === 1 ? "" : "s"}` : "requested, no execution span"}
-                            className="inline-flex items-center gap-1.5 rounded-md border border-line bg-white/[0.04] px-2 py-1 font-mono text-[11px] text-fg-muted"
-                          >
-                            <span className="h-1.5 w-1.5 rounded-[3px] bg-t_tool" />
-                            {t.name}
-                            {t.count > 0 && <span className="text-fg-faint">×{t.count}</span>}
-                          </span>
-                        ))}
+            <div className="space-y-5">
+              {data.declared.length > 0 && (
+                <section>
+                  <SectionLabel>Declared</SectionLabel>
+                  <div className="space-y-3">
+                    {data.declared.map((a, i) => (
+                      <div key={`${a.name}-${i}`} className="rounded-lg border border-line bg-white/[0.02] p-4">
+                        <div className="text-[13.5px] font-semibold text-fg">{a.name}</div>
+                        {a.description && (
+                          <div className="mt-0.5 text-[12px] text-fg-muted">{a.description}</div>
+                        )}
+                        <div className="mt-3 space-y-1.5">
+                          <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-fg-faint">
+                            Tools{a.tools.length > 0 && <span className="text-fg-muted"> · {a.tools.length}</span>}
+                          </div>
+                          {a.tools.length === 0 ? (
+                            <p className="text-[12px] text-fg-faint">No tools declared.</p>
+                          ) : (
+                            a.tools.map((t) => (
+                              <div key={t.name} className="rounded-md border border-line/70 bg-black/20 px-2.5 py-1.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="flex items-center gap-1.5 font-mono text-[11.5px] text-fg">
+                                    <span className="h-1.5 w-1.5 rounded-[3px] bg-t_tool" />
+                                    {t.name}
+                                  </span>
+                                  <span
+                                    className="shrink-0 font-mono text-[10px] text-fg-faint"
+                                    title={t.count ? `executed ${t.count}×` : "not executed in this conversation"}
+                                  >
+                                    {t.count > 0 ? `×${t.count}` : "unused"}
+                                  </span>
+                                </div>
+                                {t.description && (
+                                  <div className="mt-0.5 text-[11.5px] text-fg-muted">{t.description}</div>
+                                )}
+                                {Object.keys(t.parameters || {}).length > 0 && (
+                                  <div className="mt-1 flex flex-wrap gap-1">
+                                    {Object.keys(t.parameters).map((p) => (
+                                      <span
+                                        key={p}
+                                        className="rounded border border-line bg-white/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-fg-faint"
+                                      >
+                                        {p}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
                       </div>
-                    )}
+                    ))}
                   </div>
-                </div>
-              ))}
+                </section>
+              )}
+
+              {data.observed.length > 0 && (
+                <section>
+                  <SectionLabel>{data.declared.length > 0 ? "Observed in traces" : "Agents"}</SectionLabel>
+                  <div className="space-y-3">
+                    {data.observed.map((a) => (
+                      <div key={a.agent_id || a.name} className="rounded-lg border border-line bg-white/[0.02] p-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="truncate text-[13.5px] font-semibold text-fg">{a.name}</div>
+                            {a.slug && a.slug !== a.name && (
+                              <div className="truncate font-mono text-[10.5px] text-fg-faint">{a.slug}</div>
+                            )}
+                          </div>
+                          <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">
+                            {a.span_count} span{a.span_count === 1 ? "" : "s"}
+                          </span>
+                        </div>
+                        <div className="mt-3">
+                          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-fg-faint">
+                            Tools {a.tools.length > 0 && <span className="text-fg-muted">· {a.tools.length}</span>}
+                          </div>
+                          {a.tools.length === 0 ? (
+                            <p className="text-[12px] text-fg-faint">No tools observed.</p>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {a.tools.map((t) => (
+                                <span
+                                  key={t.name}
+                                  title={t.count ? `${t.count} call${t.count === 1 ? "" : "s"}` : "requested, no execution span"}
+                                  className="inline-flex items-center gap-1.5 rounded-md border border-line bg-white/[0.04] px-2 py-1 font-mono text-[11px] text-fg-muted"
+                                >
+                                  <span className="h-1.5 w-1.5 rounded-[3px] bg-t_tool" />
+                                  {t.name}
+                                  {t.count > 0 && <span className="text-fg-faint">×{t.count}</span>}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
           )}
         </div>
       </aside>
     </>,
     document.body,
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.18em] text-fg-faint">{children}</div>
   );
 }
 

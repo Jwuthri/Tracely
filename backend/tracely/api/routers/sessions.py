@@ -61,31 +61,68 @@ async def get_session(
     return {"thread_id": thread_id, "turns": turns, "scores": thread_scores}
 
 
+def _shape_declared_agent(ag: dict, obs_counts: dict[str, int]) -> dict:
+    """Normalize a user-declared agent ({name, description, tools}) into the panel shape, annotating
+    each tool with how many times it was actually executed in the conversation (from observed spans).
+    `tools` may be a dict-of-tools (the documented shape) or a list."""
+    raw = ag.get("tools")
+    entries = raw.items() if isinstance(raw, dict) else (
+        [(t.get("name", ""), t) for t in raw if isinstance(t, dict)] if isinstance(raw, list) else []
+    )
+    tools = []
+    for key, tdef in entries:
+        tdef = tdef if isinstance(tdef, dict) else {}
+        name = tdef.get("name") or key
+        tools.append(
+            {
+                "name": name,
+                "description": tdef.get("description") or "",
+                "parameters": tdef.get("parameters") or {},
+                "count": obs_counts.get(name, 0),
+            }
+        )
+    return {
+        "name": ag.get("name") or "agent",
+        "description": ag.get("description") or "",
+        "tools": tools,
+    }
+
+
 @router.get("/sessions/{thread_id}/agents")
 async def get_session_agents(
     thread_id: str, project_id: str = Depends(get_project_id)
 ) -> dict:
-    """The agents (and the tools each used) that participated in this conversation, derived from
-    its spans. Optional metadata — sparse when the traces carry only a single default agent. Agent
-    ids are resolved to their registered slug/display name where known."""
-    agents = await async_reader.thread_agents(project_id, thread_id)
-    ids = [a["agent_id"] for a in agents if a["agent_id"]]
+    """A conversation's agents — both the user-DECLARED catalog (sent via the SDK, rich: name,
+    description, tools with parameters) and the OBSERVED agents derived from the trace spans (with
+    tool-execution counts). The panel shows declared first; observed fills in when nothing was
+    declared. Declared tools are annotated with their observed execution counts."""
+    observed = await async_reader.thread_agents(project_id, thread_id)
+    ids = [a["agent_id"] for a in observed if a["agent_id"]]
 
-    def resolve_names() -> dict[str, dict]:
+    def work() -> tuple[dict[str, dict], list]:
         names: dict[str, dict] = {}
         with SyncSessionLocal() as s:
             for aid in ids:
                 a = repo.agent_in_project(s, project_id, aid)
                 if a:
                     names[aid] = {"slug": a.slug, "display_name": a.display_name or a.slug}
-        return names
+            row = repo.conversation_agents_get(s, project_id, thread_id)
+            declared = list(row.agents) if row and row.agents else []
+        return names, declared
 
-    name_map = await run_in_threadpool(resolve_names) if ids else {}
-    for a in agents:
+    name_map, declared_raw = await run_in_threadpool(work)
+    for a in observed:
         info = name_map.get(a["agent_id"])
         a["slug"] = info["slug"] if info else ""
         a["name"] = (info["display_name"] if info else "") or a["agent_id"] or "agent"
-    return {"thread_id": thread_id, "agents": agents}
+
+    obs_counts: dict[str, int] = {}
+    for a in observed:
+        for t in a["tools"]:
+            obs_counts[t["name"]] = obs_counts.get(t["name"], 0) + t["count"]
+    declared = [_shape_declared_agent(ag, obs_counts) for ag in declared_raw if isinstance(ag, dict)]
+
+    return {"thread_id": thread_id, "declared": declared, "observed": observed}
 
 
 class GenerateSummaryBody(BaseModel):

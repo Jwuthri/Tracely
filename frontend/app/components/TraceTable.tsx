@@ -108,8 +108,7 @@ const COLUMNS: Col[] = [
   { key: "conversation", label: "Conversation", group: "C", width: 260 },
   { key: "ctime",        label: "Datetime",     group: "C", width: 160 },
   { key: "cdur",         label: "Duration",     group: "C", width: 96 },
-  { key: "summary", label: "Summary", group: "C", width: 320 },
-  { key: "crsummary", label: "Rolling summary", group: "C", width: 240 },
+  { key: "crsummary", label: "Rolling summary", group: "C", width: 280 },
   { key: "cmeta", label: "Metadata", group: "C", width: 200 },
   { key: "cusage", label: "Usage", group: "C", width: 180 },
   { key: "role", label: "Role", group: "M", width: 110 },
@@ -885,25 +884,6 @@ function toMsg(role: string, raw: string | null): { role: string; content: unkno
   return { role, content: v };
 }
 
-function ConvSummaryCell({ conv }: { conv: ConvNode }) {
-  const msgs: Array<{ role: string; content: unknown }> = [];
-  if (conv.turnsData) {
-    for (const t of conv.turnsData) {
-      const u = toMsg("user", t.input);
-      const a = toMsg("assistant", t.output);
-      if (u) msgs.push(u);
-      if (a) msgs.push(a);
-    }
-  } else {
-    const u = toMsg("user", conv.first_input);
-    const a = toMsg("assistant", conv.last_output);
-    if (u) msgs.push(u);
-    if (a) msgs.push(a);
-  }
-  if (msgs.length === 0) return <span className="text-slate-500">—</span>;
-  return <ChatPill msgs={msgs} />;
-}
-
 // ── evaluation columns (dynamic metric columns + live run state) ─────────────────
 // Live results and run actions reach the deeply nested cells via context, so the
 // row/cell component tree stays prop-free. Keys:
@@ -928,10 +908,13 @@ const EvalViewContext = createContext<EvalView>({
 // ── rolling summary (the per-row accumulated summary at C/M/S levels) ─────────────
 // Fetched once per thread (the conversation row triggers it) and merged into id-keyed maps, so the
 // turn / step cells just read by trace_id / span_id. `undefined` = not loaded yet, "" = no summary.
+// The rolling summary is a flat JSON list of items: [{role, type, content, …}]. The compacted
+// older history is one item with role "prev_summary".
+type SummaryItems = Array<{ role: string; type: string; content: string; [k: string]: unknown }>;
 type RollingSummaryView = {
-  conversations: Record<string, string>;
-  traces: Record<string, string>;
-  spans: Record<string, string>;
+  conversations: Record<string, SummaryItems | null>;
+  traces: Record<string, SummaryItems | null>;
+  spans: Record<string, SummaryItems | null>;
   ensure: (thread: string) => void;
   generate: (thread: string) => void;
   generating: Set<string>;
@@ -940,8 +923,6 @@ const RollingSummaryContext = createContext<RollingSummaryView>({
   conversations: {}, traces: {}, spans: {}, ensure: () => {}, generate: () => {}, generating: new Set(),
 });
 
-const RS_DISPLAY_CLIP = 512; // cells show at most the top 512 chars of the accumulated summary
-
 function RollingSummaryCell({
   thread, kind, id,
 }: { thread?: string; kind: "conversation" | "trace" | "span"; id?: string }) {
@@ -949,12 +930,13 @@ function RollingSummaryCell({
   useEffect(() => {
     if (thread) rs.ensure(thread);
   }, [thread, rs]);
-  const text =
+  const val =
     kind === "conversation" ? (thread ? rs.conversations[thread] : undefined)
     : kind === "trace" ? (id ? rs.traces[id] : undefined)
     : id ? rs.spans[id] : undefined;
-  if (text === undefined) return <span className="text-slate-600">…</span>; // not generated/loaded yet
-  if (!text) {
+  if (val === undefined) return <span className="text-slate-600">…</span>; // not generated/loaded yet
+  const hasContent = Array.isArray(val) && val.length > 0;
+  if (!hasContent) {
     // Loaded but empty. At conversation level offer an inline generate (summaries are thread-scoped,
     // so turn/step cells can't generate on their own — they fill in once the thread is built).
     if (kind === "conversation" && thread) {
@@ -971,7 +953,8 @@ function RollingSummaryCell({
     }
     return <span className="text-slate-500">—</span>;
   }
-  return <TextPill text={text.slice(0, RS_DISPLAY_CLIP)} />;
+  // The full accumulated summary object, as JSON — no truncation (JsonPill previews + expands).
+  return <JsonPill raw={JSON.stringify(val)} />;
 }
 
 // Where a streamed score lands in `live` (mirrors the per-cell lookup keys).
@@ -1169,8 +1152,6 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
         : null;
       return <span className="font-mono text-xs tabular-nums text-slate-400">{fmtMs(durMs)}</span>;
     }
-    case "summary":
-      return ctx.level === "C" ? <ConvSummaryCell conv={ctx.conv} /> : null;
     case "crsummary":
       return ctx.level === "C" ? <RollingSummaryCell thread={ctx.conv.thread} kind="conversation" /> : null;
     case "cmeta": {
@@ -1712,9 +1693,9 @@ export function TraceTable({
   // ── rolling summary: fetch a thread's by-level summaries once (the conversation row triggers
   // it), merged into id-keyed maps so the turn/step cells read by trace_id / span_id. ──
   const [rsum, setRsum] = useState<{
-    conversations: Record<string, string>;
-    traces: Record<string, string>;
-    spans: Record<string, string>;
+    conversations: Record<string, SummaryItems | null>;
+    traces: Record<string, SummaryItems | null>;
+    spans: Record<string, SummaryItems | null>;
   }>({ conversations: {}, traces: {}, spans: {} });
   const [rsumGenerating, setRsumGenerating] = useState<Set<string>>(new Set());
   const rsumInflight = useRef<Set<string>>(new Set());
@@ -1726,7 +1707,7 @@ export function TraceTable({
       .then((d) => {
         if (!d) return;
         setRsum((p) => ({
-          conversations: { ...p.conversations, [thread]: d.conversation ?? "" },
+          conversations: { ...p.conversations, [thread]: d.conversation ?? null },
           traces: { ...p.traces, ...(d.traces ?? {}) },
           spans: { ...p.spans, ...(d.spans ?? {}) },
         }));

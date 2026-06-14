@@ -110,21 +110,23 @@ def test_summary_token_total():
     assert summary_token_total(items) == 300
 
 
-def test_compaction_keeps_last_two_and_drops_under_budget():
+def test_compaction_folds_older_items_into_prev_summary_item():
     svc = RollingSummaryService.__new__(RollingSummaryService)  # skip TraceReader init
-    running = _big_items(10, tokens_each=3000)  # 30k tokens, over the 20k budget
+    items = _big_items(10, tokens_each=3000)  # 30k tokens, over the 20k budget
     with patch.object(rss.provider, "llm_enabled", return_value=False):
-        out, n = svc._compact_to_budget(list(running))
+        out, n = svc._compact_to_budget(list(items))
     assert n >= 1
     assert summary_token_total(out) <= 20000  # under budget
-    assert out[0]["type"] == "summary"  # head folded into one compacted block
-    assert out[-1]["content"] == running[-1]["content"]  # last 2 kept verbatim
-    assert out[-2]["content"] == running[-2]["content"]
+    # a flat list: one leading prev_summary item, then the last 2 verbatim
+    assert out[0]["role"] == "prev_summary" and out[0]["type"] == "summary"
+    assert len(out) == 3
+    assert out[-1]["content"] == items[-1]["content"]
+    assert out[-2]["content"] == items[-2]["content"]
 
 
 def test_compaction_noop_under_budget():
     svc = RollingSummaryService.__new__(RollingSummaryService)
-    running = _big_items(3, tokens_each=1000)  # 3k tokens, well under budget
+    running = _big_items(3, tokens_each=1000)  # 3k tokens, under budget
     with patch.object(rss.provider, "llm_enabled", return_value=False):
         out, n = svc._compact_to_budget(list(running))
     assert n == 0
