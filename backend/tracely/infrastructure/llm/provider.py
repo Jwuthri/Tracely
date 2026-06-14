@@ -15,7 +15,7 @@ Heavy imports are lazy so the worker/API start even when the LLM stack isn't exe
 from __future__ import annotations
 
 import time
-from typing import Any, TypeVar
+from typing import Any, Callable, TypeVar
 
 import structlog
 
@@ -24,6 +24,26 @@ from tracely.config import settings
 log = structlog.get_logger()
 
 T = TypeVar("T")
+
+# Optional sink invoked with `{input_tokens, output_tokens, total_tokens, model}` after a call,
+# so callers (the judge) can attribute LLM-eval token spend per evaluator.
+UsageSink = Callable[[dict], None]
+
+
+def _extract_usage(result: dict, model: str | None) -> dict:
+    """Sum LangChain `usage_metadata` across the agent's AI messages → a token-usage dict.
+    Zeros when a provider doesn't report usage (graceful — spend just shows as 0)."""
+    inp = out = 0
+    for m in result.get("messages", []) or []:
+        um = getattr(m, "usage_metadata", None) or {}
+        inp += int(um.get("input_tokens") or 0)
+        out += int(um.get("output_tokens") or 0)
+    return {
+        "input_tokens": inp,
+        "output_tokens": out,
+        "total_tokens": inp + out,
+        "model": _normalize_model((model or settings.llm_judge_model).strip()),
+    }
 
 # The judge-model choices offered in the column UI. Curated (a 300-model dropdown is not a
 # selector) and verified against the live OpenRouter catalog when a key is configured —
@@ -141,10 +161,11 @@ def run_structured_agent(
     system_prompt: str | None = None,
     model: str | None = None,
     temperature: float = 0.0,
+    on_usage: UsageSink | None = None,
 ) -> T:
     """One `create_agent` invocation with a structured response schema. Returns the validated
     pydantic instance; raises on transport/validation errors (callers decide whether a failed
-    grade is skipped or surfaced)."""
+    grade is skipped or surfaced). `on_usage` (optional) receives this call's token usage."""
     from langchain.agents import create_agent
 
     agent = create_agent(
@@ -154,6 +175,8 @@ def run_structured_agent(
         response_format=response_format,
     )
     result: dict[str, Any] = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+    if on_usage is not None:
+        on_usage(_extract_usage(result, model))
     return result["structured_response"]
 
 
@@ -163,15 +186,19 @@ def run_text_agent(
     system_prompt: str | None = None,
     model: str | None = None,
     temperature: float = 0.0,
+    on_usage: UsageSink | None = None,
 ) -> str:
     """One `create_agent` invocation returning the final message text — for free-form outputs
-    (the `json` evaluator output type, where the rubric defines the object shape)."""
+    (the `json` evaluator output type, where the rubric defines the object shape). `on_usage`
+    (optional) receives this call's token usage."""
     from langchain.agents import create_agent
 
     agent = create_agent(
         get_chat_model(model, temperature), tools=[], system_prompt=system_prompt
     )
     result: dict[str, Any] = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+    if on_usage is not None:
+        on_usage(_extract_usage(result, model))
     content = result["messages"][-1].content
     if isinstance(content, str):
         return content

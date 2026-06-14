@@ -13,6 +13,7 @@ from collections import defaultdict
 
 from tracely.domain.traces.metadata import parse_thread_meta
 from tracely.infrastructure.clickhouse.client import get_async_client
+from tracely.infrastructure.clickhouse.trace_reader import _SPAN_COLS
 
 # Online-eval score filter: auto/on-demand evaluator results only (regression/gate verdict
 # rows carry an evaluation_case_id and are excluded everywhere in the UI reads).
@@ -82,6 +83,22 @@ async def trace_spans(project_id: str, trace_id: str) -> list[dict]:
     return [dict(zip(res.column_names, row)) for row in res.result_rows]
 
 
+async def thread_spans_full(project_id: str, thread_id: str) -> list[dict]:
+    """All spans across a thread with the SAME columns as the sync eval reader (`_SPAN_COLS`) — so
+    the advanced-template PREVIEW resolves against data identical to what the run path grades. The
+    `trace_spans` / sessions UI readers select a lighter, divergent set (no `tool_calls`, no
+    `is_app_root`); do NOT reuse those here or the preview would lie about production."""
+    client = await get_async_client()
+    res = await client.query(
+        f"SELECT {', '.join(_SPAN_COLS)} FROM events FINAL "
+        "WHERE project_id = {p:String} "
+        "AND (conversation_id = {th:String} OR trace_id = {th:String}) "
+        "ORDER BY start_time",
+        parameters={"p": project_id, "th": thread_id},
+    )
+    return [dict(zip(res.column_names, row)) for row in res.result_rows]
+
+
 async def trace_scores(project_id: str, trace_id: str, thread_id: str) -> list[dict]:
     """Online scores for one trace PLUS its thread's CONVERSATION-level scores (so the
     conversation metric columns render on the trace page)."""
@@ -94,6 +111,32 @@ async def trace_scores(project_id: str, trace_id: str, thread_id: str) -> list[d
         parameters={"p": project_id, "t": trace_id, "th": thread_id},
     )
     return [dict(zip(res.column_names, row)) for row in res.result_rows]
+
+
+async def evaluator_cost(project_id: str, days: int = 30) -> dict[str, dict]:
+    """Per-evaluator LLM-judge token usage over the last `days` (from `scores.metadata`), keyed by
+    `score_name` — the cost of each judge column. Structural checks make no LLM call so they don't
+    appear. `{score_name: {runs, input_tokens, output_tokens, total_tokens, model}}`."""
+    client = await get_async_client()
+    res = await client.query(
+        "SELECT name, "
+        "countIf(mapContains(metadata, 'eval.total_tokens')) AS runs, "
+        "sum(toUInt64OrZero(metadata['eval.input_tokens'])) AS input_tokens, "
+        "sum(toUInt64OrZero(metadata['eval.output_tokens'])) AS output_tokens, "
+        "sum(toUInt64OrZero(metadata['eval.total_tokens'])) AS total_tokens, "
+        "anyLast(metadata['eval.model']) AS model "
+        f"FROM scores FINAL WHERE project_id = {{p:String}} AND {_ONLINE} "
+        "AND created_at >= now() - toIntervalDay({d:UInt32}) "
+        "GROUP BY name HAVING runs > 0",
+        parameters={"p": project_id, "d": days},
+    )
+    return {
+        r[0]: {
+            "runs": int(r[1]), "input_tokens": int(r[2]), "output_tokens": int(r[3]),
+            "total_tokens": int(r[4]), "model": r[5] or "",
+        }
+        for r in res.result_rows
+    }
 
 
 # ── sessions / threads ────────────────────────────────────────────────────────

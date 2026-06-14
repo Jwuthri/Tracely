@@ -16,12 +16,13 @@ from clickhouse_connect.driver.client import Client
 from tracely.infrastructure.clickhouse.client import get_client
 
 # Columns used by services to reconstruct a trace's spans (regression promote/replay, gate
-# replay, failure intel summarization, evaluation runner).
+# replay, failure intel summarization, evaluation runner). `tool_calls` (the structured
+# invocation array) backs the advanced-judge `@CURRENT_STEP.tool_call` template variable.
 _SPAN_COLS = [
     "span_id", "parent_span_id", "type", "name", "level", "status_message",
     "start_time", "end_time", "agent_id", "agent_version_id", "agent_run_id",
-    "turn_id", "step_id", "model_id", "input", "output", "tool_call_names",
-    "trace_id", "is_app_root", "conversation_id",
+    "turn_id", "step_id", "model_id", "input", "output", "tool_call_names", "tool_calls",
+    "trace_id", "is_app_root", "conversation_id", "env",
 ]
 
 

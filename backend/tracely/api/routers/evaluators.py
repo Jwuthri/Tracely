@@ -20,6 +20,13 @@ from starlette.concurrency import run_in_threadpool
 from tracely.api.auth import get_project_id
 from tracely.domain.evaluation.evaluators import TEMPLATES
 from tracely.domain.evaluation.generation import generate_evaluator_config
+from tracely.domain.evaluation.template_resolver import (
+    build_context,
+    extract_template_variables,
+    template_resolver,
+    variables_for_level_json,
+)
+from tracely.infrastructure.clickhouse import async_reader
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.db.models import Evaluator
@@ -29,6 +36,18 @@ router = APIRouter(prefix="/api")
 
 VALID_LEVELS = {"CONVERSATION", "AGENT_RUN", "SPAN", "TOOL", "GENERATION", "CHAIN"}
 VALID_KINDS = {"structural", "llm_judge"}
+
+
+def _stamp_advanced(config: dict[str, Any]) -> dict[str, Any]:
+    """Recompute `is_advanced` + `template_variables` from the judge prompt — the single server-
+    side source of truth. A prompt containing any `@VARIABLE` makes the column advanced (routes to
+    the template resolver); without one it's a plain rubric. Promptless (structural) configs pass
+    through untouched."""
+    prompt = config.get("prompt")
+    if not isinstance(prompt, str):
+        return config
+    refs = extract_template_variables(prompt)
+    return {**config, "template_variables": refs, "is_advanced": bool(refs)}
 
 
 def _evaluator_dict(e: Evaluator) -> dict[str, Any]:
@@ -73,6 +92,16 @@ class GenerateRequest(BaseModel):
     description: str = Field(min_length=3, max_length=2000)
 
 
+class ResolveRequest(BaseModel):
+    """Live-preview request: resolve an advanced `@VARIABLE` prompt against one real item."""
+
+    prompt: str = Field(default="", max_length=20000)
+    level: str = "AGENT_RUN"
+    thread_id: str = ""
+    trace_id: str = ""
+    span_id: str = ""
+
+
 @router.get("/evaluators")
 async def list_evaluators(project_id: str = Depends(get_project_id)) -> list[dict]:
     def work():
@@ -90,6 +119,16 @@ async def list_judge_models(project_id: str = Depends(get_project_id)) -> dict:
     return {"default": default_model_id(), "models": models}
 
 
+@router.get("/evaluators/cost")
+async def evaluator_cost(
+    days: int = 30, project_id: str = Depends(get_project_id)
+) -> dict[str, dict]:
+    """Per-evaluator LLM-judge token usage over the last `days`, keyed by `score_name` — what
+    each judge column has cost to run. Empty for structural checks / before any judge has run."""
+    days = max(1, min(int(days), 365))
+    return await async_reader.evaluator_cost(project_id, days)
+
+
 @router.get("/evaluators/templates")
 async def list_templates(project_id: str = Depends(get_project_id)) -> list[dict]:
     """The browse library: every catalog template, flagged with whether this project already
@@ -101,6 +140,39 @@ async def list_templates(project_id: str = Depends(get_project_id)) -> list[dict
         return [{**t, "installed": t["score_name"] in installed} for t in TEMPLATES]
 
     return await run_in_threadpool(work)
+
+
+@router.get("/evaluators/template-variables/{level}")
+async def template_variables(level: str, project_id: str = Depends(get_project_id)) -> list[dict]:
+    """The advanced-mode `@VARIABLE`s available at `level` (name/description/type/props) — drives
+    the editor's autocomplete + 'Available variables: N' count. Level-filtered server-side."""
+    return variables_for_level_json(level)
+
+
+@router.post("/evaluators/resolve")
+async def resolve_prompt(
+    body: ResolveRequest, project_id: str = Depends(get_project_id)
+) -> dict:
+    """Resolve an advanced `@VARIABLE` prompt against a real conversation/turn/step for the live
+    preview — the SAME context builder + resolver the run path uses, minus the LLM call. Returns
+    the resolved text plus which variables were used / missing (drives the green/amber badges)."""
+    level = body.level if body.level in VALID_LEVELS else "AGENT_RUN"
+    thread_id = body.thread_id or body.trace_id
+    spans = await async_reader.thread_spans_full(project_id, thread_id) if thread_id else []
+    context = build_context(
+        level,
+        thread_spans=spans,
+        current_trace_id=body.trace_id or thread_id,
+        current_span_id=body.span_id or None,
+        wanted_vars=extract_template_variables(body.prompt),
+    )
+    resolved = template_resolver.resolve(body.prompt, context)
+    return {
+        "resolved_prompt": resolved.resolved_text,
+        "variables_used": resolved.variables_used,
+        "variables_missing": resolved.variables_missing,
+        "level": level,
+    }
 
 
 @router.post("/evaluators/generate")
@@ -129,12 +201,14 @@ async def create_evaluator(
     if body.level not in VALID_LEVELS:
         raise HTTPException(status_code=400, detail=f"level must be one of {sorted(VALID_LEVELS)}")
 
+    config = _stamp_advanced(body.config or {})
+
     def work():
         with SyncSessionLocal() as s:
             e = repo.evaluator_create(
                 s, project_id,
                 name=body.name, description=body.description, kind=body.kind,
-                level=body.level, enabled=body.enabled, config=body.config or {},
+                level=body.level, enabled=body.enabled, config=config,
                 score_name=body.score_name,
             )
             return _evaluator_dict(e)
@@ -151,9 +225,12 @@ async def update_evaluator(
 
     def work():
         with SyncSessionLocal() as s:
-            e = repo.evaluator_update(
-                s, project_id, evaluator_id, body.model_dump(exclude_unset=True)
-            )
+            patch = body.model_dump(exclude_unset=True)
+            # Only recompute advanced-ness when the config (hence the prompt) is actually being
+            # changed — an untouched config must not be clobbered by exclude_unset.
+            if isinstance(patch.get("config"), dict):
+                patch["config"] = _stamp_advanced(patch["config"])
+            e = repo.evaluator_update(s, project_id, evaluator_id, patch)
             return None if e is None else _evaluator_dict(e)
 
     res = await run_in_threadpool(work)

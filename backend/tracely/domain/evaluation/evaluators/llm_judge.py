@@ -48,6 +48,11 @@ from tracely.domain.evaluation.evaluators.base import (
 from tracely.domain.evaluation.evaluators.catalog import DEFAULT_JUDGE_PROMPT
 from tracely.domain.evaluation.output_schema import model_from_json_schema
 from tracely.domain.evaluation.results import EvalResult, RunContext
+from tracely.domain.evaluation.template_resolver import (
+    build_context,
+    extract_template_variables,
+    template_resolver,
+)
 from tracely.domain.evaluation.text import answer_for, content_text, first_io
 from tracely.domain.traces.spans import root_span
 from tracely.infrastructure.llm import provider
@@ -196,6 +201,8 @@ class LLMJudgeEvaluator(Evaluator):
         # passes config|params transparently — both .get("prompt"/"threshold") and
         # .get("params").get("prompt"/"threshold") work). Resolve both shapes.
         config = params.get("params") or params
+        if config.get("is_advanced"):
+            return self._run_advanced(ctx, config)
         if self.level == CONVERSATION:
             return self._run_conversation(ctx, config)
         if self.level in STEP_LEVELS:
@@ -225,9 +232,10 @@ class LLMJudgeEvaluator(Evaluator):
         result = self._grade(config, body, previous=_previous_from_config(config))
         return [result] if result else []
 
-    def _run_steps(self, ctx: RunContext, config: dict) -> list[EvalResult]:
-        """One grade per step. Level SPAN grades `config.span_types` (default TOOL+GENERATION);
-        a TOOL/GENERATION/CHAIN-level judge grades exactly that span type."""
+    def _step_candidates(self, ctx: RunContext, config: dict) -> list[dict]:
+        """The spans a step-level judge grades: the level's span type(s) (SPAN ⇒ `config.span_types`,
+        default TOOL+GENERATION; TOOL/GENERATION/CHAIN ⇒ exactly that type), with I/O, capped at
+        `max_spans`. Shared by the basic and advanced step paths."""
         if self.level == SPAN:
             wanted = {str(t).upper() for t in (config.get("span_types") or [TOOL, GENERATION])}
         else:
@@ -242,6 +250,12 @@ class LLMJudgeEvaluator(Evaluator):
                 "llm_judge_step_cap", trace_id=ctx.trace_id, candidates=len(candidates), cap=max_spans
             )
             candidates = candidates[:max_spans]
+        return candidates
+
+    def _run_steps(self, ctx: RunContext, config: dict) -> list[EvalResult]:
+        """One grade per step. Level SPAN grades `config.span_types` (default TOOL+GENERATION);
+        a TOOL/GENERATION/CHAIN-level judge grades exactly that span type."""
+        candidates = self._step_candidates(ctx, config)
         user_in = content_text(ctx.root.get("input")) or first_io(ctx.spans, "input")
         sequential = _is_sequential(config)
         previous = _previous_from_config(config)
@@ -291,16 +305,65 @@ class LLMJudgeEvaluator(Evaluator):
         result = self._grade(config, body)
         return [result] if result else []
 
+    # ── advanced (template) grading ──────────────────────────────────────────
+
+    def _run_advanced(self, ctx: RunContext, config: dict) -> list[EvalResult]:
+        """Advanced judge: resolve the user's `@VARIABLE` template against the trace/thread, then
+        grade. Mirrors the basic per-level dispatch — but the user controls the context. Uses
+        `ctx.thread_spans` (the whole thread, set by the service when conversation-scoped vars are
+        referenced) for @HISTORY/@PREVIOUS_*, falling back to the current trace's `spans`."""
+        template = config.get("prompt") or ""
+        wanted = config.get("template_variables") or extract_template_variables(template)
+        thread_spans = ctx.thread_spans or ctx.spans
+        if self.level in STEP_LEVELS:
+            return self._run_advanced_steps(ctx, config, template, wanted, thread_spans)
+        context = build_context(
+            self.level,
+            thread_spans=thread_spans,
+            current_trace_id=ctx.trace_id,
+            metric_previous_result=_previous_from_config(config),
+            wanted_vars=wanted,
+        )
+        result = self._grade_resolved(config, template, context)
+        return [result] if result else []
+
+    def _run_advanced_steps(
+        self, ctx: RunContext, config: dict, template: str, wanted: list[str], thread_spans: list[dict]
+    ) -> list[EvalResult]:
+        """One advanced grade per qualifying step (reusing the basic candidate selection + cap),
+        threading the previous result into `@METRIC_PREVIOUS_RESULT` in sequential mode."""
+        sequential = _is_sequential(config)
+        previous = _previous_from_config(config)
+        out: list[EvalResult] = []
+        for s in self._step_candidates(ctx, config):
+            context = build_context(
+                self.level,
+                thread_spans=thread_spans,
+                current_trace_id=ctx.trace_id,
+                current_span_id=s.get("span_id"),
+                metric_previous_result=previous,
+                wanted_vars=wanted,
+            )
+            result = self._grade_resolved(config, template, context)
+            if result:
+                result.target_span_id = s.get("span_id", "")
+                out.append(result)
+                if sequential:
+                    previous = _result_payload(result)
+        return out
+
+    def _grade_resolved(self, config: dict, template: str, context) -> EvalResult | None:
+        resolved = template_resolver.resolve(template, context)
+        return self._grade_advanced(config, resolved.resolved_text)
+
     # ── grading + output-type handling ───────────────────────────────────────
 
     def _grade(
         self, config: dict, body: str, previous: dict | None = None, deps: dict | None = None
     ) -> EvalResult | None:
+        """Basic grade: assemble the prompt (rubric system prompt + auto previous/deps context),
+        then hand off to the shared model-call tail."""
         rubric = config.get("prompt") or DEFAULT_JUDGE_PROMPT
-        output_type = str(config.get("output_type") or "score").lower()
-        if output_type not in OUTPUT_TYPES:
-            output_type = "score"
-        model = config.get("model") or None
         if previous:
             body += (
                 "\n\nPrevious result of this metric (the preceding item in the sequence — use "
@@ -318,6 +381,26 @@ class LLMJudgeEvaluator(Evaluator):
                 "\n\nResults from prerequisite evaluations (use these as additional context):\n"
                 + dep_lines
             )
+        return self._call_and_build(config, system_prompt=rubric, body=body)
+
+    def _grade_advanced(self, config: dict, resolved_text: str) -> EvalResult | None:
+        """Advanced grade: the resolved `@VARIABLE` template IS the prompt — used as both the
+        system prompt and the human message (the user's placeholders already carry every piece of
+        context they chose). No auto previous/deps append — `@METRIC_PREVIOUS_RESULT` handles
+        sequential chaining inside the template."""
+        return self._call_and_build(config, system_prompt=resolved_text, body=resolved_text)
+
+    def _call_and_build(
+        self, config: dict, *, system_prompt: str, body: str
+    ) -> EvalResult | None:
+        """The model call + output-type→result tail shared by basic and advanced grading —
+        everything after the prompt is assembled. Picks the response schema from `output_type`,
+        invokes the agent at temp 0, and stamps token usage onto the result."""
+        output_type = str(config.get("output_type") or "score").lower()
+        if output_type not in OUTPUT_TYPES:
+            output_type = "score"
+        model = config.get("model") or None
+        usage: dict = {}
         try:
             if output_type == "json":
                 schema_model = model_from_json_schema(config.get("output_schema"))
@@ -325,28 +408,38 @@ class LLMJudgeEvaluator(Evaluator):
                     verdict = provider.run_structured_agent(
                         body,
                         response_format=schema_model,
-                        system_prompt=rubric,
+                        system_prompt=system_prompt,
                         model=model,
+                        on_usage=usage.update,
                     )
-                    return self._json_result(config, verdict.model_dump())
+                    return self._attach_usage(self._json_result(config, verdict.model_dump()), usage)
                 # no usable schema: free-form strict JSON (the rubric defines the shape)
                 text = provider.run_text_agent(
                     body + "\n\nRespond with ONE strict JSON object shaped exactly as your "
                     "instructions describe.",
-                    system_prompt=rubric,
+                    system_prompt=system_prompt,
                     model=model,
+                    on_usage=usage.update,
                 )
-                return self._json_result(config, _parse_json_object(text))
+                return self._attach_usage(self._json_result(config, _parse_json_object(text)), usage)
             verdict = provider.run_structured_agent(
                 body,
                 response_format=self._response_format(output_type, config),
-                system_prompt=rubric,
+                system_prompt=system_prompt,
                 model=model,
+                on_usage=usage.update,
             )
         except Exception as exc:
             log.warning("llm_judge_failed", error=str(exc))
             return None
-        return self._to_result(config, output_type, verdict)
+        return self._attach_usage(self._to_result(config, output_type, verdict), usage)
+
+    @staticmethod
+    def _attach_usage(result: EvalResult | None, usage: dict) -> EvalResult | None:
+        """Stamp this grade's LLM token usage onto the result (for per-evaluator cost)."""
+        if result is not None and usage:
+            result.usage = dict(usage)
+        return result
 
     @staticmethod
     def _response_format(output_type: str, config: dict) -> type[BaseModel]:

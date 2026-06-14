@@ -15,6 +15,7 @@ from tracely.config import settings
 from tracely.domain.evaluation.evaluators.base import CONVERSATION, RUN, SPAN
 from tracely.domain.evaluation.evaluators.llm_judge import LLMJudgeEvaluator
 from tracely.domain.evaluation.results import RunContext
+from tracely.domain.traces.spans import root_span
 from tracely.infrastructure.llm import provider
 
 
@@ -50,7 +51,7 @@ def _ctx(spans: list[dict], thread_id: str = "") -> RunContext:
 def _stub_structured(monkeypatch, fields: dict, prompts: list | None = None, systems: list | None = None):
     """Patch run_structured_agent to build the requested response_format with canned fields."""
 
-    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0):
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None):
         if prompts is not None:
             prompts.append(prompt)
         if systems is not None:
@@ -152,7 +153,7 @@ def test_json_without_schema_falls_back_to_freeform(monkeypatch):
     payload = {"score": 0.9, "issues": [], "reason": "clean"}
     monkeypatch.setattr(
         provider, "run_text_agent",
-        lambda prompt, *, system_prompt=None, model=None, temperature=0.0:
+        lambda prompt, *, system_prompt=None, model=None, temperature=0.0, on_usage=None:
             "```json\n" + json.dumps(payload) + "\n```",
     )
     r = _judge(RUN).run(_ctx([_span()]), {"output_type": "json", "threshold": 0.5})[0]
@@ -167,7 +168,7 @@ def test_json_with_schema_enforces_user_contract(monkeypatch):
     field (score included) stays in string_value."""
     seen: dict = {}
 
-    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0):
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None):
         seen["fields"] = dict(response_format.model_fields)
         return response_format(intent="complaint", score=0.2, reasoning="the user is upset")
 
@@ -198,7 +199,7 @@ def test_sequential_steps_chain_previous_result(monkeypatch):
     """execution_mode=sequential: step i+1's prompt carries step i's result of this metric."""
     prompts: list[str] = []
 
-    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0):
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None):
         prompts.append(prompt)
         return response_format(score=0.4, reason=f"grade {len(prompts)}")
 
@@ -224,7 +225,7 @@ def test_trace_level_previous_result_seed(monkeypatch):
     """Thread runs seed cross-turn chaining via config.__previous_result__."""
     prompts: list[str] = []
 
-    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0):
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None):
         prompts.append(prompt)
         return response_format(score=1.0, reason="ok")
 
@@ -247,3 +248,92 @@ def test_transport_error_skips(monkeypatch):
 
     monkeypatch.setattr(provider, "run_structured_agent", boom)
     assert _judge(RUN).run(_ctx([_span()]), {}) == []
+
+
+# ── token-usage capture (per-evaluator cost) ─────────────────────────────────
+def test_judge_attaches_token_usage(monkeypatch):
+    monkeypatch.setattr(settings, "openrouter_api_key", "test-key")
+
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None):
+        if on_usage:
+            on_usage({"input_tokens": 100, "output_tokens": 20, "total_tokens": 120, "model": "openai/gpt-5.4-nano"})
+        return response_format(score=0.9, reason="ok")
+
+    monkeypatch.setattr(provider, "run_structured_agent", fake)
+    r = _judge(RUN).run(_ctx([_span()]), {"output_type": "score", "threshold": 0.5})[0]
+    assert r.usage and r.usage["total_tokens"] == 120 and r.usage["model"] == "openai/gpt-5.4-nano"
+
+
+def test_usage_metadata_maps_to_strings():
+    from tracely.infrastructure.clickhouse.score_writer import _usage_metadata
+
+    assert _usage_metadata(None) == {}
+    m = _usage_metadata({"input_tokens": 100, "output_tokens": 20, "total_tokens": 120, "model": "x"})
+    assert m == {
+        "eval.input_tokens": "100", "eval.output_tokens": "20",
+        "eval.total_tokens": "120", "eval.model": "x",
+    }
+
+
+# ── advanced (template) mode ─────────────────────────────────────────────────
+
+
+def test_advanced_resolves_template_as_both_system_and_human(monkeypatch):
+    """is_advanced=True: the resolved `@VARIABLE` prompt IS the prompt — fed as both the system
+    prompt and the human message, with NO auto-injected trace context."""
+    systems: list = []
+    prompts: list = []
+    _stub_structured(monkeypatch, {"score": 0.9, "reason": "ok"}, prompts=prompts, systems=systems)
+    config = {
+        "is_advanced": True,
+        "prompt": "Grade: @CURRENT_MESSAGE.output (asked: @CURRENT_MESSAGE.input)",
+        "threshold": 0.6,
+    }
+    results = _judge(RUN).run(_ctx([_span(input="ping", output="pong")]), config)
+    assert len(results) == 1 and results[0].verdict == "PASS"
+    resolved = "Grade: pong (asked: ping)"
+    assert systems == [resolved] and prompts == [resolved]
+
+
+def test_advanced_history_uses_full_thread_spans(monkeypatch):
+    """At message level @HISTORY is the WHOLE conversation — the service feeds `thread_spans` even
+    though `ctx.spans` is only the current turn."""
+    prompts: list = []
+    _stub_structured(monkeypatch, {"score": 1.0, "reason": "ok"}, prompts=prompts)
+    cur = [_span(trace_id="t2", span_id="b", input="tomorrow", output="booked!")]
+    thread = [
+        _span(trace_id="t1", span_id="a", input="book a flight", output="which date?"),
+        _span(trace_id="t2", span_id="b", input="tomorrow", output="booked!"),
+    ]
+    ctx = RunContext("p", "t2", "run-1", cur, root_span(cur), thread_id="th-9", thread_spans=thread)
+    _judge(RUN).run(ctx, {"is_advanced": True, "prompt": "@HISTORY"})
+    assert "book a flight" in prompts[0] and "booked!" in prompts[0]
+
+
+def test_advanced_step_grades_each_candidate_with_step_vars(monkeypatch):
+    prompts: list = []
+    _stub_structured(monkeypatch, {"score": 1.0, "reason": "fine"}, prompts=prompts)
+    spans = [
+        _span(span_id="root", type="AGENT", input="q", output="a"),
+        _span(span_id="tool-1", type="TOOL", name="lookup", parent_span_id="root", is_app_root=0,
+              input="x", output="result-1"),
+        _span(span_id="tool-2", type="TOOL", name="update", parent_span_id="root", is_app_root=0,
+              input="y", output="result-2"),
+    ]
+    config = {"is_advanced": True, "span_types": ["TOOL"],
+              "prompt": "step @STEP_NUMBER: @CURRENT_STEP.tool_result"}
+    results = _judge(SPAN).run(_ctx(spans), config)
+    assert [r.target_span_id for r in results] == ["tool-1", "tool-2"]
+    assert "step 1: result-1" in prompts[0]
+    assert "step 2: result-2" in prompts[1]
+
+
+def test_needs_thread_context_gates_on_conversation_scoped_vars():
+    from tracely.services.evaluation_service import _needs_thread_context
+
+    step_local = {"kind": "llm_judge", "config": {"is_advanced": True, "template_variables": ["CURRENT_STEP.tool_call"]}}
+    convo = {"kind": "llm_judge", "config": {"is_advanced": True, "template_variables": ["HISTORY"]}}
+    basic = {"kind": "llm_judge", "config": {"prompt": "grade it"}}
+    assert _needs_thread_context([step_local]) is False  # step-local pays nothing
+    assert _needs_thread_context([basic]) is False
+    assert _needs_thread_context([convo]) is True

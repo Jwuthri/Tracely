@@ -16,13 +16,14 @@ from sqlalchemy.orm import Session
 
 from tracely.config import settings
 from tracely.domain.gate.warnings import delta_warnings
-from tracely.domain.regression.contract import evaluate_assertions
+from tracely.domain.regression.contract import apply_quality, evaluate_assertions
 from tracely.domain.regression.fixtures import FixtureBundle
 from tracely.domain.trajectory import build_trajectory
 from tracely.domain.traces.spans import input_digest
 from tracely.infrastructure.blob import s3 as blobstore
 from tracely.infrastructure.clickhouse.trace_reader import TraceReader
 from tracely.infrastructure.db.models import Agent, EvaluationCase, GateCase, GateRun
+from tracely.services.evaluation_service import EvaluationService
 
 log = structlog.get_logger()
 
@@ -34,9 +35,12 @@ class GateService:
         self,
         session: Session,
         trace_reader: TraceReader | None = None,
+        eval_service: EvaluationService | None = None,
     ) -> None:
         self.session = session
         self.trace_reader = trace_reader or TraceReader()
+        # Used to re-grade answer quality on a replayed trace (the judge-in-the-gate).
+        self.eval_service = eval_service or EvaluationService(trace_reader=self.trace_reader)
 
     # ── public ops ────────────────────────────────────────────────────────────
 
@@ -101,7 +105,7 @@ class GateService:
 
         gate.passed, gate.failed, gate.skipped = passed, failed, skipped
         gate.latency_ms, gate.total_tokens, gate.warnings = total_lat, total_tok, warnings
-        gate.status = self._final_status(failed, warnings)
+        gate.status = self._final_status(passed, failed, skipped, gate.total, warnings)
         gate.finished_at = datetime.now(timezone.utc)
         self.session.commit()
         return gate
@@ -169,6 +173,13 @@ class GateService:
                 verdict, detail = evaluate_assertions(
                     case.assertions or {}, case.match_mode, build_trajectory(spans)
                 )
+                # Judge-in-the-gate: cases promoted from an answer-quality failure re-grade the
+                # replayed answer; a sub-threshold score FAILs the case (unless made advisory).
+                if (case.assertions or {}).get("quality"):
+                    quality = self._grade_quality(case, spans)
+                    verdict, detail = apply_quality(
+                        verdict, detail, quality, blocks=settings.gate_quality_blocks
+                    )
                 lat, tok = per_trace.get(cand, (0.0, 0))
                 detail = {**detail, "latency_ms": lat, "tokens": tok}
                 if verdict == "PASS":
@@ -180,6 +191,16 @@ class GateService:
                 candidate_trace_id=cand, verdict=verdict, detail=detail,
             ))
         return passed, failed, skipped
+
+    def _grade_quality(self, case: EvaluationCase, spans: list[dict]) -> list[dict]:
+        """Re-grade a replayed trace's answer with the judge(s) the case was promoted from.
+        Returns `[{score_name, verdict, value, comment}, ...]` for `apply_quality`."""
+        names = ((case.assertions or {}).get("quality") or {}).get("score_names") or None
+        results = self.eval_service.grade_trace_quality(case.project_id, spans, only_names=names)
+        return [
+            {"score_name": r.name, "verdict": r.verdict, "value": r.value, "comment": r.comment}
+            for r in results
+        ]
 
     def _baseline_gate(
         self, project_id: str, agent_id: str, exclude_id: str
@@ -197,9 +218,26 @@ class GateService:
         ).scalar_one_or_none()
 
     @staticmethod
-    def _final_status(failed: int, warnings: list[str]) -> str:
+    def _final_status(
+        passed: int, failed: int, skipped: int, total: int, warnings: list[str]
+    ) -> str:
+        """Aggregate case verdicts into the gate status.
+
+        Coverage is a first-class part of the verdict. A gate that exercised NONE of its
+        promoted cases — every case SKIPped because CI emitted no matching trace — must NOT
+        report green: that false-PASS is exactly how a misconfigured CI pipeline (no traces
+        emitted, renamed agent, input-digest drift, crashed replay) silently ships a known
+        regression. Such a run is `NO_COVERAGE`, a blocking non-PASS status. (Previously this
+        method only looked at `failed`, so all-SKIP returned PASS — the gate's worst bug.)
+        """
         if failed > 0:
             return "FAIL"  # fail-to-pass is the hard gate
+        if total == 0:
+            return "PASS"  # no regression suite for this agent yet — nothing to protect
+        if passed == 0:
+            return "NO_COVERAGE"  # cases exist but the run exercised none of them
+        if skipped > 0 and settings.gate_require_full_coverage:
+            return "NO_COVERAGE"  # partial coverage, and full coverage is required
         if warnings and settings.gate_block_on_warnings:
             return "FAIL"  # opt-in: treat soft regressions as blocking
         return "PASS"

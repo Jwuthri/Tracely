@@ -17,7 +17,10 @@ import {
   type EvaluatorTemplate,
   type JudgeModels,
 } from "../lib/evaluators";
+import { extractVariablesFromPrompt, hasTemplateVariables } from "../lib/templateVariables";
+import { AdvancedPromptEditor } from "./AdvancedPromptEditor";
 import { OutputSchemaBuilder } from "./OutputSchemaBuilder";
+import { PromptPreview } from "./PromptPreview";
 
 // ── Add Evaluation Column ───────────────────────────────────────────────────────
 // The TurnWise-style wizard: Browse Library (one click) · Manual (form) · Use AI
@@ -189,6 +192,16 @@ function configFromForm(f: FormState, previous?: EvaluatorConfig): EvaluatorConf
   config.prompt = f.prompt.trim();
   config.output_type = f.outputType;
   config.execution_mode = f.executionMode;
+  // Advanced-ness follows the prompt's @VARIABLEs (the backend recomputes this authoritatively on
+  // save — mirror it here so the optimistic column object matches what's persisted).
+  const templateVars = extractVariablesFromPrompt(config.prompt);
+  if (templateVars.length > 0) {
+    config.is_advanced = true;
+    config.template_variables = templateVars;
+  } else {
+    delete config.is_advanced;
+    delete config.template_variables;
+  }
   if (f.model.trim()) config.model = f.model.trim();
   else delete config.model;
   if (f.outputType === "score" || f.outputType === "number" || f.outputType === "json") {
@@ -213,19 +226,28 @@ function configFromForm(f: FormState, previous?: EvaluatorConfig): EvaluatorConf
   return config;
 }
 
+// Which prompt tab a seeded config opens on: advanced when it's flagged or its prompt carries @VARIABLEs.
+function modeForConfig(config: EvaluatorConfig): "basic" | "advanced" {
+  return config.is_advanced || hasTemplateVariables(config.prompt ?? "") ? "advanced" : "basic";
+}
+
 export function AddColumnModal({
   open,
   onClose,
   onSaved,
   editing,
+  previewThread,
 }: {
   open: boolean;
   onClose: () => void;
   onSaved: (ev: EvaluatorDef) => void;
   editing?: EvaluatorDef | null;
+  previewThread?: string; // a conversation id the advanced preview defaults to (what the user is viewing)
 }) {
   const [step, setStep] = useState<Step>("type");
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  // Basic = plain rubric (trace context auto-appended); Advanced = @VARIABLE template the user controls.
+  const [promptMode, setPromptMode] = useState<"basic" | "advanced">("basic");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   // Use AI
@@ -259,9 +281,11 @@ export function AddColumnModal({
         },
         editing.config ?? {},
       ));
+      setPromptMode(modeForConfig(editing.config ?? {}));
       setStep("config");
     } else {
       setForm(EMPTY_FORM);
+      setPromptMode("basic");
       setStep("type");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -297,6 +321,7 @@ export function AddColumnModal({
       t.config ?? {},
       t.score_name,
     ));
+    setPromptMode(modeForConfig(t.config ?? {}));
     setStep("config");
   }
 
@@ -313,6 +338,7 @@ export function AddColumnModal({
         },
         draft.config ?? {},
       ));
+      setPromptMode(modeForConfig(draft.config ?? {}));
       setStep("config");
     } catch (e) {
       setError(e instanceof Error ? e.message : "generation failed");
@@ -459,7 +485,7 @@ export function AddColumnModal({
               {/* Manual + AI cards */}
               <div className="grid grid-cols-2 gap-3">
                 <button
-                  onClick={() => { setForm(EMPTY_FORM); setStep("config"); }}
+                  onClick={() => { setForm(EMPTY_FORM); setPromptMode("basic"); setStep("config"); }}
                   className="group flex flex-col items-center gap-2.5 rounded-lg border border-line bg-ink-700/40 p-5 text-center transition-colors hover:border-line-bright hover:bg-ink-600/50"
                 >
                   <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-info/15 text-info">
@@ -717,17 +743,56 @@ export function AddColumnModal({
               ) : (
                 <>
                   <div>
-                    <label className="mb-1.5 block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">Evaluation Prompt</label>
-                    <textarea
-                      value={form.prompt}
-                      onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))}
-                      rows={5}
-                      placeholder="You are evaluating the quality of an AI assistant's response. Consider…"
-                      className="w-full resize-y rounded-lg border border-line bg-ink-900/60 px-3 py-2 text-[12.5px] leading-relaxed text-fg placeholder:text-fg-faint/60 focus:border-signal/40 focus:outline-none"
-                    />
-                    <p className="mt-1.5 text-[10.5px] text-fg-faint">
-                      Trace content (request, answer, tool results / transcript / step I/O) is appended automatically.
-                    </p>
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <label className="block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">Evaluation Prompt</label>
+                      <div className="flex items-center gap-0.5 rounded-md border border-line bg-ink-900/60 p-0.5">
+                        {(["basic", "advanced"] as const).map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setPromptMode(m)}
+                            className={clsx(
+                              "rounded px-2.5 py-0.5 text-[10.5px] font-medium capitalize transition-colors",
+                              promptMode === m
+                                ? "bg-emerald-500/15 text-emerald-300"
+                                : "text-fg-faint hover:text-fg-muted",
+                            )}
+                          >
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {promptMode === "basic" ? (
+                      <>
+                        <textarea
+                          value={form.prompt}
+                          onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))}
+                          rows={5}
+                          placeholder="You are evaluating the quality of an AI assistant's response. Consider…"
+                          className="w-full resize-y rounded-lg border border-line bg-ink-900/60 px-3 py-2 text-[12.5px] leading-relaxed text-fg placeholder:text-fg-faint/60 focus:border-signal/40 focus:outline-none"
+                        />
+                        <p className="mt-1.5 text-[10.5px] text-fg-faint">
+                          Trace content (request, answer, tool results / transcript / step I/O) is appended automatically.
+                        </p>
+                      </>
+                    ) : (
+                      <div className="space-y-2.5">
+                        <AdvancedPromptEditor
+                          value={form.prompt}
+                          onChange={(v) => setForm((f) => ({ ...f, prompt: v }))}
+                          level={form.level}
+                          sequential={form.executionMode === "sequential"}
+                          placeholder="Grade the answer. Use @HISTORY, @GOAL, @CURRENT_STEP.tool_call, … (type @ for variables)"
+                        />
+                        {form.executionMode === "sequential" && (
+                          <p className="text-[10.5px] text-fg-faint">
+                            Tip: use <span className="font-mono text-emerald-400">@METRIC_PREVIOUS_RESULT</span> to read the previous evaluation result.
+                          </p>
+                        )}
+                        <PromptPreview prompt={form.prompt} level={form.level} defaultThread={previewThread} />
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">

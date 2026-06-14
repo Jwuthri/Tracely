@@ -27,6 +27,41 @@ def evaluate_case(case, traj: Trajectory) -> tuple[str, dict]:
     return evaluate_assertions(case.assertions or {}, case.match_mode, traj)
 
 
+def apply_quality(
+    verdict: str,
+    detail: dict[str, Any],
+    quality: list[dict] | None,
+    *,
+    blocks: bool,
+) -> tuple[str, dict]:
+    """Fold answer-quality judge results into a structural case verdict (the judge-in-the-gate).
+
+    `quality` is what re-running the case's answer-quality judge(s) on the produced trajectory's
+    trace yielded — a list of `{score_name, verdict, value, comment}`. A FAIL flips the case to
+    FAIL when `blocks` (the default), catching wrong/hallucinated answers a structural check
+    (tool sequence + no-error) cannot. When not blocking, the result is recorded but advisory.
+
+    Pure: the (impure) judge call happens in the service; this only combines the outcome. When
+    `quality` is empty/None — no quality assertion, no enabled judge, or no LLM key — the verdict
+    is unchanged and `quality_checked=False` records that the answer wasn't graded.
+    """
+    if not quality:
+        return verdict, {**detail, "quality_checked": False}
+    failed = [q for q in quality if q.get("verdict") == "FAIL"]
+    worst = failed[0] if failed else quality[0]
+    merged = {
+        **detail,
+        "quality_checked": True,
+        "quality_pass": not failed,
+        "quality_score": worst.get("value"),
+        "quality_score_name": worst.get("score_name"),
+        "quality_reason": worst.get("comment"),
+    }
+    if failed and blocks:
+        return "FAIL", merged
+    return verdict, merged
+
+
 def evaluate_assertions(
     assertions: dict[str, Any],
     match_mode_default: str,

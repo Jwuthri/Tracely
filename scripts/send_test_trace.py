@@ -64,6 +64,10 @@ def main() -> None:
     hallucinate = os.environ.get("HALLUCINATE", "") not in ("", "0", "false")
     env = os.environ.get("ENV", "")  # e.g. "ci" for a CI run; empty -> prod
     random_run = os.environ.get("RANDOM", "") not in ("", "0", "false")
+    # QUERY_IDX picks the user query (0-based into _QUERIES). Different queries → different inputs
+    # → different input_digests, so two demo scenarios (e.g. a silent-failure case and a
+    # hallucination case) don't collide on the idempotency key.
+    query_idx = int(os.environ.get("QUERY_IDX", "0") or "0") % len(_QUERIES)
 
     if random_run:
         import secrets
@@ -74,11 +78,13 @@ def main() -> None:
         # Pick a random query variant for diversity.
         idx = int.from_bytes(trace_id[:1], "big") % len(_QUERIES)
     else:
-        # Deterministic base: same variant always produces the same trace_id so re-runs dedup.
+        # Deterministic base: same (variant, query, env) always produces the same trace_id so
+        # re-runs dedup. Query index is in a distinct bit region so scenarios stay separable.
         base = 0xFACADE if hallucinate else 0x511EE7 if silent else 0xF0FFEE if fixed else 0xC0FFEE
-        trace_id = (base + (0x010000 if env == "ci" else 0)).to_bytes(16, "big")
+        base += (0x010000 if env == "ci" else 0) + (query_idx * 0x01000000)
+        trace_id = base.to_bytes(16, "big")
         now = time.time_ns()
-        idx = 0
+        idx = query_idx
 
     user_query, city = _QUERIES[idx]
 
@@ -94,16 +100,18 @@ def main() -> None:
     ])
 
     if hallucinate:
-        # Tool succeeds but the model fabricates a contradictory answer.
+        # Tool succeeds (get_weather returns 64°F/sunny) but the model fabricates a contradictory,
+        # absurd answer — a QUALITY failure no structural check catches (the tool DID run).
+        fabricated = (
+            f"It's 9000°F and snowing heavily in {city} right now, "
+            "and the midnight sun is blazing overhead at noon."
+        )
         llm_output = json.dumps({
             "role": "assistant",
-            "content": (
-                "It's 9000°F and snowing heavily in San Francisco right now, "
-                "and the midnight sun is blazing over the bay."
-            ),
+            "content": fabricated,
             "finish_reason": "stop",
         })
-        agent_answer = "It's 9000°F and snowing heavily in San Francisco right now."
+        agent_answer = fabricated
     elif fixed or silent:
         llm_output = json.dumps({
             "role": "assistant",

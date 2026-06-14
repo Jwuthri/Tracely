@@ -43,6 +43,15 @@ def evaluator_get(s: Session, project_id: str, evaluator_id: str) -> Evaluator |
     return e if e and e.project_id == project_id else None
 
 
+def agent_slug(s: Session, project_id: str, agent_id: str) -> str:
+    """The slug for an agent id within a project ("" if unknown) — used to match an evaluator's
+    `target_agent` (a human-set slug) against a trace whose spans carry the agent id."""
+    if not agent_id:
+        return ""
+    a = s.get(Agent, agent_id)
+    return a.slug if a and a.project_id == project_id else ""
+
+
 def evaluator_score_names(s: Session, project_id: str) -> set[str]:
     return set(
         s.execute(
@@ -126,6 +135,9 @@ def evaluator_enabled_specs(
         {
             "id": r.id, "kind": r.kind, "config": r.config or {},
             "score_name": r.score_name, "level": r.level,
+            # targeting + sampling — the runner applies these on the auto (on-ingest) run
+            "target_agent": r.target_agent or "", "target_env": r.target_env or "",
+            "sampling": r.sampling if r.sampling is not None else 1.0,
         }
         for r in s.execute(
             select(Evaluator)

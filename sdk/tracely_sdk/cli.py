@@ -23,8 +23,8 @@ import urllib.request
 
 MARKER = "<!-- tracely-gate -->"
 STATUS_CONTEXT = "tracely/regression-gate"
-ICON = {"PASS": "✓", "FAIL": "✗", "SKIP": "–"}
-EMOJI = {"PASS": "✅", "FAIL": "❌", "SKIP": "⏭️"}
+ICON = {"PASS": "✓", "FAIL": "✗", "SKIP": "–", "NO_COVERAGE": "⚠"}
+EMOJI = {"PASS": "✅", "FAIL": "❌", "SKIP": "⏭️", "NO_COVERAGE": "⚠️"}
 
 
 # ── Tracely API ──────────────────────────────────────────────────────────────
@@ -73,6 +73,11 @@ def case_reason(detail: dict) -> str:
         bits.append("errors: " + ", ".join(d["erroring_steps"]))
     if not d.get("tools_ok", True) and not d.get("missing_tools"):
         bits.append(f"tool sequence mismatch (mode={d.get('match_mode', '')})")
+    if d.get("quality_pass") is False:  # judge-in-the-gate: the replayed answer is still bad
+        q = "answer quality below bar"
+        if d.get("quality_reason"):
+            q += f": {d['quality_reason']}"
+        bits.append(q)
     if d.get("reason"):  # SKIP carries a plain reason
         bits.append(str(d["reason"]))
     return "; ".join(bits)
@@ -90,12 +95,17 @@ def render_console(data: dict, sha: str) -> None:
         print(f"  {ICON.get(c['verdict'], '?')} {c['verdict']:<4} {c['title']}{extra}")
     for w in data.get("warnings") or []:
         print(f"  ⚠️  {w}")
+    if data["status"] == "NO_COVERAGE":
+        print(
+            f"\n  ⚠ NO COVERAGE — exercised 0 of {data.get('total', 0)} promoted case(s); "
+            "no CI traces matched. Treated as a failure (a gate that tests nothing must not pass)."
+        )
     print(f"\n  Result: {data['status']}\n")
 
 
 def render_markdown(data: dict, web_url: str, sha: str) -> str:
     status = data["status"]
-    head = "🔴" if status == "FAIL" else "🟢" if status == "PASS" else "⚪"
+    head = {"FAIL": "🔴", "PASS": "🟢", "NO_COVERAGE": "🟠"}.get(status, "⚪")
     sha_txt = f"`{sha[:7]}`" if sha else ""
     lines = [
         MARKER,
@@ -122,6 +132,14 @@ def render_markdown(data: dict, web_url: str, sha: str) -> str:
         lines.append(
             "> These regression tests were promoted from **real production failures**. "
             "A FAIL means this change reintroduces — or fails to fix — a known failure."
+        )
+        lines.append("")
+    if status == "NO_COVERAGE":
+        lines.append(
+            f"> ⚠️ **No coverage.** This run exercised **0 of {data.get('total', 0)}** promoted "
+            "regression case(s) — CI emitted no trace matching them (a misconfigured replay step, "
+            "a renamed agent, or an input-digest mismatch). A gate that tests nothing is **not** a "
+            "pass — fix the CI step so the suite actually runs."
         )
         lines.append("")
     if web_url:
@@ -242,7 +260,11 @@ def post_pr_check(
         print("note: not in a GitHub repo context (no GITHUB_REPOSITORY); skipping PR check")
         return
     gh = GitHub(token, dry_run=args.dry_run)
-    state = {"PASS": "success", "FAIL": "failure"}.get(data["status"], "error")
+    # NO_COVERAGE is a blocking non-PASS (the gate exercised nothing) → a failing check, not a
+    # transient "error". Exit code is already non-zero for any non-PASS (see cmd_gate/cmd_replay).
+    state = {"PASS": "success", "FAIL": "failure", "NO_COVERAGE": "failure"}.get(
+        data["status"], "error"
+    )
     desc = f"{data['passed']} passed · {data['failed']} failed · {data['skipped']} skipped"
     target = f"{web_url.rstrip('/')}/gates/{data['id']}" if web_url else ""
     if sha:
