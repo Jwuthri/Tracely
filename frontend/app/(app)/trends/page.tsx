@@ -1,6 +1,7 @@
 import { getTrends } from "@/app/lib/api";
 import { StatCard } from "@/app/components/ui";
 import { Bars, Legend } from "@/app/components/Bars";
+import { MetaAnalysisPanel } from "@/app/components/MetaAnalysisPanel";
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const mmdd = (d: string) => d.slice(5); // YYYY-MM-DD -> MM-DD
@@ -70,6 +71,8 @@ export default async function TrendsPage() {
           <Legend items={[["bg-ok/30", "passed"], ["bg-fail/70", "failed"]]} />
         </section>
       </div>
+
+      <MetaAnalysisPanel />
     </div>
   );
 }

@@ -31,9 +31,19 @@ def ingest_otlp_blob(self, project_id: str, key: str, content_type: str) -> dict
 @celery_app.task(name="tracely.evaluate_run", bind=True, max_retries=3, default_retry_delay=3)
 def evaluate_run_task(self, project_id: str, trace_id: str) -> dict:
     try:
-        return EvaluationService().evaluate_trace(project_id, trace_id)
+        result = EvaluationService().evaluate_trace(project_id, trace_id)
     except Exception as exc:
         raise self.retry(exc=exc)
+    # Real-time rolling summary: fold this turn into the thread's accumulating summary. Incremental
+    # (only new spans are summarized) and best-effort — a summary failure must never fail the run.
+    try:
+        from tracely.services.rolling_summary_service import RollingSummaryService
+
+        thread_id = result.get("thread_id") or trace_id
+        RollingSummaryService().build_for_thread(project_id, thread_id, source="ingest")
+    except Exception as exc:
+        log.warning("rolling_summary_ingest_failed", trace_id=trace_id, error=str(exc))
+    return result
 
 
 @celery_app.task(name="tracely.rebuild_clusters", bind=True, max_retries=0)

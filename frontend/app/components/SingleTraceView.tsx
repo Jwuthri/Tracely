@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { useState } from "react";
 import type { ConvNode, SpanOut } from "../lib/api";
 import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
+import { AgentsSidePanel } from "./AgentsSidePanel";
 import { TraceTable } from "./TraceTable";
 import { Waterfall } from "./Waterfall";
 import { Badge, verdictVariant } from "./ui";
@@ -22,6 +23,7 @@ export function SingleTraceView({
 }) {
   const [tab, setTab] = useState<"table" | "timeline">("table");
   const [wide, setWide] = useWide();
+  const [showAgents, setShowAgents] = useState(false);
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-1 border-b border-line">
@@ -39,6 +41,18 @@ export function SingleTraceView({
               evals {verdict}
             </Badge>
           )}
+          <button
+            onClick={() => setShowAgents(true)}
+            title="Agents & tools in this trace"
+            className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-[12px] text-fg-muted transition-colors hover:border-signal/40 hover:text-fg"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <rect x="4" y="8" width="16" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
+              <path d="M12 4v4M9 13h.01M15 13h.01" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              <circle cx="12" cy="3.5" r="1.2" fill="currentColor" />
+            </svg>
+            Agents
+          </button>
           <WideToggle wide={wide} onToggle={() => setWide(!wide)} />
         </div>
       </div>
@@ -46,6 +60,9 @@ export function SingleTraceView({
         {tab === "table" && <TraceTable conversations={[conv]} embedded />}
         {tab === "timeline" && <Waterfall spans={spans} />}
       </div>
+      {showAgents && (
+        <AgentsSidePanel threadId={conv.thread} onClose={() => setShowAgents(false)} />
+      )}
     </div>
   );
 }

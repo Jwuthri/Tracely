@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode, type SVGProps } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type SVGProps } from "react";
 import { useRouter } from "next/navigation";
 import type { ConvNode, EvalScore, FullTurn, SpanOut, ThreadTurn } from "../lib/api";
 import { convUsage, fmtUsd, spanUsage, turnUsage, usageSummary } from "../lib/usage";
@@ -109,6 +109,7 @@ const COLUMNS: Col[] = [
   { key: "ctime",        label: "Datetime",     group: "C", width: 160 },
   { key: "cdur",         label: "Duration",     group: "C", width: 96 },
   { key: "summary", label: "Summary", group: "C", width: 320 },
+  { key: "crsummary", label: "Rolling summary", group: "C", width: 240 },
   { key: "cmeta", label: "Metadata", group: "C", width: 200 },
   { key: "cusage", label: "Usage", group: "C", width: 180 },
   { key: "role", label: "Role", group: "M", width: 110 },
@@ -116,6 +117,7 @@ const COLUMNS: Col[] = [
   { key: "mtime", label: "Datetime", group: "M", width: 160 },
   { key: "mdur",  label: "Duration", group: "M", width: 96 },
   { key: "content", label: "Content", group: "M", width: 420 },
+  { key: "mrsummary", label: "Rolling summary", group: "M", width: 240 },
   { key: "musage", label: "Usage", group: "M", width: 180 },
   { key: "sindex", label: "#", group: "S", width: 56 },
   { key: "type", label: "Type", group: "S", width: 120 },
@@ -126,6 +128,7 @@ const COLUMNS: Col[] = [
   { key: "name", label: "Name", group: "S", width: 170 },
   { key: "input", label: "Input", group: "S", width: 240 },
   { key: "output", label: "Output", group: "S", width: 240 },
+  { key: "srsummary", label: "Rolling summary", group: "S", width: 240 },
   { key: "susage", label: "Usage", group: "S", width: 180 },
 ];
 
@@ -922,6 +925,55 @@ const EvalViewContext = createContext<EvalView>({
   runThread: () => {}, runTrace: () => {}, runColumn: () => {}, editColumn: () => {}, removeColumn: () => {},
 });
 
+// ── rolling summary (the per-row accumulated summary at C/M/S levels) ─────────────
+// Fetched once per thread (the conversation row triggers it) and merged into id-keyed maps, so the
+// turn / step cells just read by trace_id / span_id. `undefined` = not loaded yet, "" = no summary.
+type RollingSummaryView = {
+  conversations: Record<string, string>;
+  traces: Record<string, string>;
+  spans: Record<string, string>;
+  ensure: (thread: string) => void;
+  generate: (thread: string) => void;
+  generating: Set<string>;
+};
+const RollingSummaryContext = createContext<RollingSummaryView>({
+  conversations: {}, traces: {}, spans: {}, ensure: () => {}, generate: () => {}, generating: new Set(),
+});
+
+const RS_DISPLAY_CLIP = 512; // cells show at most the top 512 chars of the accumulated summary
+
+function RollingSummaryCell({
+  thread, kind, id,
+}: { thread?: string; kind: "conversation" | "trace" | "span"; id?: string }) {
+  const rs = useContext(RollingSummaryContext);
+  useEffect(() => {
+    if (thread) rs.ensure(thread);
+  }, [thread, rs]);
+  const text =
+    kind === "conversation" ? (thread ? rs.conversations[thread] : undefined)
+    : kind === "trace" ? (id ? rs.traces[id] : undefined)
+    : id ? rs.spans[id] : undefined;
+  if (text === undefined) return <span className="text-slate-600">…</span>; // not generated/loaded yet
+  if (!text) {
+    // Loaded but empty. At conversation level offer an inline generate (summaries are thread-scoped,
+    // so turn/step cells can't generate on their own — they fill in once the thread is built).
+    if (kind === "conversation" && thread) {
+      const busy = rs.generating.has(thread);
+      return (
+        <button
+          onClick={() => rs.generate(thread)}
+          disabled={busy}
+          className="font-mono text-[11px] text-slate-500 transition-colors hover:text-cyan-400 disabled:opacity-50"
+        >
+          {busy ? "generating…" : "generate"}
+        </button>
+      );
+    }
+    return <span className="text-slate-500">—</span>;
+  }
+  return <TextPill text={text.slice(0, RS_DISPLAY_CLIP)} />;
+}
+
 // Where a streamed score lands in `live` (mirrors the per-cell lookup keys).
 function scoreKey(s: EvalScore): string | null {
   if (s.observation_id) return `span:${s.observation_id}|${s.name}`;
@@ -1119,6 +1171,8 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
     }
     case "summary":
       return ctx.level === "C" ? <ConvSummaryCell conv={ctx.conv} /> : null;
+    case "crsummary":
+      return ctx.level === "C" ? <RollingSummaryCell thread={ctx.conv.thread} kind="conversation" /> : null;
     case "cmeta": {
       if (ctx.level !== "C") return null;
       // backend-aggregated thread metadata (available in the list); else union from loaded spans.
@@ -1151,6 +1205,8 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
         : null;
     case "content":
       return ctx.level === "M" ? <TurnMessage raw={ctx.role === "user" ? ctx.turn.input : ctx.turn.output} role={ctx.role} /> : null;
+    case "mrsummary":
+      return ctx.level === "M" ? <RollingSummaryCell thread={ctx.conv.thread} kind="trace" id={ctx.turn.trace_id} /> : null;
     case "musage":
       return ctx.level === "M" && ctx.role === "assistant" ? <UsageCell usage={turnUsage(ctx.turn)} /> : null;
     // S group
@@ -1201,6 +1257,8 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
         ? <MessageContent raw={asRoleMessage("assistant", raw)} />
         : <MessageContent raw={raw} />;
     }
+    case "srsummary":
+      return ctx.level === "S" ? <RollingSummaryCell kind="span" id={ctx.span.span_id} /> : null;
     case "susage":
       return ctx.level === "S" ? <UsageCell usage={spanUsage(ctx.span)} /> : null;
     default:
@@ -1651,6 +1709,68 @@ export function TraceTable({
     void getEvaluatorCost(30).then(setEvalCost).catch(() => {});
   }, []);
 
+  // ── rolling summary: fetch a thread's by-level summaries once (the conversation row triggers
+  // it), merged into id-keyed maps so the turn/step cells read by trace_id / span_id. ──
+  const [rsum, setRsum] = useState<{
+    conversations: Record<string, string>;
+    traces: Record<string, string>;
+    spans: Record<string, string>;
+  }>({ conversations: {}, traces: {}, spans: {} });
+  const [rsumGenerating, setRsumGenerating] = useState<Set<string>>(new Set());
+  const rsumInflight = useRef<Set<string>>(new Set());
+
+  const loadRsum = useCallback((thread: string) => {
+    rsumInflight.current.add(thread);
+    return fetch(`/api/sessions/${encodeURIComponent(thread)}/rolling-summary/by-level`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        setRsum((p) => ({
+          conversations: { ...p.conversations, [thread]: d.conversation ?? "" },
+          traces: { ...p.traces, ...(d.traces ?? {}) },
+          spans: { ...p.spans, ...(d.spans ?? {}) },
+        }));
+      })
+      .catch(() => {})
+      .finally(() => rsumInflight.current.delete(thread));
+  }, []);
+
+  const ensureRsum = useCallback(
+    (thread: string) => {
+      if (!thread || rsumInflight.current.has(thread) || rsum.conversations[thread] !== undefined) return;
+      void loadRsum(thread);
+    },
+    [loadRsum, rsum.conversations],
+  );
+
+  const generateRsum = useCallback(
+    (thread: string) => {
+      if (!thread || rsumGenerating.has(thread)) return;
+      setRsumGenerating((p) => new Set(p).add(thread));
+      void fetch(`/api/sessions/${encodeURIComponent(thread)}/rolling-summary/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      })
+        .then(() => loadRsum(thread))
+        .catch(() => {})
+        .finally(() => setRsumGenerating((p) => { const n = new Set(p); n.delete(thread); return n; }));
+    },
+    [loadRsum, rsumGenerating],
+  );
+
+  const rsumView = useMemo<RollingSummaryView>(
+    () => ({
+      conversations: rsum.conversations,
+      traces: rsum.traces,
+      spans: rsum.spans,
+      ensure: ensureRsum,
+      generate: generateRsum,
+      generating: rsumGenerating,
+    }),
+    [rsum, ensureRsum, generateRsum, rsumGenerating],
+  );
+
   // Fixed columns first, then EVERY metric column at the right end of the table (ordered
   // C-metrics → M-metrics → S-metrics, creation order within a level), each with its own
   // cycled column tint — the TurnWise layout.
@@ -1856,6 +1976,7 @@ export function TraceTable({
 
   return (
     <EvalViewContext.Provider value={evalView}>
+      <RollingSummaryContext.Provider value={rsumView}>
       <div
         style={!embedded && wide ? WIDE_STYLE : undefined}
         className="overflow-hidden rounded-lg border border-slate-700 transition-[width,margin] duration-200"
@@ -1959,6 +2080,7 @@ export function TraceTable({
         onClose={() => setColumnModal({ open: false, editing: null })}
         onSaved={() => void listEvaluators().then(setEvaluators)}
       />
+      </RollingSummaryContext.Provider>
     </EvalViewContext.Provider>
   );
 }

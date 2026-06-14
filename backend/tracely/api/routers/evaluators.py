@@ -159,12 +159,23 @@ async def resolve_prompt(
     level = body.level if body.level in VALID_LEVELS else "AGENT_RUN"
     thread_id = body.thread_id or body.trace_id
     spans = await async_reader.thread_spans_full(project_id, thread_id) if thread_id else []
+    wanted = extract_template_variables(body.prompt)
+    # Prefer the rolling summary for @HISTORY/@MESSAGES so the preview matches what the run path
+    # grades (run==preview parity); falls back to the raw transcript when no summary exists.
+    history_override = None
+    if thread_id and ({"HISTORY", "MESSAGES"} & {w.split(".", 1)[0] for w in wanted}):
+        from tracely.services.rolling_summary_service import RollingSummaryService
+
+        history_override = await run_in_threadpool(
+            RollingSummaryService.history_override, project_id, thread_id
+        )
     context = build_context(
         level,
         thread_spans=spans,
         current_trace_id=body.trace_id or thread_id,
         current_span_id=body.span_id or None,
-        wanted_vars=extract_template_variables(body.prompt),
+        wanted_vars=wanted,
+        history_override=history_override,
     )
     resolved = template_resolver.resolve(body.prompt, context)
     return {

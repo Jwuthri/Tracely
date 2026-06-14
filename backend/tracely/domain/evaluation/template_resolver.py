@@ -366,6 +366,7 @@ def build_context(
     current_span_id: str | None = None,
     metric_previous_result: dict | None = None,
     wanted_vars: list[str] | None = None,
+    history_override: str | None = None,
 ) -> EvaluationContext:
     """Build the `EvaluationContext` for ONE evaluated item from already-fetched span dicts.
 
@@ -373,6 +374,10 @@ def build_context(
     just the current trace's spans (the conversation collapses to one turn — fine, since the
     cross-trace vars aren't materialized). `wanted_vars` (bare names) restricts materialization to
     referenced variables; `None` materializes everything applicable.
+
+    `history_override` (optional): a precomputed history string (the rolling summary) used for
+    `@HISTORY`/`@MESSAGES` instead of rebuilding the raw transcript from spans. None → raw
+    transcript (the original behavior), so this stays non-breaking.
     """
     ctx = EvaluationContext(metric_previous_result=metric_previous_result)
     want = _base_names(wanted_vars)
@@ -386,17 +391,22 @@ def build_context(
     ios = [(_turn_io(spans)) for _, spans in turns]  # [(user, answer), ...]
     cl = catalog_level(level)
 
-    # whole-conversation vars
+    # whole-conversation vars — prefer a precomputed rolling summary for @HISTORY/@MESSAGES,
+    # else rebuild the raw transcript from spans (original behavior).
     if need("HISTORY") or need("MESSAGES"):
-        lines: list[str] = []
-        for user, answer in ios:
-            if user:
-                lines.append(f"[user]: {_clip(user, _MSG_CLIP)}")
-            if answer:
-                lines.append(f"[assistant]: {_clip(answer, _MSG_CLIP)}")
-        transcript = _clip("\n".join(lines), _HISTORY_CLIP)
-        ctx.history = transcript or None
-        ctx.messages = transcript or None
+        if history_override:
+            ctx.history = history_override
+            ctx.messages = history_override
+        else:
+            lines: list[str] = []
+            for user, answer in ios:
+                if user:
+                    lines.append(f"[user]: {_clip(user, _MSG_CLIP)}")
+                if answer:
+                    lines.append(f"[assistant]: {_clip(answer, _MSG_CLIP)}")
+            transcript = _clip("\n".join(lines), _HISTORY_CLIP)
+            ctx.history = transcript or None
+            ctx.messages = transcript or None
     if need("USER_MESSAGES"):
         ctx.user_messages = "\n".join(f"[user]: {_clip(u, _MSG_CLIP)}" for u, _ in ios if u) or None
     if need("ASSISTANT_MESSAGES"):

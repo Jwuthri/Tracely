@@ -183,7 +183,11 @@ class EvaluationService:
         log.info(
             "evaluated", trace_id=trace_id, scores=len(results) + conv_count, failures=len(fail_results)
         )
-        return {"scores": len(results) + conv_count, "failures": len(fail_results)}
+        return {
+            "scores": len(results) + conv_count,
+            "failures": len(fail_results),
+            "thread_id": thread_id,
+        }
 
     def evaluate_thread(
         self,

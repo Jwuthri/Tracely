@@ -229,6 +229,45 @@ async def sessions_overview(
     return rows
 
 
+async def thread_agents(project_id: str, thread_id: str) -> list[dict]:
+    """The agents that participated in a thread and the tools each used, DERIVED from the thread's
+    spans (Tracely ingests OTLP — there is no richer agent catalog than the trace itself). Each:
+    `{agent_id, tools: [{name, count}], span_count, tool_call_count}` where `count` is the number
+    of executed TOOL spans for that tool (a tool only *requested* — seen in `tool_call_names` —
+    shows count 0). Sorted by tool activity then span volume. The router resolves friendly names."""
+    spans = await thread_spans_full(project_id, thread_id)
+    spans_by_agent: dict[str, int] = defaultdict(int)
+    tools_touched: dict[str, set[str]] = defaultdict(set)
+    tool_execs: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for s in spans:
+        aid = s.get("agent_id") or ""
+        spans_by_agent[aid] += 1
+        name = s.get("name")
+        if s.get("type") == "TOOL" and name:
+            tool_execs[aid][str(name)] += 1
+            tools_touched[aid].add(str(name))
+        for t in s.get("tool_call_names") or []:
+            if t:
+                tools_touched[aid].add(str(t))
+
+    out: list[dict] = []
+    for aid, span_count in spans_by_agent.items():
+        tools = sorted(
+            ({"name": n, "count": tool_execs[aid].get(n, 0)} for n in tools_touched[aid]),
+            key=lambda t: (-t["count"], t["name"]),
+        )
+        out.append(
+            {
+                "agent_id": aid,
+                "tools": tools,
+                "span_count": span_count,
+                "tool_call_count": sum(t["count"] for t in tools),
+            }
+        )
+    out.sort(key=lambda a: (a["tool_call_count"], a["span_count"]), reverse=True)
+    return out
+
+
 async def session_turns(project_id: str, thread_id: str) -> list[dict]:
     """The turns (traces) inside one thread, oldest-first — a simple conversation replay."""
     client = await get_async_client()
@@ -313,6 +352,85 @@ async def conversation_scores_by_thread(
 async def conversation_scores(project_id: str, thread_id: str) -> list[dict]:
     """One thread's CONVERSATION-level scores."""
     return (await conversation_scores_by_thread(project_id, [thread_id])).get(thread_id, [])
+
+
+async def agent_trace_ids(
+    project_id: str, agent_id: str, limit: int = 2000
+) -> list[dict]:
+    """`[{trace_id, thread}]` for an agent's traces (newest first, capped). A trace is attributed
+    to the agent of its ROOT span (matching how evaluation/failure-intel attribute runs); a trace
+    with a conversation belongs to that thread, otherwise it is its own 1-turn thread. `agent_id`
+    blank → every trace in the project (whole-project analysis)."""
+    client = await get_async_client()
+    having = "HAVING anyIf(agent_id, parent_span_id = '') = {a:String}" if agent_id else ""
+    params: dict = {"p": project_id, "n": max(1, limit)}
+    if agent_id:
+        params["a"] = agent_id
+    res = await client.query(
+        f"""
+        SELECT trace_id,
+               if(max(conversation_id) != '', max(conversation_id), trace_id) AS thread,
+               min(start_time) AS ts
+        FROM events FINAL
+        WHERE project_id = {{p:String}}
+        GROUP BY trace_id
+        {having}
+        ORDER BY ts DESC
+        LIMIT {{n:UInt32}}
+        """,
+        parameters=params,
+    )
+    return [{"trace_id": r[0], "thread": r[1]} for r in res.result_rows]
+
+
+async def agent_score_rows(
+    project_id: str, agent_id: str, max_traces: int = 2000
+) -> list[dict]:
+    """Flat online-eval score rows for an agent, across ALL levels, for meta-analysis. Each row:
+    `{conversation_id (thread), trace_id, metric_name, evaluation_level, value, string_value,
+    verdict}`. Composes the trace lookup with the existing per-trace + per-thread score readers
+    (so conversation-level scores — which carry no trace_id — are included via their thread)."""
+    traces = await agent_trace_ids(project_id, agent_id, max_traces)
+    if not traces:
+        return []
+    thread_of = {t["trace_id"]: t["thread"] for t in traces}
+    trace_ids = list(thread_of)
+    threads = list(dict.fromkeys(thread_of.values()))
+
+    by_trace = await scores_by_trace(project_id, trace_ids)
+    conv = await conversation_scores_by_thread(project_id, threads)
+
+    rows: list[dict] = []
+    for tid, scores in by_trace.items():
+        thread = thread_of.get(tid, tid)
+        for sc in scores:
+            # scores_by_trace returns all levels for a trace; conversation-level rows have no
+            # trace_id so they don't appear here — they come from conv below (deduped per thread).
+            rows.append(
+                {
+                    "conversation_id": thread,
+                    "trace_id": tid,
+                    "metric_name": sc["name"],
+                    "evaluation_level": sc["evaluation_level"],
+                    "value": sc["value"],
+                    "string_value": sc.get("string_value", ""),
+                    "verdict": sc.get("verdict", ""),
+                }
+            )
+    for thread, scores in conv.items():
+        for sc in scores:
+            rows.append(
+                {
+                    "conversation_id": thread,
+                    "trace_id": None,
+                    "metric_name": sc["name"],
+                    "evaluation_level": sc["evaluation_level"],
+                    "value": sc["value"],
+                    "string_value": sc.get("string_value", ""),
+                    "verdict": sc.get("verdict", ""),
+                }
+            )
+    return rows
 
 
 # ── search / stats / trends ───────────────────────────────────────────────────

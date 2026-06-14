@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type { SpanOut, Thread, ThreadTurn } from "../lib/api";
 import { resolvePromptPreview, type EvaluatorLevel, type ResolvedPreview } from "../lib/evaluators";
 import { catalogLevel } from "../lib/templateVariables";
+import { Markdown } from "./Markdown";
 
 // Live preview: resolve the advanced @VARIABLE prompt against a real conversation/turn/step and
 // show the result with used (green) / missing (amber) badges. Navigation reuses the existing
@@ -38,6 +39,7 @@ export function PromptPreview({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState(false);
+  const [raw, setRaw] = useState(false);
 
   // conversations (once)
   useEffect(() => {
@@ -170,21 +172,43 @@ export function PromptPreview({
         <p className="text-[11px] text-fg-faint">Write a prompt with <span className="font-mono text-emerald-400">@variables</span> to preview the resolved text.</p>
       ) : result ? (
         <>
-          <pre
-            className={clsx(
-              "overflow-auto whitespace-pre-wrap break-words rounded-md border border-line bg-ink-950/60 p-2.5 font-mono text-[11px] leading-relaxed text-fg-muted",
-              expanded ? "max-h-96" : "max-h-44",
-            )}
-          >
-            {result.resolved_prompt}
-          </pre>
-          <button
-            type="button"
-            onClick={() => setExpanded((x) => !x)}
-            className="text-[10.5px] text-fg-faint transition-colors hover:text-fg-muted"
-          >
-            {expanded ? "Collapse" : "Expand"}
-          </button>
+          {raw ? (
+            <pre
+              className={clsx(
+                "overflow-auto whitespace-pre-wrap break-words rounded-md border border-line bg-ink-950/60 p-2.5 font-mono text-[11px] leading-relaxed text-fg-muted",
+                expanded ? "max-h-96" : "max-h-44",
+              )}
+            >
+              {result.resolved_prompt}
+            </pre>
+          ) : (
+            <div
+              className={clsx(
+                "overflow-auto rounded-md border border-line bg-ink-950/60 p-2.5",
+                expanded ? "max-h-96" : "max-h-44",
+              )}
+            >
+              <Markdown content={result.resolved_prompt} className="space-y-1.5" />
+            </div>
+          )}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setExpanded((x) => !x)}
+              className="text-[10.5px] text-fg-faint transition-colors hover:text-fg-muted"
+            >
+              {expanded ? "Collapse" : "Expand"}
+            </button>
+            <span className="text-fg-faint">·</span>
+            <button
+              type="button"
+              onClick={() => setRaw((x) => !x)}
+              title={raw ? "Render as Markdown" : "Show the exact resolved text the judge receives"}
+              className="text-[10.5px] text-fg-faint transition-colors hover:text-fg-muted"
+            >
+              {raw ? "Rendered" : "Raw"}
+            </button>
+          </div>
         </>
       ) : null}
     </div>

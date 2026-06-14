@@ -307,6 +307,22 @@ class LLMJudgeEvaluator(Evaluator):
 
     # ── advanced (template) grading ──────────────────────────────────────────
 
+    def _history_override(self, ctx: RunContext, wanted: list[str]) -> str | None:
+        """The rolling-summary history for `@HISTORY`/`@MESSAGES`, when one exists for this thread —
+        a compact, prefix-stable substitute for the raw transcript. None (the default) leaves the
+        raw transcript in place, so behavior is unchanged when no summary has been generated."""
+        names = {w.split(".", 1)[0] for w in (wanted or [])}
+        if not ({"HISTORY", "MESSAGES"} & names):
+            return None
+        try:
+            from tracely.services.rolling_summary_service import RollingSummaryService
+
+            return RollingSummaryService.history_override(
+                ctx.project_id, ctx.thread_id or ctx.trace_id
+            )
+        except Exception:  # a cache miss/error must never block a grade
+            return None
+
     def _run_advanced(self, ctx: RunContext, config: dict) -> list[EvalResult]:
         """Advanced judge: resolve the user's `@VARIABLE` template against the trace/thread, then
         grade. Mirrors the basic per-level dispatch — but the user controls the context. Uses
@@ -315,20 +331,28 @@ class LLMJudgeEvaluator(Evaluator):
         template = config.get("prompt") or ""
         wanted = config.get("template_variables") or extract_template_variables(template)
         thread_spans = ctx.thread_spans or ctx.spans
+        history_override = self._history_override(ctx, wanted)
         if self.level in STEP_LEVELS:
-            return self._run_advanced_steps(ctx, config, template, wanted, thread_spans)
+            return self._run_advanced_steps(ctx, config, template, wanted, thread_spans, history_override)
         context = build_context(
             self.level,
             thread_spans=thread_spans,
             current_trace_id=ctx.trace_id,
             metric_previous_result=_previous_from_config(config),
             wanted_vars=wanted,
+            history_override=history_override,
         )
         result = self._grade_resolved(config, template, context)
         return [result] if result else []
 
     def _run_advanced_steps(
-        self, ctx: RunContext, config: dict, template: str, wanted: list[str], thread_spans: list[dict]
+        self,
+        ctx: RunContext,
+        config: dict,
+        template: str,
+        wanted: list[str],
+        thread_spans: list[dict],
+        history_override: str | None = None,
     ) -> list[EvalResult]:
         """One advanced grade per qualifying step (reusing the basic candidate selection + cap),
         threading the previous result into `@METRIC_PREVIOUS_RESULT` in sequential mode."""
@@ -343,6 +367,7 @@ class LLMJudgeEvaluator(Evaluator):
                 current_span_id=s.get("span_id"),
                 metric_previous_result=previous,
                 wanted_vars=wanted,
+                history_override=history_override,
             )
             result = self._grade_resolved(config, template, context)
             if result:

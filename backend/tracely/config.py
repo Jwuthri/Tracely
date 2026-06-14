@@ -64,6 +64,22 @@ class Settings(BaseSettings):
     fi_umap_min_n: int = 50
     fi_min_cluster_size: int = 2
 
+    # Meta-analysis ("Analyze"): cross-metric correlation/outlier synthesis over an agent's
+    # evaluator scores. The stats (Spearman, z-score) are deterministic Python; only the prose
+    # synthesis is an LLM call — a slightly larger model than the per-cell judge is worth it here
+    # since it reasons over the whole metric set at once. Goes through provider.run_structured_agent.
+    meta_analysis_model: str = "openai/gpt-5-mini"
+
+    # Rolling summary: the per-span accumulating conversation summary that backs @HISTORY / the
+    # conversation judge (compressed history instead of the raw transcript). A step whose components
+    # fit under `rolling_summary_step_max_tokens` is kept VERBATIM (no LLM, no information loss);
+    # only larger steps are summarized by the model. The summarizer goes through the provider seam.
+    rolling_summary_model: str = "openai/gpt-5.4-nano"
+    rolling_summary_step_max_tokens: int = 512
+    # Whole-summary budget: when the accumulated summary exceeds this many tokens, the older items
+    # (everything but the last 2, which stay verbatim) are recursively compacted into one block.
+    rolling_summary_max_tokens: int = 20000
+
     # CI/CD gate soft thresholds — latency/token deltas vs the baseline (last green gate) raise a
     # WARNING by default (not a hard fail); fail-to-pass stays the only blocking gate unless the
     # block flag is set. Percentages are "% worse than baseline".

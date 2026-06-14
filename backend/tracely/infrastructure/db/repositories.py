@@ -12,6 +12,7 @@ import re
 from uuid import uuid4
 
 from sqlalchemy import desc, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from tracely.infrastructure.db.models import (
@@ -23,6 +24,8 @@ from tracely.infrastructure.db.models import (
     FailureCluster,
     GateCase,
     GateRun,
+    MetaAnalysis,
+    RollingSummary,
 )
 
 # ── evaluators (= evaluation columns) ─────────────────────────────────────────
@@ -50,6 +53,23 @@ def agent_slug(s: Session, project_id: str, agent_id: str) -> str:
         return ""
     a = s.get(Agent, agent_id)
     return a.slug if a and a.project_id == project_id else ""
+
+
+def agents_list(s: Session, project_id: str) -> list[Agent]:
+    """A project's registered agents (for the meta-analysis agent selector), newest first."""
+    return list(
+        s.execute(
+            select(Agent)
+            .where(Agent.project_id == project_id)
+            .order_by(desc(Agent.created_at))
+        ).scalars()
+    )
+
+
+def agent_in_project(s: Session, project_id: str, agent_id: str) -> Agent | None:
+    """An agent by id, scoped to the project (None if unknown / cross-tenant)."""
+    a = s.get(Agent, agent_id)
+    return a if a and a.project_id == project_id else None
 
 
 def evaluator_score_names(s: Session, project_id: str) -> set[str]:
@@ -369,3 +389,166 @@ def gate_cluster_trends(s: Session, project_id: str) -> dict:
         "resolved_clusters": resolved_c,
         "mttr_hours": mttr_hours,
     }
+
+
+# ── meta-analyses ─────────────────────────────────────────────────────────────
+
+
+def meta_analysis_create(
+    s: Session, project_id: str, *, agent_id: str, result: dict, meta: dict
+) -> MetaAnalysis:
+    """Persist a meta-analysis result. A fresh row per run (history is kept); the UI reads the
+    latest via `meta_analysis_latest_for_agent`."""
+    ma = MetaAnalysis(
+        id=str(uuid4()),
+        project_id=project_id,
+        agent_id=agent_id or "",
+        analysis_type="agent",
+        result=result or {},
+        meta=meta or {},
+    )
+    s.add(ma)
+    s.commit()
+    s.refresh(ma)
+    return ma
+
+
+def meta_analysis_latest_for_agent(
+    s: Session, project_id: str, agent_id: str
+) -> MetaAnalysis | None:
+    """The most recent analysis for this (project, agent) — what the panel shows on open."""
+    return (
+        s.execute(
+            select(MetaAnalysis)
+            .where(
+                MetaAnalysis.project_id == project_id,
+                MetaAnalysis.agent_id == (agent_id or ""),
+            )
+            .order_by(desc(MetaAnalysis.created_at))
+            .limit(1)
+        ).scalars().first()
+    )
+
+
+def meta_analysis_get(s: Session, project_id: str, analysis_id: str) -> MetaAnalysis | None:
+    ma = s.get(MetaAnalysis, analysis_id)
+    return ma if ma and ma.project_id == project_id else None
+
+
+def meta_analysis_delete(s: Session, project_id: str, analysis_id: str) -> bool:
+    ma = meta_analysis_get(s, project_id, analysis_id)
+    if ma is None:
+        return False
+    s.delete(ma)
+    s.commit()
+    return True
+
+
+# ── rolling summaries ─────────────────────────────────────────────────────────
+
+
+def rolling_summary_get_by_span(
+    s: Session, project_id: str, span_id: str
+) -> RollingSummary | None:
+    return (
+        s.execute(
+            select(RollingSummary).where(
+                RollingSummary.project_id == project_id, RollingSummary.span_id == span_id
+            )
+        ).scalars().first()
+    )
+
+
+def rolling_summary_latest_for_thread(
+    s: Session, project_id: str, thread_id: str
+) -> RollingSummary | None:
+    """The highest-step_order row = the whole-conversation summary."""
+    return (
+        s.execute(
+            select(RollingSummary)
+            .where(
+                RollingSummary.project_id == project_id, RollingSummary.thread_id == thread_id
+            )
+            .order_by(desc(RollingSummary.step_order), desc(RollingSummary.created_at))
+            .limit(1)
+        ).scalars().first()
+    )
+
+
+def rolling_summary_latest_before(
+    s: Session, project_id: str, thread_id: str, step_order: int
+) -> RollingSummary | None:
+    """The accumulated summary strictly before `step_order` — seeds continued accumulation."""
+    return (
+        s.execute(
+            select(RollingSummary)
+            .where(
+                RollingSummary.project_id == project_id,
+                RollingSummary.thread_id == thread_id,
+                RollingSummary.step_order < step_order,
+            )
+            .order_by(desc(RollingSummary.step_order))
+            .limit(1)
+        ).scalars().first()
+    )
+
+
+def rolling_summary_list_for_thread(
+    s: Session, project_id: str, thread_id: str
+) -> list[RollingSummary]:
+    return list(
+        s.execute(
+            select(RollingSummary)
+            .where(
+                RollingSummary.project_id == project_id, RollingSummary.thread_id == thread_id
+            )
+            .order_by(RollingSummary.step_order)
+        ).scalars()
+    )
+
+
+def rolling_summary_create(
+    s: Session,
+    project_id: str,
+    *,
+    thread_id: str,
+    trace_id: str,
+    span_id: str,
+    step_order: int,
+    summary: list,
+    token_count: int,
+    meta: dict,
+) -> RollingSummary:
+    """Insert one step's accumulated summary. Race-safe: a concurrent writer that already inserted
+    this span (unique project+span) makes us roll back and return the existing row."""
+    rs = RollingSummary(
+        id=str(uuid4()),
+        project_id=project_id,
+        thread_id=thread_id,
+        trace_id=trace_id or "",
+        span_id=span_id,
+        step_order=step_order,
+        summary=summary or [],
+        token_count=token_count,
+        meta=meta or {},
+    )
+    s.add(rs)
+    try:
+        s.commit()
+    except IntegrityError:
+        s.rollback()
+        existing = rolling_summary_get_by_span(s, project_id, span_id)
+        if existing is not None:
+            return existing
+        raise
+    s.refresh(rs)
+    return rs
+
+
+def rolling_summary_delete_for_thread(s: Session, project_id: str, thread_id: str) -> int:
+    """Drop a thread's summaries (force-regenerate). Returns rows removed."""
+    rows = rolling_summary_list_for_thread(s, project_id, thread_id)
+    for r in rows:
+        s.delete(r)
+    s.commit()
+    return len(rows)

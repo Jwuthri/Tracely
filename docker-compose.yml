@@ -26,6 +26,13 @@ x-app-env: &app-env
   OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   LLM_JUDGE_API_KEY: ${OPENAI_API_KEY:-}
+  # Meta-analysis ("Analyze") synthesis model + rolling-summary compression model. The heavy
+  # lifting (correlations/outliers; verbatim short steps) is deterministic; these only set the
+  # model for the prose/compression LLM calls (both via the OpenRouter provider).
+  META_ANALYSIS_MODEL: ${META_ANALYSIS_MODEL:-openai/gpt-5-mini}
+  ROLLING_SUMMARY_MODEL: ${ROLLING_SUMMARY_MODEL:-openai/gpt-5.4-nano}
+  ROLLING_SUMMARY_STEP_MAX_TOKENS: ${ROLLING_SUMMARY_STEP_MAX_TOKENS:-512}
+  ROLLING_SUMMARY_MAX_TOKENS: ${ROLLING_SUMMARY_MAX_TOKENS:-20000}
   # Auth (default "dev" = no human login, ingest key only — the stack runs open out of the box).
   # Self-host: set AUTH_MODE=local and SESSION_SECRET ($(openssl rand -hex 32)) in .env, then docker compose up
   AUTH_MODE: ${AUTH_MODE:-dev}

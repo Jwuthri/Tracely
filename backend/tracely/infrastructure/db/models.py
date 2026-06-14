@@ -332,3 +332,50 @@ class FailureEmbedding(Base):
     summary: Mapped[str] = mapped_column(String(4000), default="")
     embedding: Mapped[list[float]] = mapped_column(Vector(settings.embedding_dim))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MetaAnalysis(Base):
+    """A cross-metric meta-analysis over an agent's evaluator scores: Spearman correlations +
+    z-score outliers (computed deterministically in Python) plus an LLM-written synthesis
+    (patterns / recommendations / summary). Scoped per (project, agent); `agent_id` is the events
+    agent id (Agent uuid) the analysis covered, or "" for a whole-project analysis. `result` holds
+    the full `MetaAnalysisOutput`; `meta` holds run provenance (model, counts, agent slug)."""
+
+    __tablename__ = "meta_analyses"
+    __table_args__ = (Index("ix_meta_analyses_project_agent", "project_id", "agent_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    agent_id: Mapped[str] = mapped_column(String(64), default="")
+    analysis_type: Mapped[str] = mapped_column(String(32), default="agent")
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RollingSummary(Base):
+    """A per-span ACCUMULATING summary of a conversation: one row per span (step), each holding the
+    full compressed summary of every step from the start of the thread up to and including it. The
+    last row (highest `step_order`) is the whole-conversation summary. Backs the `@HISTORY` /
+    conversation-judge context as a cache (stored compressed history instead of re-sending the raw
+    transcript). Generation is idempotent — one row per (project, span)."""
+
+    __tablename__ = "rolling_summaries"
+    __table_args__ = (
+        UniqueConstraint("project_id", "span_id", name="uq_rolling_summary_project_span"),
+        Index("ix_rolling_summaries_thread", "project_id", "thread_id", "step_order"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    thread_id: Mapped[str] = mapped_column(String(64))
+    trace_id: Mapped[str] = mapped_column(String(64), default="")
+    span_id: Mapped[str] = mapped_column(String(64))
+    step_order: Mapped[int] = mapped_column(Integer, default=0)
+    summary: Mapped[list] = mapped_column(JSON, default=list)
+    token_count: Mapped[int] = mapped_column(Integer, default=0)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
