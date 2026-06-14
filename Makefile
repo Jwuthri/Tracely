@@ -1,4 +1,4 @@
-.PHONY: help infra-up infra-down infra-prune install migrate migrate-ch migrate-pg seed backend workers frontend docs test send-trace demo-failures gate replay sdk-example auto-openai auto-agent run-all-examples seed-demo seed-regression fmt
+.PHONY: help infra-up infra-down infra-prune install migrate migrate-ch migrate-pg seed demo backend workers frontend docs test send-trace demo-failures gate replay sdk-example auto-openai auto-agent run-all-examples seed-demo seed-regression fmt
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -27,6 +27,9 @@ migrate-pg:  ## apply Postgres (Alembic) migrations
 seed:        ## create the default project + ingest key (tracely_dev_key)
 	uv run python -m tracely.services.seeding_service
 
+demo:        ## populate the WHOLE product in one go — traces + clusters + Cases + Gates (needs backend+worker up)
+	TRACELY_API=$(TRACELY_API) uv run python scripts/seed_demo.py
+
 backend:     ## run FastAPI (ingestion + reads) on :8000
 	uv run uvicorn tracely.api.main:app --reload --port 8000
 
@@ -45,8 +48,8 @@ test:        ## run backend tests
 send-trace:  ## post a sample OTLP trace to the running API
 	uv run python scripts/send_test_trace.py
 
-# Override the target when the API is not on :8000 — e.g. `make demo-failures TRACELY_API=http://localhost:8088`
-TRACELY_API ?= http://localhost:8088
+# Override the target when the API is not on :8000 — e.g. `make demo TRACELY_API=http://localhost:8088`
+TRACELY_API ?= http://localhost:8000
 demo-failures: ## seed a mix of failing runs (errors + silent + hallucinations) for the clustering demo
 	@for i in 1 2 3 4 5; do TRACELY_API=$(TRACELY_API) RANDOM=1 uv run python scripts/send_test_trace.py; done
 	@for i in 1 2 3 4 5 6 7 8 9; do TRACELY_API=$(TRACELY_API) RANDOM=1 SILENT=1 uv run python scripts/send_test_trace.py; done

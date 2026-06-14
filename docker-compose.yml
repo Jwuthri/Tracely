@@ -184,6 +184,30 @@ services:
       - ./sdk:/app/sdk
       - ./scripts:/app/scripts
 
+  # one-shot (profile "demo"): populate the WHOLE product — conversations + failure clusters + the
+  # regression/gate half — so the running instance never shows the empty Test/Ship side (the
+  # "looks like a Langfuse clone" state). Idempotent; safe to leave enabled across restarts.
+  #   docker compose --profile demo up -d --build --wait
+  demo:
+    image: tracely-backend
+    profiles: ["demo"]
+    environment:
+      <<: *app-env
+      TRACELY_API: http://backend:8000
+      TRACELY_KEY: tracely_dev_key
+    depends_on:
+      backend:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    command: ["python", "scripts/seed_demo.py"]
+    volumes:                       # live source so script edits apply without an image rebuild
+      - ./backend:/app/backend
+      - ./workers:/app/workers
+      - ./sdk:/app/sdk
+      - ./scripts:/app/scripts
+    restart: "no"
+
   frontend:
     image: tracely-frontend
     build:

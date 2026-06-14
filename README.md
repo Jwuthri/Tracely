@@ -6,6 +6,8 @@
 
 📖 New here? Read the guided tour in **[OVERVIEW.md](OVERVIEW.md)**. Want the rationale? The full **[design dossier](design/README.md)** reverse-engineers Langfuse and designs Tracely on top.
 
+🎬 **See the moat in 2 minutes → [DEMO.md](DEMO.md):** re-break an agent and watch the CI gate block the PR with a step-aligned trajectory diff — the move no dataset-first tool can reproduce.
+
 ---
 
 ## The spine
@@ -44,9 +46,9 @@ TRACELY_BACKEND_PORT=8088 TRACELY_WEB_PORT=3002 docker compose up -d --build --w
 
 open http://localhost:3001/traces              # the UI  (TRACELY_WEB_PORT to remap)
 
-# populate a rich demo, then refresh:
-docker compose exec backend python sdk/examples/seed_conversations.py   # every trace shape (RAG, multi-agent, multimodal, …)
-docker compose exec backend python sdk/examples/seed_regression.py      # + a red→green CI gate demo (fills Cases + Gates)
+# populate the WHOLE product (traces + clusters + Cases + Gates) in one command:
+docker compose --profile demo up -d --build --wait     # adds a one-shot `demo` seeder, then refresh
+# (or seed an already-running stack:  docker compose exec backend python scripts/seed_demo.py)
 # or a single sample trace:  docker compose exec backend python scripts/send_test_trace.py
 docker compose down                            # stop  (add -v to wipe data)
 ```
@@ -62,7 +64,7 @@ make seed          # default project + ingest key → tracely_dev_key
 make backend       # FastAPI  :8000  (OpenAPI at /docs)   ┐
 make workers       # Celery ingestion/eval worker          ├ three terminals
 make frontend      # Next.js  :3001                        ┘
-make seed-demo     # rich demo conversations   ·   make seed-regression   (red→green CI gate)
+make demo          # populate the WHOLE product in one go: traces + clusters + Cases + Gates
 make send-trace    # a single sample OTLP trace
 make test          # backend unit tests (no infra)
 ```
