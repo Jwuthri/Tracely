@@ -160,11 +160,12 @@ async def resolve_prompt(
     thread_id = body.thread_id or body.trace_id
     spans = await async_reader.thread_spans_full(project_id, thread_id) if thread_id else []
     wanted = extract_template_variables(body.prompt)
-    # Prefer the rolling summary for @HISTORY/@MESSAGES so the preview matches what the run path
-    # grades (run==preview parity); falls back to the raw transcript when no summary exists.
+    # The rolling summary backs @ROLLING_SUMMARY and substitutes for @HISTORY/@MESSAGES so the
+    # preview matches what the run path grades (run==preview parity); falls back to the raw
+    # transcript when no summary exists.
     base_names = {w.split(".", 1)[0] for w in wanted}
     history_override = None
-    if thread_id and ({"HISTORY", "MESSAGES"} & base_names):
+    if thread_id and ({"HISTORY", "MESSAGES", "ROLLING_SUMMARY"} & base_names):
         from tracely.services.rolling_summary_service import RollingSummaryService
 
         history_override = await run_in_threadpool(

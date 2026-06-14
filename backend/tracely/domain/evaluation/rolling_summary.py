@@ -25,6 +25,9 @@ from tracely.domain.evaluation.text import content_text
 # Local type constants (mirror otel vocabulary; avoid importing the evaluators package).
 THINKING = "THINKING"
 TOOL = "TOOL"
+GENERATION = "GENERATION"
+CHAIN = "CHAIN"
+AGENT = "AGENT"
 
 ROLE_USER = "user"
 ROLE_ASSISTANT = "assistant"
@@ -82,6 +85,115 @@ def components_token_total(components: list[Component]) -> int:
     return sum(estimate_tokens(c.content) for c in components)
 
 
+# --- readable-text extraction -------------------------------------------------
+# Span I/O arrives as JSON strings wrapping chat messages / content blocks / framework envelopes.
+# `user_text` pulls the human REQUEST out of an input; `assistant_text` pulls the model REPLY out of
+# an output. Both return "" when there is no human text (e.g. a pure tool-calling turn), which is how
+# the caller decides between an `output_content` item and a structured fallback. Distinct from
+# `content_text` (first-text-or-raw) so a structured blob is never stored verbatim as `content`.
+
+# user-request envelope keys, in priority order (CrewAI/OpenAI {question}, LangChain {messages}, …)
+_USER_KEYS = ("question", "query", "prompt", "input", "text", "content", "message")
+
+
+def _maybe_json(value: object) -> object:
+    """Parse a JSON-looking string into its object; pass anything else (incl. plain strings) through."""
+    if isinstance(value, str):
+        s = value.strip()
+        if s[:1] in ("[", "{"):
+            try:
+                return json.loads(s)
+            except (ValueError, TypeError):
+                return value
+    return value
+
+
+def _message_items(value: object) -> list[dict]:
+    """The chat-message dicts in `value` — a single `{role|content}` dict or a list of them. A
+    content-block array (`[{type,text}]`) is NOT messages (handled by `_block_text`)."""
+    if isinstance(value, dict):
+        return [value] if ("role" in value or "content" in value) else []
+    if isinstance(value, list):
+        return [m for m in value if isinstance(m, dict) and ("role" in m or "content" in m)]
+    return []
+
+
+def _block_text(content: object) -> str:
+    """Text from a message `content`: a plain string, or a content-block array `[{type:text,text}]`
+    / Gemini-style `[{text}]`, joined. "" when there's nothing textual."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for b in content:
+            if isinstance(b, dict) and isinstance(b.get("text"), str):
+                parts.append(b["text"])
+            elif isinstance(b, str):
+                parts.append(b)
+        return "\n".join(p for p in parts if p)
+    return ""
+
+
+def assistant_text(value: object) -> str:
+    """The model's readable reply from a span output (last non-empty assistant/model message, or a
+    bare content/content-block). "" for a pure tool-calling turn (empty `content` + `tool_calls`)."""
+    value = _maybe_json(value)
+    msgs = _message_items(value)
+    if msgs:
+        for m in reversed(msgs):  # prefer the last assistant/model message with text
+            if m.get("role") in (ROLE_ASSISTANT, "model", None):
+                t = _block_text(m.get("content"))
+                if t.strip():
+                    return t
+        for m in reversed(msgs):  # otherwise any message with text
+            t = _block_text(m.get("content"))
+            if t.strip():
+                return t
+        return ""
+    if isinstance(value, str):
+        return value
+    return _block_text(value)  # bare content-block array
+
+
+def user_text(value: object) -> str:
+    """The human request from a span input — unwraps message arrays (last `user` message), common
+    envelopes ({question}/{messages}/{input}/…), Google-ADK `{new_message:{parts:[{text}]}}`, and
+    content-block arrays. "" when nothing readable is found."""
+    value = _maybe_json(value)
+    msgs = _message_items(value)
+    if msgs:
+        for m in reversed(msgs):  # the most recent user turn
+            if m.get("role") == ROLE_USER:
+                t = _block_text(m.get("content"))
+                if t.strip():
+                    return t
+        t = _block_text(msgs[0].get("content"))  # no explicit user role → first message
+        if t.strip():
+            return t
+    if isinstance(value, dict):
+        nm = value.get("new_message")  # Google ADK
+        if isinstance(nm, dict):
+            t = _block_text(nm.get("parts"))
+            if t.strip():
+                return t
+        if value.get("messages"):
+            t = user_text(value["messages"])
+            if t.strip():
+                return t
+        for k in _USER_KEYS:
+            v = value.get(k)
+            if isinstance(v, str) and v.strip():
+                return v
+            if v is not None and not isinstance(v, str):  # nested envelope, e.g. input:{messages:[…]}
+                t = user_text(v)
+                if t.strip():
+                    return t
+        return ""
+    if isinstance(value, str):
+        return value
+    return _block_text(value)
+
+
 def compacted_item(content: str) -> dict:
     """The compacted older-history block — one item with the `prev_summary` role (not a wrapper
     key). Sits at the front of the list ahead of the verbatim recent items."""
@@ -126,20 +238,60 @@ def _as_structured(out: object) -> str | None:
 
 
 def _tool_args(span: dict) -> str | None:
+    """The tool-call arguments as a compact JSON string. Unwraps a sole `{kwargs:{…}}` / `{args:[],
+    kwargs:{…}}` envelope (LlamaIndex) down to the real kwargs."""
     tcs = span.get("tool_calls")
     if tcs:
         try:
             return _clip(json.dumps(tcs, ensure_ascii=False), 600)
         except (TypeError, ValueError):
             return None
-    inp = content_text(span.get("input"))
-    return _clip(inp, 600) or None
+    obj = _maybe_json(span.get("input"))
+    if isinstance(obj, dict) and isinstance(obj.get("kwargs"), dict) and set(obj) <= {"args", "kwargs"}:
+        obj = obj["kwargs"]
+    if isinstance(obj, (dict, list)):
+        try:
+            return _clip(json.dumps(obj, ensure_ascii=False), 600) or None
+        except (TypeError, ValueError):
+            pass
+    return _clip(content_text(span.get("input")), 600) or None
+
+
+def _tool_result_text(value: object) -> str:
+    """The tool's result, preferring the real payload over framework wrappers — LlamaIndex
+    `{raw_output:…}`, Google-ADK `{response:…}` — falling back to readable text."""
+    obj = _maybe_json(value)
+    if isinstance(obj, dict):
+        for key in ("raw_output", "response"):
+            if obj.get(key) is not None:
+                try:
+                    return _clip(json.dumps(obj[key], ensure_ascii=False))
+                except (TypeError, ValueError):
+                    break
+    return _clip(content_text(value))
 
 
 def user_input_component(span: dict) -> Component | None:
     """The user request carried on a turn's root span input, if any."""
-    text = content_text(span.get("input"))
-    return Component(ROLE_USER, T_OUTPUT_CONTENT, _clip(text)) if text else None
+    text = user_text(span.get("input"))
+    return Component(ROLE_USER, T_OUTPUT_CONTENT, _clip(text)) if text and text.strip() else None
+
+
+def user_input_for_turn(tspans: list[dict], root_id: str | None = None) -> Component | None:
+    """The user request for a whole turn: the root span's input, else (frameworks whose root input is
+    a workflow-config blob, e.g. LlamaIndex) the last `user` message in the turn's first GENERATION
+    input. Returns None when no human request can be found."""
+    root = next((s for s in tspans if s.get("span_id") == root_id), None) if root_id else None
+    root = root or (tspans[0] if tspans else {})
+    uc = user_input_component(root)
+    if uc:
+        return uc
+    for s in tspans:
+        if (s.get("type") or "").upper() == GENERATION:
+            text = user_text(s.get("input"))
+            if text and text.strip():
+                return Component(ROLE_USER, T_OUTPUT_CONTENT, _clip(text))
+    return None
 
 
 def step_components(span: dict) -> list[Component]:
@@ -160,23 +312,60 @@ def step_components(span: dict) -> list[Component]:
         comps.append(
             Component(ROLE_ASSISTANT, T_TOOL_CALL, call_text, tool_name=name, tool_arguments=args)
         )
-        result = content_text(span.get("output"))
+        result = _tool_result_text(span.get("output"))
         if result:
-            comps.append(Component(ROLE_TOOL, T_TOOL_RESULT, _clip(result), tool_name=name))
+            comps.append(Component(ROLE_TOOL, T_TOOL_RESULT, result, tool_name=name))
         return comps
 
-    # generation / chain / agent / other: any requested tools, then the textual/structured output
-    for t in span.get("tool_call_names") or []:
-        if t:
-            comps.append(Component(ROLE_ASSISTANT, T_TOOL_CALL, str(t), tool_name=str(t)))
-    structured = _as_structured(span.get("output"))
-    if structured:
-        comps.append(Component(ROLE_ASSISTANT, T_OUTPUT_STRUCTURED, structured))
-    else:
-        txt = content_text(span.get("output"))
-        if txt:
-            comps.append(Component(ROLE_ASSISTANT, T_OUTPUT_CONTENT, _clip(txt)))
+    # generation / other: the model's readable reply, else a genuinely structured (non-message)
+    # output. Bare tool-call announces are intentionally dropped — the TOOL spans carry the real
+    # calls (name + args + result), so announcing them here would only duplicate.
+    out = span.get("output")
+    text = assistant_text(out)
+    if text and text.strip():
+        comps.append(Component(ROLE_ASSISTANT, T_OUTPUT_CONTENT, _clip(text)))
+    elif not _message_items(_maybe_json(out)):  # not a (text-less) chat message → real structured data
+        structured = _as_structured(out)
+        if structured:
+            comps.append(Component(ROLE_ASSISTANT, T_OUTPUT_STRUCTURED, structured))
     return comps
+
+
+def decompose_turn_span(
+    span: dict, *, is_root: bool, multi: bool, user_comp: Component | None
+) -> list[Component]:
+    """Components a span contributes to the rolling summary. The turn's root contributes the user
+    request (plus its own content only when it's the turn's single span); a non-root CHAIN/AGENT span
+    is a framework wrapper/router (LangGraph `tools_condition`, LlamaIndex `BaseWorkflowAgent.*`) whose
+    real content already lives in its child GENERATION/TOOL spans, so it contributes nothing."""
+    if is_root:
+        comps: list[Component] = []
+        if user_comp:
+            comps.append(user_comp)
+        if not multi:
+            comps += step_components(span)
+        return comps
+    if (span.get("type") or "").upper() in (CHAIN, AGENT):
+        return []
+    return step_components(span)
+
+
+def dedup_consecutive(prev_last: dict | None, new_items: list[dict]) -> list[dict]:
+    """`new_items` with any run of items identical (role+type+content) to the preceding item removed —
+    collapses the duplicate final-answer rows frameworks emit (wrapper span + generation span)."""
+    out: list[dict] = []
+    last = prev_last
+    for it in new_items:
+        if (
+            last
+            and last.get("role") == it.get("role")
+            and last.get("type") == it.get("type")
+            and (last.get("content") or "") == (it.get("content") or "")
+        ):
+            continue
+        out.append(it)
+        last = it
+    return out
 
 
 def items_from_components(

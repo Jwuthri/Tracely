@@ -6,12 +6,17 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from tracely.domain.evaluation.rolling_summary import (
+    assistant_text,
     components_token_total,
+    decompose_turn_span,
+    dedup_consecutive,
     format_summary_as_history,
     items_from_components,
     step_components,
     summary_token_total,
     user_input_component,
+    user_input_for_turn,
+    user_text,
 )
 from tracely.services import rolling_summary_service as rss
 from tracely.services.rolling_summary_service import RollingSummaryService
@@ -131,3 +136,114 @@ def test_compaction_noop_under_budget():
         out, n = svc._compact_to_budget(list(running))
     assert n == 0
     assert out == running  # untouched
+
+
+# --- readable-text extraction (the "object stored as content" defects) --------
+
+_Q = "Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-01) back in stock?"
+
+
+def test_user_text_unwraps_question_envelope():  # CrewAI / OpenAI / Anthropic / LiteLLM
+    assert user_text('{"question": "%s"}' % _Q) == _Q
+
+
+def test_user_text_unwraps_messages_envelope():  # LangChain / LangGraph / OpenRouter
+    assert user_text('{"messages": [{"role": "user", "content": "%s"}]}' % _Q) == _Q
+
+
+def test_user_text_unwraps_google_adk_new_message():
+    raw = '{"user_id": "ada", "session_id": "s", "new_message": {"parts": [{"text": "%s"}]}}' % _Q
+    assert user_text(raw) == _Q
+
+
+def test_user_text_picks_last_user_message_in_multiturn_input():
+    raw = (
+        '[{"role": "system", "content": "You are a bot"},'
+        ' {"role": "user", "content": "first question"},'
+        ' {"role": "assistant", "content": "an answer"},'
+        ' {"role": "user", "content": "second question"}]'
+    )
+    assert user_text(raw) == "second question"
+
+
+def test_user_text_empty_for_unrecognized_blob():  # LlamaIndex workflow init_state
+    assert user_text('{"init_state": {"is_running": false, "config": {}}}') == ""
+    assert user_text(None) == ""
+
+
+def test_assistant_text_unwraps_message_array():  # the headline defect
+    raw = '[{"role": "assistant", "content": "Your order is out for delivery."}]'
+    assert assistant_text(raw) == "Your order is out for delivery."
+
+
+def test_assistant_text_unwraps_model_role_and_blocks():  # Gemini / OpenAI-Agents / ADK
+    assert assistant_text('[{"role": "model", "content": "stock is fine"}]') == "stock is fine"
+    blocks = '[{"role": "assistant", "content": [{"type": "text", "text": "block answer"}]}]'
+    assert assistant_text(blocks) == "block answer"
+
+
+def test_assistant_text_empty_for_pure_tool_call_turn():  # content:"" + tool_calls
+    raw = '[{"role": "assistant", "content": "", "tool_calls": [{"id": "x", "function": {}}]}]'
+    assert assistant_text(raw) == ""
+    assert assistant_text('{"role": "assistant", "content": null}') == ""
+
+
+def test_generation_message_array_becomes_output_content_not_structured():
+    # CrewAI ReAct: the inner content text is extracted, NOT the [{role,content}] wrapper.
+    raw = '[{"role": "assistant", "content": "Thought: I need the order status.\\nFinal Answer: done."}]'
+    comps = step_components({"type": "GENERATION", "output": raw})
+    assert len(comps) == 1
+    assert comps[0].type == "output_content"
+    assert comps[0].content.startswith("Thought:")
+    assert "role" not in comps[0].content  # no JSON wrapper leaked into content
+
+
+def test_generation_tool_call_turn_yields_nothing():
+    # empty content + tool_calls → the TOOL spans represent the call; the generation adds nothing.
+    raw = '[{"role": "assistant", "content": "", "tool_calls": [{"id": "c", "function": {}}]}]'
+    assert step_components({"type": "GENERATION", "output": raw}) == []
+
+
+def test_tool_args_unwraps_llama_index_kwargs():
+    comps = step_components({"type": "TOOL", "name": "get_order_status",
+                            "input": '{"kwargs": {"order_id": "ORD-4471"}}', "output": "{}"})
+    assert comps[0].tool_arguments == '{"order_id": "ORD-4471"}'
+    assert "kwargs" not in comps[0].content
+
+
+def test_tool_result_prefers_raw_output_and_adk_response():
+    li = step_components({"type": "TOOL", "name": "t",
+                          "input": "{}", "output": '{"blocks": [{"text": "junk"}], "raw_output": {"ok": 1}}'})
+    assert li[1].content == '{"ok": 1}'
+    adk = step_components({"type": "TOOL", "name": "t",
+                           "input": "{}", "output": '{"id": "x", "name": "t", "response": {"ok": 2}}'})
+    assert adk[1].content == '{"ok": 2}'
+
+
+def test_decompose_skips_nonroot_chain_and_agent():
+    # LangGraph tools_condition router / LlamaIndex BaseWorkflowAgent.* → contribute nothing
+    routing = {"type": "CHAIN", "name": "tools_condition", "output": "__end__"}
+    assert decompose_turn_span(routing, is_root=False, multi=True, user_comp=None) == []
+    agent = {"type": "AGENT", "name": "sub", "output": "noise"}
+    assert decompose_turn_span(agent, is_root=False, multi=True, user_comp=None) == []
+    # a non-root GENERATION is still decomposed
+    gen = {"type": "GENERATION", "output": '[{"role": "assistant", "content": "hi"}]'}
+    out = decompose_turn_span(gen, is_root=False, multi=True, user_comp=None)
+    assert out and out[0].type == "output_content" and out[0].content == "hi"
+
+
+def test_user_input_for_turn_falls_back_to_generation_input():
+    # LlamaIndex: root input is a config blob → use the user message in the GENERATION input
+    root = {"span_id": "r", "type": "CHAIN", "input": '{"init_state": {"config": {}}}'}
+    gen = {"span_id": "g", "type": "GENERATION",
+           "input": '[{"role": "system", "content": "sys"}, {"role": "user", "content": "%s"}]' % _Q}
+    comp = user_input_for_turn([root, gen], root_id="r")
+    assert comp is not None and comp.role == "user" and comp.content == _Q
+
+
+def test_dedup_consecutive_drops_repeated_final_answer():
+    a = {"role": "assistant", "type": "output_content", "content": "same"}
+    b = {"role": "assistant", "type": "output_content", "content": "same"}
+    c = {"role": "assistant", "type": "output_content", "content": "different"}
+    assert dedup_consecutive(None, [a, b, c]) == [a, c]
+    assert dedup_consecutive(a, [b, c]) == [c]  # dedups against the prior stored tail too

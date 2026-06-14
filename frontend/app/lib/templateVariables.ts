@@ -34,6 +34,7 @@ const ALL: CatalogLevel[] = ["conversation", "message", "step"];
 export const TEMPLATE_VARIABLES: TemplateVar[] = [
   // common (all levels)
   { name: "HISTORY", description: "Full formatted conversation history", type: "string", levels: ALL },
+  { name: "ROLLING_SUMMARY", description: "Accumulated rolling summary of the conversation so far (compact, prefix-stable); empty when none has been generated", type: "string", levels: ALL },
   { name: "GOAL", description: "User's overall goal/intent (first request in the thread)", type: "string", levels: ALL },
   { name: "LIST_AGENT", description: "List of agents seen with the tools they called", type: "string", levels: ALL },
   // conversation only

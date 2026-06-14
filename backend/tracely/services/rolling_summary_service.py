@@ -29,11 +29,12 @@ from tracely.domain.evaluation.rolling_summary import (
     as_summary_items,
     compacted_item,
     components_token_total,
+    decompose_turn_span,
+    dedup_consecutive,
     format_summary_as_history,
     items_from_components,
-    step_components,
     summary_token_total,
-    user_input_component,
+    user_input_for_turn,
 )
 from tracely.domain.traces.spans import root_span
 from tracely.infrastructure.clickhouse.trace_reader import TraceReader
@@ -81,10 +82,13 @@ class RollingSummaryService:
         if not spans:
             return {"thread_id": thread_id, "steps": 0, "items": [], "token_count": 0, "llm_steps": 0}
 
-        # flatten to thread order, tagging each span's trace + whether it's the turn's root wrapper
+        # flatten to thread order, tagging each span's trace + whether it's the turn's root wrapper,
+        # and resolving each turn's user request once (root input, or a GENERATION-input fallback)
         flat: list[tuple[str, dict, bool, bool]] = []
+        user_by_trace: dict[str, object] = {}
         for trace_id, tspans in _group_turns(spans):
             root_id = root_span(tspans).get("span_id")
+            user_by_trace[trace_id] = user_input_for_turn(tspans, root_id)
             multi = len(tspans) > 1
             for span in tspans:
                 flat.append((trace_id, span, span.get("span_id") == root_id, multi))
@@ -110,17 +114,11 @@ class RollingSummaryService:
                     running = existing[span_id]
                     continue
 
-                # decompose: the agent-root wrapper contributes only the user input (its answer is
-                # captured by the child generation) unless the turn is a single span.
-                comps = []
-                if is_root:
-                    uc = user_input_component(span)
-                    if uc:
-                        comps.append(uc)
-                    if not multi:
-                        comps += step_components(span)
-                else:
-                    comps += step_components(span)
+                # decompose: the root contributes the user request (its answer is captured by the
+                # child generation) unless single-span; non-root framework wrappers contribute nothing.
+                comps = decompose_turn_span(
+                    span, is_root=is_root, multi=multi, user_comp=user_by_trace.get(trace_id)
+                )
 
                 verbatim = True
                 if comps:
@@ -135,7 +133,7 @@ class RollingSummaryService:
                             verbatim = False
                             llm_steps += 1
                     new_items = [it.model_dump(exclude_none=True) for it in items_from_components(comps, summaries)]
-                    running = running + new_items
+                    running = running + dedup_consecutive(running[-1] if running else None, new_items)
 
                 # RULE 2 — keep the whole summary under budget (fold older items into a prev_summary item)
                 running, compactions = self._compact_to_budget(running)

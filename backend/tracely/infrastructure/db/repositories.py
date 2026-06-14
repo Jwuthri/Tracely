@@ -81,6 +81,20 @@ def evaluator_score_names(s: Session, project_id: str) -> set[str]:
     )
 
 
+def advisory_score_names(s: Session, project_id: str) -> list[str]:
+    """Score names of evaluators marked `config.advisory` — a FAIL on these is recorded and shown but
+    does NOT flip a trace/turn/session/trend to failing (e.g. the subjective answer-quality judge).
+    The per-evaluator replacement for the old hardcoded `name != 'tracely.run.quality'` magic string;
+    the read layer excludes these names uniformly (see `domain.evaluation.verdict`)."""
+    return [
+        r.score_name
+        for r in s.execute(
+            select(Evaluator).where(Evaluator.project_id == project_id)
+        ).scalars()
+        if (r.config or {}).get("advisory") is True
+    ]
+
+
 def evaluator_create(
     s: Session,
     project_id: str,

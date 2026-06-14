@@ -308,11 +308,12 @@ class LLMJudgeEvaluator(Evaluator):
     # ── advanced (template) grading ──────────────────────────────────────────
 
     def _history_override(self, ctx: RunContext, wanted: list[str]) -> str | None:
-        """The rolling-summary history for `@HISTORY`/`@MESSAGES`, when one exists for this thread —
-        a compact, prefix-stable substitute for the raw transcript. None (the default) leaves the
-        raw transcript in place, so behavior is unchanged when no summary has been generated."""
+        """The rolling summary for this thread, when one exists — it backs `@ROLLING_SUMMARY` and
+        is a compact, prefix-stable substitute for the raw transcript at `@HISTORY`/`@MESSAGES`.
+        None (the default) leaves the raw transcript in place, so behavior is unchanged when no
+        summary has been generated."""
         names = {w.split(".", 1)[0] for w in (wanted or [])}
-        if not ({"HISTORY", "MESSAGES"} & names):
+        if not ({"HISTORY", "MESSAGES", "ROLLING_SUMMARY"} & names):
             return None
         try:
             from tracely.services.rolling_summary_service import RollingSummaryService

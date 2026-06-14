@@ -47,11 +47,11 @@ def test_catalog_level_maps_evaluator_levels():
     assert catalog_level("SPAN") == catalog_level("TOOL") == "step"
 
 
-def test_conversation_level_exposes_nine_variables():
+def test_conversation_level_exposes_common_and_conversation_variables():
     names = {v.name for v in variables_for_level("CONVERSATION")}
-    # 3 common + 6 conversation-only (matches the editor's "Available variables: 9")
-    assert len(names) == 9
-    assert "HISTORY" in names and "FIRST_USER_MSG" in names
+    # 4 common (HISTORY, ROLLING_SUMMARY, GOAL, LIST_AGENT) + 6 conversation-only
+    assert len(names) == 10
+    assert "HISTORY" in names and "ROLLING_SUMMARY" in names and "FIRST_USER_MSG" in names
     # step-only vars are NOT offered at conversation level
     assert "CURRENT_STEP" not in names and "STEP_NUMBER" not in names
 

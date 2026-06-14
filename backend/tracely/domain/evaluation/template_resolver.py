@@ -100,6 +100,12 @@ _STEP_PROPS = (
 TEMPLATE_VARIABLES: tuple[TemplateVariable, ...] = (
     # common (all levels)
     TemplateVariable("HISTORY", "Full formatted conversation history", "string", _ALL),
+    TemplateVariable(
+        "ROLLING_SUMMARY",
+        "Accumulated rolling summary of the conversation so far (compact, prefix-stable); "
+        "empty when no summary has been generated for this thread",
+        "string", _ALL,
+    ),
     TemplateVariable("GOAL", "User's overall goal/intent (first request in the thread)", "string", _ALL),
     TemplateVariable("LIST_AGENT", "List of agents seen with the tools they called", "string", _ALL),
     # conversation only
@@ -178,6 +184,7 @@ class EvaluationContext:
     "not present" → the resolver renders `[No <REF> available]`. Built by `build_context`."""
 
     history: str | None = None
+    rolling_summary: str | None = None
     goal: str | None = None
     agents: str | None = None
     messages: str | None = None
@@ -369,7 +376,8 @@ def _format_message(msg: dict) -> str | None:
 
 
 _STRING_ATTRS = {
-    "HISTORY": "history", "GOAL": "goal", "LIST_AGENT": "agents", "MESSAGES": "messages",
+    "HISTORY": "history", "ROLLING_SUMMARY": "rolling_summary",
+    "GOAL": "goal", "LIST_AGENT": "agents", "MESSAGES": "messages",
     "USER_MESSAGES": "user_messages", "ASSISTANT_MESSAGES": "assistant_messages",
     "FIRST_USER_MSG": "first_user_msg", "LAST_USER_MSG": "last_user_msg",
     "LAST_ASSISTANT_MSG": "last_assistant_msg", "PREVIOUS_USER_MSG": "previous_user_msg",
@@ -411,15 +419,21 @@ def build_context(
     cross-trace vars aren't materialized). `wanted_vars` (bare names) restricts materialization to
     referenced variables; `None` materializes everything applicable.
 
-    `history_override` (optional): a precomputed history string (the rolling summary) used for
-    `@HISTORY`/`@MESSAGES` instead of rebuilding the raw transcript from spans. None → raw
-    transcript (the original behavior), so this stays non-breaking.
+    `history_override` (optional): a precomputed history string (the rolling summary). It backs
+    the explicit `@ROLLING_SUMMARY` variable AND transparently substitutes for `@HISTORY`/
+    `@MESSAGES` (instead of rebuilding the raw transcript from spans). None → raw transcript for
+    `@HISTORY`/`@MESSAGES` and a soft-miss for `@ROLLING_SUMMARY`, so this stays non-breaking.
     """
     ctx = EvaluationContext(metric_previous_result=metric_previous_result)
     want = _base_names(wanted_vars)
 
     def need(name: str) -> bool:
         return want is None or name in want
+
+    # The rolling summary is its own explicit variable (soft-miss when absent) AND, when present,
+    # the substitute for @HISTORY/@MESSAGES below. It's passed in (own table), not built here.
+    if need("ROLLING_SUMMARY") and history_override:
+        ctx.rolling_summary = history_override
 
     turns = _group_turns(thread_spans)
     if not turns:

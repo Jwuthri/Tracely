@@ -10,6 +10,7 @@ shapes, so a schema change touches one file.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 
 from tracely.domain.traces.metadata import parse_thread_meta
 from tracely.infrastructure.clickhouse.client import get_async_client
@@ -19,12 +20,16 @@ from tracely.infrastructure.clickhouse.trace_reader import _SPAN_COLS
 # rows carry an evaluation_case_id and are excluded everywhere in the UI reads).
 _ONLINE = "source = 'EVAL' AND evaluation_case_id = ''"
 
-# Thread/turn status reflects STRUCTURAL failures (errors, missing tools, silent failures);
-# the subjective LLM-judge quality score is excluded here and shown per-trace instead.
+# A trace counts as failing iff it has a FAIL on a NON-advisory evaluator. "Advisory" evaluators
+# (the subjective answer-quality judge, etc.) are excluded via the `{adv:Array(String)}` bind param —
+# the SQL twin of `domain.evaluation.verdict`. Every consumer binds `adv` (the project's advisory
+# score-names from `repositories.advisory_score_names`); an empty array excludes nothing
+# (`x NOT IN []` is always true in ClickHouse). This replaced the hardcoded `name != 'tracely.run.quality'`
+# magic string, which special-cased one judge and was applied inconsistently across the read paths.
 _FAILING = (
     "SELECT trace_id FROM scores FINAL WHERE project_id = {p:String} "
     f"AND {_ONLINE} AND verdict = 'FAIL' "
-    "AND name != 'tracely.run.quality'"
+    "AND name NOT IN {adv:Array(String)}"
 )
 
 _SCORE_COLS = "name, evaluation_level, observation_id, value, string_value, verdict, comment, data_type"
@@ -33,8 +38,10 @@ _SCORE_COLS = "name, evaluation_level, observation_id, value, string_value, verd
 # ── traces ────────────────────────────────────────────────────────────────────
 
 
-async def traces_overview(project_id: str, limit: int) -> list[dict]:
-    """Newest traces with span counts + the per-trace online-eval verdict."""
+async def traces_overview(
+    project_id: str, limit: int, advisory: Sequence[str] = ()
+) -> list[dict]:
+    """Newest traces with span counts + the per-trace online-eval verdict (advisory FAILs excluded)."""
     client = await get_async_client()
     res = await client.query(
         """
@@ -54,9 +61,9 @@ async def traces_overview(project_id: str, limit: int) -> list[dict]:
     )
     rows = [dict(zip(res.column_names, row)) for row in res.result_rows]
     ev = await client.query(
-        "SELECT trace_id, maxIf(1, verdict = 'FAIL') AS fail FROM scores FINAL "
-        f"WHERE project_id = {{p:String}} AND {_ONLINE} GROUP BY trace_id",
-        parameters={"p": project_id},
+        "SELECT trace_id, maxIf(1, verdict = 'FAIL' AND name NOT IN {adv:Array(String)}) AS fail "
+        f"FROM scores FINAL WHERE project_id = {{p:String}} AND {_ONLINE} GROUP BY trace_id",
+        parameters={"p": project_id, "adv": list(advisory)},
     )
     verdict = {r[0]: ("FAIL" if r[1] else "PASS") for r in ev.result_rows}
     for r in rows:
@@ -148,14 +155,16 @@ async def sessions_overview(
     offset: int,
     from_ts: str | None = None,
     to_ts: str | None = None,
+    advisory: Sequence[str] = (),
 ) -> list[dict]:
     """Traces grouped into threads by conversation (a trace with no conversation is its own
     1-turn thread), newest-last-activity first, with per-thread rollups + parsed metadata.
     The optional time window bounds each trace's start_time INSIDE the per-trace subquery so
-    ClickHouse can prune by the `toYYYYMM(start_time)` partition."""
+    ClickHouse can prune by the `toYYYYMM(start_time)` partition. `advisory` excludes those
+    evaluators' FAILs from the per-thread `failing` flag (see `_FAILING`)."""
     client = await get_async_client()
     time_clause = ""
-    params: dict = {"p": project_id, "n": limit, "o": max(offset, 0)}
+    params: dict = {"p": project_id, "n": limit, "o": max(offset, 0), "adv": list(advisory)}
     if from_ts:
         time_clause += " AND start_time >= parseDateTimeBestEffort({from:String})"
         params["from"] = from_ts
@@ -268,8 +277,11 @@ async def thread_agents(project_id: str, thread_id: str) -> list[dict]:
     return out
 
 
-async def session_turns(project_id: str, thread_id: str) -> list[dict]:
-    """The turns (traces) inside one thread, oldest-first — a simple conversation replay."""
+async def session_turns(
+    project_id: str, thread_id: str, advisory: Sequence[str] = ()
+) -> list[dict]:
+    """The turns (traces) inside one thread, oldest-first — a simple conversation replay. `advisory`
+    excludes those evaluators' FAILs from each turn's `failing` flag (see `_FAILING`)."""
     client = await get_async_client()
     res = await client.query(
         f"""
@@ -303,7 +315,7 @@ async def session_turns(project_id: str, thread_id: str) -> list[dict]:
         WHERE if(conv != '', conv, trace_id) = {{th:String}}
         ORDER BY ts ASC
         """,
-        parameters={"p": project_id, "th": thread_id},
+        parameters={"p": project_id, "th": thread_id, "adv": list(advisory)},
     )
     return [dict(zip(res.column_names, row)) for row in res.result_rows]
 
