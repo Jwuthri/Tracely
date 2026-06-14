@@ -9,9 +9,11 @@ import {
   deleteEvaluator,
   levelGroup,
   listEvaluators,
+  getEvaluatorCost,
   streamEvaluationRun,
   LEVEL_LABEL,
   type EvaluatorDef,
+  type EvaluatorCost,
   type RunScope,
 } from "../lib/evaluators";
 import { mergeMeta } from "../lib/meta";
@@ -1441,21 +1443,38 @@ function EmptyTr({ cols, text }: { cols: Col[]; text: string }) {
 }
 
 // ── column-visibility menu ──────────────────────────────────────────────────────
-function ColumnsMenu({ all, hidden, onToggle, onClose }: { all: Col[]; hidden: Set<string>; onToggle: (k: string) => void; onClose: () => void }) {
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+function ColumnsMenu({ all, hidden, cost, onToggle, onClose }: { all: Col[]; hidden: Set<string>; cost: Record<string, EvaluatorCost>; onToggle: (k: string) => void; onClose: () => void }) {
   return (
     <>
       <div className="fixed inset-0 z-20" onClick={onClose} />
-      <div className="absolute right-0 top-full z-30 mt-1 w-60 rounded-lg border border-slate-700 bg-slate-900 p-2 shadow-xl shadow-slate-900/50">
-        <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-slate-500">Toggle columns</div>
+      <div className="absolute right-0 top-full z-30 mt-1 w-64 rounded-lg border border-slate-700 bg-slate-900 p-2 shadow-xl shadow-slate-900/50">
+        <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-slate-500">Toggle columns · judge cost (30d)</div>
         <div className="max-h-72 overflow-auto">
-          {all.map((col) => (
-            <label key={col.key} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
-              <input type="checkbox" checked={!hidden.has(col.key)} onChange={() => onToggle(col.key)} className="accent-cyan-500" />
-              <span className="truncate">{col.label}</span>
-              {col.evaluator && <span className="rounded bg-cyan-500/15 px-1 text-[9px] font-medium uppercase text-cyan-300">eval</span>}
-              <span className={clsx("ml-auto rounded px-1 text-[10px] font-medium", LEVEL_BADGE[col.group])}>{col.group}</span>
-            </label>
-          ))}
+          {all.map((col) => {
+            const c = col.evaluator ? cost[col.evaluator.score_name] : undefined;
+            return (
+              <label key={col.key} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
+                <input type="checkbox" checked={!hidden.has(col.key)} onChange={() => onToggle(col.key)} className="accent-cyan-500" />
+                <span className="truncate">{col.label}</span>
+                {col.evaluator && <span className="rounded bg-cyan-500/15 px-1 text-[9px] font-medium uppercase text-cyan-300">eval</span>}
+                {c && (
+                  <span
+                    className="rounded bg-slate-700/60 px-1 font-mono text-[9px] text-slate-400"
+                    title={`${c.runs} judge run(s) · ${c.total_tokens.toLocaleString()} tokens over 30d${c.model ? ` · ${c.model}` : ""}`}
+                  >
+                    {fmtTokens(c.total_tokens)} tok
+                  </span>
+                )}
+                <span className={clsx("ml-auto rounded px-1 text-[10px] font-medium", LEVEL_BADGE[col.group])}>{col.group}</span>
+              </label>
+            );
+          })}
         </div>
       </div>
     </>
@@ -1618,6 +1637,7 @@ export function TraceTable({
 
   // ── evaluation columns: definitions + live run state ──────────────────────────
   const [evaluators, setEvaluators] = useState<EvaluatorDef[]>([]);
+  const [evalCost, setEvalCost] = useState<Record<string, EvaluatorCost>>({});
   const [liveScores, setLiveScores] = useState<Record<string, EvalScore>>({});
   const [busyCols, setBusyCols] = useState<Set<string>>(new Set());
   const [busyRows, setBusyRows] = useState<Set<string>>(new Set());
@@ -1628,6 +1648,7 @@ export function TraceTable({
   });
   useEffect(() => {
     void listEvaluators().then(setEvaluators).catch(() => {});
+    void getEvaluatorCost(30).then(setEvalCost).catch(() => {});
   }, []);
 
   // Fixed columns first, then EVERY metric column at the right end of the table (ordered
@@ -1884,7 +1905,7 @@ export function TraceTable({
                 <Eye className="h-3.5 w-3.5" />
                 <span>Columns</span>
               </button>
-              {colMenu && <ColumnsMenu all={allColumns} hidden={hidden} onToggle={toggleCol} onClose={() => setColMenu(false)} />}
+              {colMenu && <ColumnsMenu all={allColumns} hidden={hidden} cost={evalCost} onToggle={toggleCol} onClose={() => setColMenu(false)} />}
             </div>
           </div>
         </div>
@@ -1934,6 +1955,7 @@ export function TraceTable({
       <AddColumnModal
         open={columnModal.open}
         editing={columnModal.editing}
+        previewThread={[...openConv][0] ?? conversations[0]?.thread}
         onClose={() => setColumnModal({ open: false, editing: null })}
         onSaved={() => void listEvaluators().then(setEvaluators)}
       />

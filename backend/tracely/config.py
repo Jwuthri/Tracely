@@ -70,6 +70,22 @@ class Settings(BaseSettings):
     gate_latency_warn_pct: float = 25.0
     gate_tokens_warn_pct: float = 25.0
     gate_block_on_warnings: bool = False
+    # Coverage policy. A gate that exercised NONE of its promoted cases (every case SKIPped
+    # because CI emitted no matching trace) is ALWAYS treated as a non-PASS `NO_COVERAGE` —
+    # a green gate that tested nothing is the worst failure mode for a merge-blocker. When this
+    # flag is on, ANY skipped case (partial coverage) also blocks; off (default) only all-skip blocks.
+    gate_require_full_coverage: bool = False
+    # Judge-in-the-gate. Cases promoted from an answer-QUALITY failure (a hallucination / wrong
+    # answer with a structurally-clean trace) carry a `quality` assertion: at gate time the answer
+    # judge re-grades the replayed answer and a sub-threshold score FAILs the case. This is what
+    # turns the gate from "catches crashes" into "catches the bad answers customers fear". Set
+    # False to record the quality verdict but keep it advisory (don't block) if the judge is noisy.
+    gate_quality_blocks: bool = True
+    # The canonical answer-quality judge the gate enforces (an AGENT_RUN llm_judge score_name).
+    # Scoped to ONE judge on purpose: "block when the answer is wrong/unfaithful", not "block when
+    # any AGENT_RUN judge — including signal detectors with inverted thresholds — fires". Blank =
+    # consider every enabled AGENT_RUN llm_judge (legacy/broad behavior).
+    gate_quality_score_name: str = "tracely.run.quality"
 
     # ── Auth & multi-tenancy ──────────────────────────────────────────────────────
     # "dev"   = no human auth; the ingest key is the only credential (today's behavior, no secret needed).

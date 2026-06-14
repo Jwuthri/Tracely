@@ -27,8 +27,21 @@ _CONVERSATION = "CONVERSATION"
 _ONLINE_EVAL_COLS = [
     "project_id", "id", "trace_id", "observation_id", "session_id", "agent_run_id", "name",
     "source", "data_type", "value", "string_value", "verdict", "evaluation_level", "comment",
-    "created_at", "event_ts",
+    "metadata", "created_at", "event_ts",
 ]
+
+
+def _usage_metadata(usage: dict | None) -> dict[str, str]:
+    """LLM-judge token usage → string-map entries for the `scores.metadata` column (so eval spend
+    is attributable per evaluator). Empty for structural checks (no LLM call)."""
+    if not usage:
+        return {}
+    return {
+        "eval.input_tokens": str(int(usage.get("input_tokens") or 0)),
+        "eval.output_tokens": str(int(usage.get("output_tokens") or 0)),
+        "eval.total_tokens": str(int(usage.get("total_tokens") or 0)),
+        "eval.model": str(usage.get("model") or ""),
+    }
 
 _REGRESSION_VERDICT_COLS = [
     "project_id", "id", "trace_id", "name", "source", "data_type", "value",
@@ -47,6 +60,7 @@ class _EvalResultLike(Protocol):
     string_value: str
     target_span_id: str
     comment: str
+    usage: dict | None
 
 
 class ScoreWriter:
@@ -83,7 +97,7 @@ class ScoreWriter:
             rows.append([
                 project_id, sid, row_trace, r.target_span_id or None, row_session, agent_run_id,
                 r.name, "EVAL", r.data_type, r.value, r.string_value or "", r.verdict, r.level,
-                r.comment, now, now,
+                r.comment, _usage_metadata(getattr(r, "usage", None)), now, now,
             ])
         insert_rows(self.client, "scores", _ONLINE_EVAL_COLS, rows)
 

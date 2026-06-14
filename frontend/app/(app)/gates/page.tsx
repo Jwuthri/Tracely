@@ -5,9 +5,10 @@ import { RunGateButton } from "@/app/components/RunGateButton";
 import { TimeAgo } from "@/app/components/TimeAgo";
 import { IconChevron } from "@/app/components/icons";
 
-function gateVariant(s: string): "ok" | "fail" | "info" | "neutral" {
+function gateVariant(s: string): "ok" | "fail" | "warn" | "info" | "neutral" {
   if (s === "PASS") return "ok";
   if (s === "FAIL") return "fail";
+  if (s === "NO_COVERAGE") return "warn"; // exercised nothing — a blocking non-pass, not green
   if (s === "RUNNING") return "info";
   return "neutral";
 }

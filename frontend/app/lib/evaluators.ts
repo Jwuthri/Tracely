@@ -16,6 +16,8 @@ export type EvaluatorConfig = {
   output_type?: EvaluatorOutputType; // "category" is legacy — superseded by json + enum schemas
   output_schema?: Record<string, unknown>; // JSON Schema, for output_type "json"
   execution_mode?: "batch" | "sequential"; // sequential = chain items of this metric
+  is_advanced?: boolean; // prompt uses @VARIABLE templates (set server-side from the prompt)
+  template_variables?: string[]; // refs used, e.g. ["HISTORY", "CURRENT_STEP.tool_call"] (informational)
   depends_on?: string[]; // score_names of evaluators whose results are injected as context
   categories?: string[]; // legacy (category output type)
   fail_categories?: string[]; // legacy
@@ -84,6 +86,15 @@ export async function listEvaluators(): Promise<EvaluatorDef[]> {
   return res.json();
 }
 
+// Per-evaluator LLM-judge token usage (keyed by score_name) — what each judge column costs to run.
+export type EvaluatorCost = { runs: number; input_tokens: number; output_tokens: number; total_tokens: number; model: string };
+
+export async function getEvaluatorCost(days = 30): Promise<Record<string, EvaluatorCost>> {
+  const res = await fetch(`/api/evaluators/cost?days=${days}`, { cache: "no-store" });
+  if (!res.ok) return {};
+  return res.json();
+}
+
 export async function createEvaluator(draft: EvaluatorDraft & { enabled?: boolean }): Promise<EvaluatorDef> {
   return jsonOrThrow(await fetch("/api/evaluators", {
     method: "POST",
@@ -124,6 +135,33 @@ export async function generateEvaluator(description: string): Promise<EvaluatorD
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ description }),
+  }));
+}
+
+// ── Advanced-mode live preview ──────────────────────────────────────────────────
+// Resolve an @VARIABLE prompt against a real conversation/turn/step (no LLM) for the editor's
+// preview pane.
+
+export type ResolvePreviewRequest = {
+  prompt: string;
+  level: EvaluatorLevel;
+  thread_id?: string;
+  trace_id?: string;
+  span_id?: string;
+};
+
+export type ResolvedPreview = {
+  resolved_prompt: string;
+  variables_used: string[];
+  variables_missing: string[];
+  level: string;
+};
+
+export async function resolvePromptPreview(req: ResolvePreviewRequest): Promise<ResolvedPreview> {
+  return jsonOrThrow(await fetch("/api/evaluators/resolve", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
   }));
 }
 

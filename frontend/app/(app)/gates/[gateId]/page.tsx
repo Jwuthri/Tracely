@@ -16,6 +16,12 @@ export default async function GatePage({ params }: { params: Promise<{ gateId: s
     );
   }
   const pass = g.status === "PASS";
+  const nocov = g.status === "NO_COVERAGE";
+  const tone = pass
+    ? { box: "border-ok/30 bg-ok/[0.04]", chip: "border-ok/40 bg-ok/10 text-ok", text: "text-ok" }
+    : nocov
+      ? { box: "border-warn/30 bg-warn/[0.05]", chip: "border-warn/40 bg-warn/10 text-warn", text: "text-warn" }
+      : { box: "border-fail/30 bg-fail/[0.05]", chip: "border-fail/40 bg-fail/10 text-fail", text: "text-fail" };
   const cases = g.cases ?? [];
 
   return (
@@ -30,26 +36,27 @@ export default async function GatePage({ params }: { params: Promise<{ gateId: s
       <div
         className={clsx(
           "reveal card flex flex-wrap items-center justify-between gap-6 overflow-hidden p-5",
-          pass ? "border-ok/30 bg-ok/[0.04]" : "border-fail/30 bg-fail/[0.05]",
+          tone.box,
         )}
       >
         <div className="flex items-center gap-4">
-          <div
-            className={clsx(
-              "grid h-12 w-12 place-items-center rounded-xl border",
-              pass ? "border-ok/40 bg-ok/10 text-ok" : "border-fail/40 bg-fail/10 text-fail",
-            )}
-          >
+          <div className={clsx("grid h-12 w-12 place-items-center rounded-xl border", tone.chip)}>
             {pass ? <IconCheck className="h-6 w-6" /> : <IconX className="h-6 w-6" />}
           </div>
           <div>
-            <div className={clsx("font-display text-[30px] font-extrabold leading-none", pass ? "text-ok" : "text-fail")}>
+            <div className={clsx("font-display text-[30px] font-extrabold leading-none", tone.text)}>
               {g.status}
             </div>
             <div className="mt-1.5 font-mono text-[12px] text-fg-muted">
               {g.agent} · {g.env}
               {g.git_ref && ` · ${g.git_ref.slice(0, 8)}`}
             </div>
+            {nocov && (
+              <div className="mt-2 max-w-md text-[12px] leading-snug text-warn/90">
+                Exercised 0 of {g.total} promoted case(s) — no CI trace matched (misconfigured
+                replay, renamed agent, or input-digest drift). A gate that tests nothing is not a pass.
+              </div>
+            )}
           </div>
         </div>
         <div className="flex gap-3">
@@ -93,6 +100,7 @@ export default async function GatePage({ params }: { params: Promise<{ gateId: s
               ? (c.detail as { erroring_steps: string[] }).erroring_steps
               : [];
             const reason = (c.detail as { reason?: string })?.reason;
+            const quality = c.detail as { quality_pass?: boolean; quality_reason?: string };
             return (
               <div
                 key={i}
@@ -102,6 +110,11 @@ export default async function GatePage({ params }: { params: Promise<{ gateId: s
                 <span className="min-w-0">
                   <span className="text-fg">{c.title}</span>
                   {errs.length > 0 && <span className="ml-2 font-mono text-[11px] text-fail">errors: {errs.join(", ")}</span>}
+                  {quality?.quality_pass === false && (
+                    <span className="ml-2 font-mono text-[11px] text-fail">
+                      answer quality{quality.quality_reason ? `: ${quality.quality_reason}` : ""}
+                    </span>
+                  )}
                   {c.verdict === "SKIP" && reason && <span className="ml-2 font-mono text-[11px] text-fg-faint">{reason}</span>}
                 </span>
                 {c.candidate_trace_id ? (

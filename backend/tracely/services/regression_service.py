@@ -40,6 +40,7 @@ from tracely.infrastructure.db.models import (
     EvaluationSuite,
     EvaluationSuiteCase,
 )
+from tracely.services.evaluation_service import EvaluationService
 
 
 class NotFound(Exception):
@@ -54,10 +55,16 @@ class RegressionService:
         session: Session,
         trace_reader: TraceReader | None = None,
         score_writer: ScoreWriter | None = None,
+        eval_service: EvaluationService | None = None,
     ) -> None:
         self.session = session
         self.trace_reader = trace_reader or TraceReader()
         self.score_writer = score_writer or ScoreWriter(self.trace_reader.client)
+        # Grades answer quality on the source trace so a hallucination (clean trace, bad answer)
+        # becomes a promotable, gate-able case — not just structural tool/error failures.
+        self.eval_service = eval_service or EvaluationService(
+            trace_reader=self.trace_reader, score_writer=self.score_writer
+        )
 
     # ── reads (used by callers that just need the trace) ──────────────────────
 
@@ -86,6 +93,11 @@ class RegressionService:
             return existing  # idempotent
 
         assertions = self._build_assertions(traj)
+        # Answer-quality judges that the SOURCE trace failed → the case guards against them too,
+        # so a hallucination with a structurally-clean trace is still promotable + gate-able.
+        quality_failed = self._grade_source_quality(project_id, spans)
+        if quality_failed:
+            assertions["quality"] = {"score_names": quality_failed}
         fixture_key = self._store_fixtures(project_id, digest, spans)
         case = self._create_case(
             project_id=project_id, agent_id=agent_id, trace_id=trace_id, root=root,
@@ -93,7 +105,7 @@ class RegressionService:
             trajectory_json=traj.to_json(),
         )
         self._attach_to_regression_suite(project_id, agent_id, case)
-        self._validate_fail_to_pass(case, traj, trace_id)
+        self._validate_fail_to_pass(case, traj, trace_id, quality_failed=bool(quality_failed))
         return case
 
     def replay_case(
@@ -122,6 +134,16 @@ class RegressionService:
     @staticmethod
     def _evaluate(case: EvaluationCase, traj: Trajectory) -> tuple[str, dict]:
         return evaluate_assertions(case.assertions or {}, case.match_mode, traj)
+
+    def _grade_source_quality(self, project_id: str, spans: list[dict]) -> list[str]:
+        """Answer-quality judge `score_name`s the SOURCE trace FAILed. The case is promoted to
+        guard against these recurring; the gate re-checks them on replay. Empty when no judge is
+        configured / no LLM key — the case then stays a structural-only regression (old behavior)."""
+        return [
+            r.name
+            for r in self.eval_service.grade_trace_quality(project_id, spans)
+            if r.verdict == "FAIL"
+        ]
 
     @staticmethod
     def _build_assertions(traj: Trajectory) -> dict:
@@ -205,15 +227,24 @@ class RegressionService:
         self.session.commit()
 
     def _validate_fail_to_pass(
-        self, case: EvaluationCase, traj: Trajectory, trace_id: str
+        self,
+        case: EvaluationCase,
+        traj: Trajectory,
+        trace_id: str,
+        quality_failed: bool = False,
     ) -> None:
-        """The source (failing) trace must currently FAIL the case for it to be PROMOTED."""
+        """The source (failing) trace must currently FAIL the case for it to be PROMOTED — either
+        structurally (the tool/error contract) OR on answer quality (a hallucination whose trace
+        is structurally clean). Otherwise the case is a non-discriminating no-op and stays DRAFT."""
         verdict, detail = self._evaluate(case, traj)
-        case.fail_to_pass_validated = verdict == "FAIL"
+        recorded = "FAIL" if (verdict == "FAIL" or quality_failed) else verdict
+        if quality_failed and verdict != "FAIL":
+            detail = {**detail, "quality_pass": False, "promoted_on": "quality"}
+        case.fail_to_pass_validated = recorded == "FAIL"
         case.status = "PROMOTED" if case.fail_to_pass_validated else "DRAFT"
         self.session.add(CaseReplay(
             id=str(uuid.uuid4()), case_id=case.id, candidate_trace_id=trace_id,
-            verdict=verdict, detail={**detail, "validation": True},
+            verdict=recorded, detail={**detail, "validation": True},
         ))
         self.session.commit()
-        self.score_writer.write_regression_verdict(case, trace_id, verdict)
+        self.score_writer.write_regression_verdict(case, trace_id, recorded)

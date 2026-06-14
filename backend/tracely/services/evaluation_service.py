@@ -26,8 +26,11 @@ from typing import Callable
 
 import structlog
 
+from tracely.config import settings
 from tracely.domain.evaluation.evaluators import EvalResult, RunContext, default_registry
-from tracely.domain.evaluation.evaluators.base import CONVERSATION
+from tracely.domain.evaluation.evaluators.base import CONVERSATION, RUN
+from tracely.domain.evaluation.targeting import spec_applies
+from tracely.domain.evaluation.template_resolver import references_conversation_scope
 from tracely.domain.traces.spans import root_span
 from tracely.infrastructure.clickhouse.score_writer import ScoreWriter
 from tracely.infrastructure.clickhouse.trace_reader import TraceReader
@@ -102,6 +105,19 @@ def _inject_dependencies(spec: dict, completed: dict[str, list[dict]]) -> dict:
     return {**spec, "config": {**(spec.get("config") or {}), "__dependencies__": deps}}
 
 
+def _needs_thread_context(specs: list[dict]) -> bool:
+    """True when an advanced llm_judge spec references a conversation-scoped variable
+    (`@HISTORY`/`@MESSAGES`/`@PREVIOUS_*`/`@GOAL`/`@LIST_AGENT`) — the only case where a
+    trace/step-level eval needs the WHOLE thread fetched. Purely step-local advanced columns
+    (only `@CURRENT_STEP.*` / `@METRIC_PREVIOUS_RESULT`) pay nothing."""
+    return any(
+        s.get("kind") == "llm_judge"
+        and (s.get("config") or {}).get("is_advanced")
+        and references_conversation_scope((s.get("config") or {}).get("template_variables"))
+        for s in specs
+    )
+
+
 class EvaluationService:
     """Online evaluation orchestrator. Stateless across calls; lazy-constructs the trace
     reader / score writer / structural clusterer."""
@@ -123,6 +139,7 @@ class EvaluationService:
         specs: list[dict] | None = None,
         on_result: OnResult | None = None,
         skip_conversation: bool = False,
+        thread_spans: list[dict] | None = None,
     ) -> dict:
         spans = self.trace_reader.read_spans(project_id, trace_id)
         if not spans:
@@ -131,11 +148,23 @@ class EvaluationService:
         agent_run_id = root.get("agent_run_id") or trace_id
         thread_id = next((s.get("conversation_id") for s in spans if s.get("conversation_id")), "") or trace_id
         if specs is None:
-            specs = self.load_enabled_evaluators(project_id)
+            # Auto (on-ingest) run: honor each evaluator's targeting + sampling. An explicit
+            # on-demand run passes `specs` and always grades (the user chose them).
+            specs = self._apply_targeting(
+                project_id, self.load_enabled_evaluators(project_id), root, trace_id
+            )
         trace_specs = [s for s in specs if s["level"] != CONVERSATION]
         conv_specs = [] if skip_conversation else [s for s in specs if s["level"] == CONVERSATION]
 
-        ctx = RunContext(project_id, trace_id, agent_run_id, spans, root)
+        # Advanced judges that read @HISTORY/@PREVIOUS_* need the whole thread (one extra read,
+        # gated). `evaluate_thread` passes `thread_spans` in so the per-turn loop fetches once.
+        if thread_spans is None and thread_id != trace_id and _needs_thread_context(trace_specs):
+            thread_spans = self.trace_reader.read_thread_spans(project_id, thread_id)
+
+        ctx = RunContext(
+            project_id, trace_id, agent_run_id, spans, root,
+            thread_id=thread_id, thread_spans=thread_spans,
+        )
         results = self._dispatch_specs(trace_specs, ctx)
         if results:
             self.score_writer.write_eval_scores(
@@ -187,16 +216,95 @@ class EvaluationService:
                 if on_result is not None:
                     on_result(score)
 
+            # Fetch the thread's spans ONCE (not once per turn) when an advanced judge needs the
+            # full transcript — `evaluate_trace` reuses what we pass instead of re-reading.
+            thread_spans = (
+                self.trace_reader.read_thread_spans(project_id, thread_id)
+                if _needs_thread_context(trace_specs) else None
+            )
             for tid in self.trace_reader.thread_trace_ids(project_id, thread_id):
                 staged = [_with_previous(s, chain) for s in trace_specs]
                 r = self.evaluate_trace(
-                    project_id, tid, specs=staged, on_result=capture, skip_conversation=True
+                    project_id, tid, specs=staged, on_result=capture, skip_conversation=True,
+                    thread_spans=thread_spans,
                 )
                 total += r.get("scores", 0)
                 failures += r.get("failures", 0)
         if conv_specs:
             total += self._evaluate_conversation(project_id, thread_id, conv_specs, on_result)
         return {"scores": total, "failures": failures}
+
+    def _apply_targeting(
+        self, project_id: str, specs: list[dict], root: dict, trace_id: str
+    ) -> list[dict]:
+        """Drop evaluators whose target_agent/target_env don't match this trace, then roll each
+        one's sampling die. The agent slug is resolved only when some evaluator actually targets
+        an agent (avoids a DB hit on the common no-targeting path)."""
+        agent_id = root.get("agent_id") or ""
+        env = root.get("env") or ""
+        agent_slug = ""
+        if agent_id and any((s.get("target_agent") or "").strip() for s in specs):
+            try:
+                with SyncSessionLocal() as sess:
+                    agent_slug = repositories.agent_slug(sess, project_id, agent_id)
+            except Exception as exc:  # slug lookup must never break evaluation
+                log.warning("agent_slug_lookup_failed", agent_id=agent_id, error=str(exc))
+        return [
+            s
+            for s in specs
+            if spec_applies(
+                s, agent_id=agent_id, agent_slug=agent_slug, env=env, trace_id=trace_id
+            )
+        ]
+
+    # ── answer-quality grading for the CI gate (non-persisting) ─────────────────
+
+    def quality_specs(
+        self, project_id: str, only_names: list[str] | None = None
+    ) -> list[dict]:
+        """The answer-quality judge(s) the gate replays — enabled AGENT_RUN-level LLM judges.
+
+        Narrowed (in priority order) to: the explicit `only_names` a case recorded it was promoted
+        from; else the single canonical answer-quality judge (`settings.gate_quality_score_name`)
+        so the gate enforces "the answer is wrong/unfaithful", NOT every AGENT_RUN judge (some are
+        signal detectors with inverted thresholds — blocking on those is noise). Blank config →
+        every AGENT_RUN llm_judge (legacy broad behavior)."""
+        specs = [
+            s
+            for s in self.load_enabled_evaluators(project_id)
+            if s["kind"] == "llm_judge" and s["level"] == RUN
+        ]
+        if only_names:
+            wanted = set(only_names)
+            specs = [s for s in specs if s["score_name"] in wanted]
+        elif settings.gate_quality_score_name:
+            specs = [s for s in specs if s["score_name"] == settings.gate_quality_score_name]
+        return specs
+
+    def grade_trace_quality(
+        self,
+        project_id: str,
+        spans: list[dict],
+        only_names: list[str] | None = None,
+        specs: list[dict] | None = None,
+    ) -> list[EvalResult]:
+        """Run answer-quality judge(s) on an arbitrary set of spans (a promote source trace or a
+        replayed gate trace) WITHOUT persisting — returns the `EvalResult`s so the caller can
+        gate on them. Empty when there are no quality judges, no spans, or grading fails (a
+        missing LLM key degrades to structural-only, never a false fail)."""
+        if specs is None:
+            specs = self.quality_specs(project_id, only_names)
+        if not spans or not specs:
+            return []
+        root = root_span(spans)
+        ctx = RunContext(
+            project_id,
+            root.get("trace_id", "") or "",
+            root.get("agent_run_id", "") or "",
+            spans,
+            root,
+        )
+        return self._dispatch_specs(specs, ctx)
 
     # ── internals ─────────────────────────────────────────────────────────────
 
