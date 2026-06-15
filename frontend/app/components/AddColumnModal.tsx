@@ -236,12 +236,14 @@ export function AddColumnModal({
   onClose,
   onSaved,
   editing,
+  prefill,
   previewThread,
 }: {
   open: boolean;
   onClose: () => void;
   onSaved: (ev: EvaluatorDef) => void;
   editing?: EvaluatorDef | null;
+  prefill?: EvaluatorDraft | null; // a draft to seed a NEW column (e.g. a cluster's suggested evaluator)
   previewThread?: string; // a conversation id the advanced preview defaults to (what the user is viewing)
 }) {
   const [step, setStep] = useState<Step>("type");
@@ -283,13 +285,26 @@ export function AddColumnModal({
       ));
       setPromptMode(modeForConfig(editing.config ?? {}));
       setStep("config");
+    } else if (prefill) {
+      // a suggested/draft evaluator (e.g. from a failure cluster): seed the form for review, skip
+      // the type picker, land on Configure so the user confirms/edits before creating.
+      setForm(formFromConfig(
+        {
+          name: prefill.name, description: prefill.description, kind: prefill.kind,
+          level: prefill.level, enabled: true,
+        },
+        prefill.config ?? {},
+        prefill.score_name,
+      ));
+      setPromptMode(modeForConfig(prefill.config ?? {}));
+      setStep("config");
     } else {
       setForm(EMPTY_FORM);
       setPromptMode("basic");
       setStep("type");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, editing]);
+  }, [open, editing, prefill]);
 
   useEffect(() => {
     if (open && step === "library" && templates === null) {

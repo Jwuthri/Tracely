@@ -1,6 +1,6 @@
 import { getCluster } from "@/app/lib/api";
 import { ClusterActions } from "@/app/components/ClusterActions";
-import { CodeBlock } from "@/app/components/CodeBlock";
+import { SuggestedEvaluatorCard } from "@/app/components/SuggestedEvaluatorCard";
 import { CopyId } from "@/app/components/CopyId";
 import { Badge } from "@/app/components/ui";
 import { IconArrowLeft } from "@/app/components/icons";
@@ -102,26 +102,7 @@ export default async function ClusterPage({ params }: { params: Promise<{ cluste
         </section>
       )}
 
-      {ev && (
-        <section className="reveal card overflow-hidden" style={{ animationDelay: "125ms" }}>
-          <div className="flex items-center justify-between border-b border-line px-4 py-3">
-            <div className="flex items-center gap-2.5">
-              <span className="text-[13px] font-semibold text-fg">Suggested evaluator</span>
-              <span className="font-mono text-[11px] text-fg-faint">{ev.name}</span>
-            </div>
-            <span className="rounded bg-ink-700 px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">
-              {ev.language}
-            </span>
-          </div>
-          <div className="px-4 py-3.5">
-            <p className="mb-3 text-[12.5px] leading-relaxed text-fg-muted">
-              A starting-point check that would catch this failure mode automatically — copy it to create an
-              evaluator.
-            </p>
-            <CodeBlock code={ev.code} action="Copy" />
-          </div>
-        </section>
-      )}
+      {ev && <SuggestedEvaluatorCard ev={ev} />}
 
       <section className="reveal card overflow-hidden" style={{ animationDelay: "140ms" }}>
         <div className="border-b border-line px-4 py-3 text-[13px] font-semibold text-fg">

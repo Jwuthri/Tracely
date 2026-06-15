@@ -198,7 +198,16 @@ export type ClusterMember = {
   latency_ms?: number;
 };
 
-export type SuggestedEvaluator = { name: string; language: string; code: string };
+// A creatable evaluator draft (built-in structural check or LLM-judge rubric) the cluster view
+// opens straight in the Add Column editor — see backend evaluator_suggestion.suggest_evaluator.
+export type SuggestedEvaluator = {
+  name: string;
+  description: string;
+  kind: "structural" | "llm_judge";
+  level: string;
+  config: Record<string, unknown>;
+  rationale: string;
+};
 
 export type FailureCluster = {
   id: string;
