@@ -1,0 +1,107 @@
+name: CI
+
+# Real CI for the repo: lint + tests + frontend build + both prod Docker images + a dependency
+# audit. Complements `tracely-gate.yml` (the regression-gate dogfood) — this gates *the code*.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend · ruff + pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # --frozen installs exactly what uv.lock pins (incl. the tracely-sdk[all] provider extras),
+      # so CI also catches lock/extra drift — the "transitive-conflict minefield" risk.
+      - name: Install (uv sync --frozen)
+        run: uv sync --frozen
+      - name: Lint (ruff check)
+        run: uv run ruff check .
+      - name: Test (pytest)
+        run: uv run pytest -q backend/tests
+
+  frontend:
+    name: frontend · next build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      # Matches the prod Dockerfile (Dockerfile.railway) — its lockfile is installed non-frozen.
+      - name: Install deps
+        run: pnpm install --no-frozen-lockfile
+      # `next build` type-checks (tsc) + lints + compiles — the frontend's fast feedback gate.
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_AUTH_MODE: dev
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  docker:
+    name: docker · build prod images
+    runs-on: ubuntu-latest
+    # Build both production images so a broken Dockerfile fails CI instead of the deploy — the
+    # frontend prod image (Dockerfile.railway) was previously never built until Railway deploy.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.backend
+          push: false
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+      - name: Frontend image (prod)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile.railway
+          push: false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+  audit:
+    name: deps · security audit (informational)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: pip-audit (python deps)
+        continue-on-error: true # advisory: surfaces CVEs in transitive deps; doesn't block PRs
+        run: |
+          uv export --frozen --no-emit-workspace --format requirements-txt -o requirements.txt
+          uvx pip-audit -r requirements.txt
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: pnpm audit (frontend deps)
+        continue-on-error: true
+        working-directory: frontend
+        run: pnpm audit --audit-level=high

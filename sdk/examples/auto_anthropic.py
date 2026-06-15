@@ -1,12 +1,10 @@
-"""Anthropic (Claude) — automatic tracing of a real tool-calling agent (PRD 12, P0).
+"""Anthropic (Claude) — automatic tracing of a two-agent conversation (PRD 12, P0).
 
-A support agent answers a multi-part question using Claude's native tool use (`tool_use` /
-`tool_result`) against the fake DB, then summarizes. Each `messages.create` call is captured
-automatically as a GENERATION span by the Anthropic instrumentor — **no span code on the LLM
-calls**. One `@observe(as_type="agent")` on the loop gives the run a single AGENT root so the
-generations + tool spans land in one trace tree (instead of each messages.create() becoming its own
-trace); the tool fns are decorated with `@observe(as_type="tool")` so each tool round-trip is a TOOL
-span, and `tracely.trace(...)` attaches the run's agent/conversation/user metadata onto every span.
+A Support Agent answers order/inventory questions with Claude's native tool use (`tool_use` /
+`tool_result`), then hands the pricing turn to a Billing Agent. Each `messages.create` call is
+captured automatically as a GENERATION span by the Anthropic instrumentor — **no span code on the
+LLM calls**; the tool fns are decorated with `@observe(as_type="tool")` so each round-trip is a TOOL
+span, and each agent is an ordinary `@observe(as_type="agent")` function.
 
     pip install "tracely-sdk[anthropic]"
     export ANTHROPIC_API_KEY=sk-ant-...
@@ -19,7 +17,16 @@ import json
 import os
 
 import tracely_sdk as tracely
-from _fake_db import ANTHROPIC_TOOLS, QUESTION, SYSTEM, observed_tools
+from _fake_db import (
+    AGENTS,
+    BILLING_SYSTEM,
+    BILLING_TOOLS,
+    SUPPORT_TOOLS,
+    SYSTEM,
+    TURNS,
+    anthropic_tools,
+    observed_tools,
+)
 
 from pathlib import Path
 
@@ -50,16 +57,13 @@ def main() -> None:
     client = Anthropic()
     tools = observed_tools()  # your tool fns, decorated once with @observe(as_type="tool")
 
-    @tracely.observe(as_type="agent")
-    def support_agent(question: str) -> str:
+    def run(question: str, system: str, tool_names: list[str]) -> str:
+        """A normal Claude tool-use loop. Each agent below is just this loop with its own tools."""
         messages: list = [{"role": "user", "content": question}]
-        for _ in range(5):  # agentic loop: call tools until Claude gives a final answer
+        for _ in range(5):
             resp = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=1024,
-                system=SYSTEM,
-                messages=messages,
-                tools=ANTHROPIC_TOOLS,
+                model="claude-haiku-4-5-20251001", max_tokens=1024, system=system,
+                messages=messages, tools=anthropic_tools(tool_names),
             )
             messages.append({"role": "assistant", "content": resp.content})
             if resp.stop_reason != "tool_use":
@@ -68,27 +72,31 @@ def main() -> None:
             for block in resp.content:  # dispatch as usual — the decorator makes each a TOOL span
                 if block.type == "tool_use":
                     result = tools[block.name](**block.input)
-                    print(f"  tool {block.name}{block.input} -> {result}")
                     results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": json.dumps(result),
-                        }
+                        {"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(result)}
                     )
             messages.append({"role": "user", "content": results})
         return "(loop limit hit)"
 
-    with tracely.trace(
-        agent="support-agent",
-        conversation=os.path.basename(__file__),
-        user="ada@example.com",
-        example=os.path.basename(__file__),
-    ):
-        print("agent:", support_agent(QUESTION))
+    @tracely.observe(as_type="agent")
+    def support_agent(question: str) -> str:
+        return run(question, SYSTEM, SUPPORT_TOOLS)
+
+    @tracely.observe(as_type="agent")
+    def billing_agent(question: str) -> str:
+        return run(question, BILLING_SYSTEM, BILLING_TOOLS)
+
+    handlers = {"support-agent": support_agent, "billing-agent": billing_agent}
+    conv = os.path.basename(__file__)
+    for i, (question, slug) in enumerate(TURNS):
+        with tracely.trace(
+            agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
+            agents=AGENTS if i == 0 else None,
+        ):
+            print(f"[{slug}] turn {i}:", handlers[slug](question))
 
     tracely.flush()
-    print("sent — open Tracely → Traces: one AGENT run → generations + tool spans, no span code.")
+    print("sent — a multi-turn, two-agent conversation → generations + tool spans, no span code.")
 
 
 if __name__ == "__main__":

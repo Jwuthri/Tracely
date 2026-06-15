@@ -1,8 +1,8 @@
-"""Non-patching drop-in for Anthropic — a real tool-calling agent, no global patching (PRD 12, R13).
+"""Non-patching drop-in for Anthropic — a two-agent conversation, no global patching (PRD 12, R13).
 
 The Anthropic counterpart to `dropin_openai.py`: `init(False)` sets up export only;
 `tracely_sdk.anthropic.Anthropic` (= `wrap_anthropic(anthropic.Anthropic())`) traces just this
-client instance. Same Claude tool-use loop as `auto_anthropic.py`, nothing patched globally.
+client instance. Same Support→Billing two-agent loop as `auto_anthropic.py`, nothing patched globally.
 
     pip install "tracely-sdk[anthropic]"      # or just: pip install anthropic
     export ANTHROPIC_API_KEY=sk-ant-...
@@ -16,7 +16,16 @@ import json
 import os
 
 import tracely_sdk as tracely
-from _fake_db import ANTHROPIC_TOOLS, QUESTION, SYSTEM, observed_tools
+from _fake_db import (
+    AGENTS,
+    BILLING_SYSTEM,
+    BILLING_TOOLS,
+    SUPPORT_TOOLS,
+    SYSTEM,
+    TURNS,
+    anthropic_tools,
+    observed_tools,
+)
 
 from pathlib import Path
 
@@ -41,23 +50,18 @@ def main() -> None:
         print("Set ANTHROPIC_API_KEY to make a real call.")
         return
 
-    from tracely_sdk.anthropic import (
-        Anthropic,
-    )  # pre-wrapped (= wrap_anthropic(anthropic.Anthropic()))
+    from tracely_sdk.anthropic import Anthropic  # pre-wrapped (= wrap_anthropic(anthropic.Anthropic()))
 
     client = Anthropic()
     tools = observed_tools()  # your tool fns, decorated once with @observe(as_type="tool")
 
-    @tracely.observe(as_type="agent")
-    def support_agent(question: str) -> str:
+    def run(question: str, system: str, tool_names: list[str]) -> str:
+        """A normal Claude tool-use loop. Each agent below is just this loop with its own tools."""
         messages: list = [{"role": "user", "content": question}]
-        for _ in range(5):  # agentic loop: call tools until Claude gives a final answer
+        for _ in range(5):
             resp = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=1024,
-                system=SYSTEM,
-                messages=messages,
-                tools=ANTHROPIC_TOOLS,
+                model="claude-haiku-4-5-20251001", max_tokens=1024, system=system,
+                messages=messages, tools=anthropic_tools(tool_names),
             )
             messages.append({"role": "assistant", "content": resp.content})
             if resp.stop_reason != "tool_use":
@@ -67,25 +71,30 @@ def main() -> None:
                 if block.type == "tool_use":
                     result = tools[block.name](**block.input)
                     results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": json.dumps(result),
-                        }
+                        {"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(result)}
                     )
             messages.append({"role": "user", "content": results})
         return "(loop limit hit)"
 
-    with tracely.trace(
-        agent="support-agent",
-        conversation=os.path.basename(__file__),
-        user="ada@example.com",
-        example=os.path.basename(__file__),
-    ):
-        print("agent:", support_agent(QUESTION))
+    @tracely.observe(as_type="agent")
+    def support_agent(question: str) -> str:
+        return run(question, SYSTEM, SUPPORT_TOOLS)
+
+    @tracely.observe(as_type="agent")
+    def billing_agent(question: str) -> str:
+        return run(question, BILLING_SYSTEM, BILLING_TOOLS)
+
+    handlers = {"support-agent": support_agent, "billing-agent": billing_agent}
+    conv = os.path.basename(__file__)
+    for i, (question, slug) in enumerate(TURNS):
+        with tracely.trace(
+            agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
+            agents=AGENTS if i == 0 else None,
+        ):
+            print(f"[{slug}] turn {i}:", handlers[slug](question))
 
     tracely.flush()
-    print("sent — Claude tool-calling agent traced via the drop-in; nothing patched globally.")
+    print("sent — a multi-turn, two-agent Claude conversation traced via the drop-in; nothing patched globally.")
 
 
 if __name__ == "__main__":

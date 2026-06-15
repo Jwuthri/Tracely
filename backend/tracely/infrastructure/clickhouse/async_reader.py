@@ -475,8 +475,9 @@ async def search_threads(project_id: str, q: str, limit: int = 8) -> list[dict]:
     ]
 
 
-async def stats_counts(project_id: str) -> dict:
-    """Headline counters for the dashboard: traces/spans, error traces, auto-eval failures."""
+async def stats_counts(project_id: str, advisory: Sequence[str] = ()) -> dict:
+    """Headline counters for the dashboard: traces/spans, error traces, auto-eval failures
+    (advisory evaluators' FAILs excluded, so `auto_failures` matches the per-trace verdict)."""
     client = await get_async_client()
     r = (
         await client.query(
@@ -495,39 +496,45 @@ async def stats_counts(project_id: str) -> dict:
     af = (
         await client.query(
             "SELECT uniqExact(trace_id) FROM scores FINAL WHERE project_id = {p:String} "
-            f"AND {_ONLINE} AND verdict = 'FAIL'",
-            parameters={"p": project_id},
+            f"AND {_ONLINE} AND verdict = 'FAIL' AND name NOT IN {{adv:Array(String)}}",
+            parameters={"p": project_id, "adv": list(advisory)},
         )
     ).result_rows
     auto_failures = int(af[0][0]) if af else 0
     return {"traces": traces, "spans": spans, "failing_traces": failing, "auto_failures": auto_failures}
 
 
-async def daily_trace_failures(project_id: str, days: int) -> list[dict]:
+async def daily_trace_failures(
+    project_id: str, days: int, advisory: Sequence[str] = ()
+) -> list[dict]:
     """Per-day trace + failing-trace counts, both dated by the trace's own start_time (so
-    failures<=traces); a trace 'failed' if it has any online EVAL FAIL score."""
+    failures<=traces); a trace 'failed' if it has any online EVAL FAIL on a non-advisory evaluator."""
     client = await get_async_client()
     rows = (
         await client.query(
             "SELECT toDate(start_time) AS d, uniqExact(trace_id) AS traces, "
             "uniqExactIf(trace_id, trace_id IN ("
             "  SELECT trace_id FROM scores FINAL WHERE project_id = {p:String} "
-            f"  AND {_ONLINE} AND verdict = 'FAIL')) AS failures "
+            f"  AND {_ONLINE} AND verdict = 'FAIL' AND name NOT IN {{adv:Array(String)}})) AS failures "
             "FROM events FINAL "
             "WHERE project_id = {p:String} AND start_time >= subtractDays(now(), {d:UInt32}) "
             "GROUP BY d ORDER BY d",
-            parameters={"p": project_id, "d": days},
+            parameters={"p": project_id, "d": days, "adv": list(advisory)},
         )
     ).result_rows
     return [{"date": str(d), "traces": int(t), "failures": int(f)} for d, t, f in rows]
 
 
-async def trace_failure_totals(project_id: str) -> tuple[int, int]:
-    """(total traces, total traces with an online EVAL FAIL)."""
+async def trace_failure_totals(
+    project_id: str, advisory: Sequence[str] = ()
+) -> tuple[int, int]:
+    """(total traces, total traces with an online EVAL FAIL on a non-advisory evaluator)."""
     client = await get_async_client()
 
-    async def _scalar(sql: str) -> int:
-        r = (await client.query(sql, parameters={"p": project_id})).result_rows
+    async def _scalar(sql: str, extra: dict | None = None) -> int:
+        r = (
+            await client.query(sql, parameters={"p": project_id, **(extra or {})})
+        ).result_rows
         return int(r[0][0]) if r and r[0][0] is not None else 0
 
     total = await _scalar(
@@ -535,6 +542,7 @@ async def trace_failure_totals(project_id: str) -> tuple[int, int]:
     )
     failures = await _scalar(
         "SELECT uniqExact(trace_id) FROM scores FINAL WHERE project_id = {p:String} "
-        f"AND {_ONLINE} AND verdict = 'FAIL'"
+        f"AND {_ONLINE} AND verdict = 'FAIL' AND name NOT IN {{adv:Array(String)}}",
+        {"adv": list(advisory)},
     )
     return total, failures

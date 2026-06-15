@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from starlette.concurrency import run_in_threadpool
 
+from tracely.api.advisory import advisory_score_names
 from tracely.api.auth import get_project_id
 from tracely.infrastructure.clickhouse import async_reader
 from tracely.infrastructure.db import repositories as repo
@@ -20,8 +21,9 @@ router = APIRouter(prefix="/api")
 @router.get("/trends")
 async def trends(days: int = 14, project_id: str = Depends(get_project_id)) -> dict:
     days = max(1, min(days, 90))
-    daily = await async_reader.daily_trace_failures(project_id, days)
-    total_traces, total_failures = await async_reader.trace_failure_totals(project_id)
+    advisory = await advisory_score_names(project_id)
+    daily = await async_reader.daily_trace_failures(project_id, days, advisory)
+    total_traces, total_failures = await async_reader.trace_failure_totals(project_id, advisory)
 
     def registry():
         with SyncSessionLocal() as s:

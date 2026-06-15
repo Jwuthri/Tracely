@@ -1,12 +1,11 @@
-"""Google Gemini — automatic tracing of a real tool-calling agent (PRD 12).
+"""Google Gemini — automatic tracing of a two-agent conversation (PRD 12).
 
-A support agent answers a multi-part question with Gemini's function calling against the fake DB,
-then summarizes. `tracely.init()` activates the Gemini instrumentor, so each `generate_content`
-call is captured automatically as a GENERATION span — **no span code on the LLM calls**. One
-`@observe(as_type="agent")` on the loop gives the run a single AGENT root so the generations + tool
-spans land in one trace tree; we disable the SDK's *automatic* function calling and dispatch the
-tools ourselves — the tool fns are decorated with `@observe(as_type="tool")`, so each tool round-trip
-is a TOOL span (generation → tools → generation), matching the framework examples.
+A Support Agent answers order/inventory questions with Gemini's function calling, then hands the
+pricing turn to a Billing Agent. `tracely.init()` activates the Gemini instrumentor, so each
+`generate_content` call is captured automatically as a GENERATION span — **no span code on the LLM
+calls**. We disable the SDK's *automatic* function calling and dispatch the tools ourselves — the
+tool fns are decorated with `@observe(as_type="tool")`, so each tool round-trip is a TOOL span; each
+agent is an ordinary `@observe(as_type="agent")` function.
 
     pip install "tracely-sdk[google]" google-genai
     export GEMINI_API_KEY=...        # or GOOGLE_API_KEY
@@ -18,7 +17,18 @@ from __future__ import annotations
 import os
 
 import tracely_sdk as tracely
-from _fake_db import QUESTION, SYSTEM, check_inventory, get_order_status, observed_tools
+from _fake_db import (
+    AGENTS,
+    BILLING_SYSTEM,
+    BILLING_TOOLS,
+    SUPPORT_TOOLS,
+    SYSTEM,
+    TURNS,
+    check_inventory,
+    compare_prices,
+    get_order_status,
+    observed_tools,
+)
 
 from pathlib import Path
 
@@ -27,6 +37,11 @@ from dotenv import load_dotenv
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(_PROJECT_ROOT / ".env", override=True)  # provider keys from the repo-root .env
 
+_RAW_FNS = {
+    "get_order_status": get_order_status,
+    "check_inventory": check_inventory,
+    "compare_prices": compare_prices,
+}
 
 API = os.environ.get("TRACELY_API", "http://localhost:8000")
 KEY = os.environ.get("TRACELY_KEY", "tracely_dev_key")
@@ -50,17 +65,17 @@ def main() -> None:
 
     client = genai.Client()
     tools = observed_tools()  # your tool fns, decorated once with @observe(as_type="tool")
-    config = types.GenerateContentConfig(
-        system_instruction=SYSTEM,
-        tools=[get_order_status, check_inventory],  # the SDK builds tool schemas from the fns
-        # disable the SDK's auto-calling so WE dispatch the tools — each becomes a TOOL span
-        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-    )
 
-    @tracely.observe(as_type="agent")
-    def support_agent(question: str) -> str:
+    def run(question: str, system: str, tool_names: list[str]) -> str:
+        """A normal Gemini function-calling loop. Each agent below is this loop with its own tools."""
+        config = types.GenerateContentConfig(
+            system_instruction=system,
+            tools=[_RAW_FNS[n] for n in tool_names],  # the SDK builds tool schemas from the fns
+            # disable the SDK's auto-calling so WE dispatch the tools — each becomes a TOOL span
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        )
         contents: list = [types.Content(role="user", parts=[types.Part(text=question)])]
-        for _ in range(5):  # agentic loop: call tools until Gemini gives a final answer
+        for _ in range(5):
             resp = client.models.generate_content(
                 model="gemini-3.1-flash-lite", contents=contents, config=config
             )
@@ -71,22 +86,29 @@ def main() -> None:
             parts = []
             for fc in calls:  # dispatch as usual — the decorator makes each a TOOL span
                 result = tools[fc.name](**dict(fc.args))
-                parts.append(
-                    types.Part.from_function_response(name=fc.name, response={"result": result})
-                )
+                parts.append(types.Part.from_function_response(name=fc.name, response={"result": result}))
             contents.append(types.Content(role="user", parts=parts))
         return "(loop limit hit)"
 
-    with tracely.trace(
-        agent="support-agent",
-        conversation=os.path.basename(__file__),
-        user="ada@example.com",
-        example=os.path.basename(__file__),
-    ):
-        print("agent:", support_agent(QUESTION))
+    @tracely.observe(as_type="agent")
+    def support_agent(question: str) -> str:
+        return run(question, SYSTEM, SUPPORT_TOOLS)
+
+    @tracely.observe(as_type="agent")
+    def billing_agent(question: str) -> str:
+        return run(question, BILLING_SYSTEM, BILLING_TOOLS)
+
+    handlers = {"support-agent": support_agent, "billing-agent": billing_agent}
+    conv = os.path.basename(__file__)
+    for i, (question, slug) in enumerate(TURNS):
+        with tracely.trace(
+            agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
+            agents=AGENTS if i == 0 else None,
+        ):
+            print(f"[{slug}] turn {i}:", handlers[slug](question))
 
     tracely.flush()
-    print("sent — open Tracely → Traces: one AGENT run → generations + tool spans, no span code.")
+    print("sent — a multi-turn, two-agent conversation → generations + tool spans, no span code.")
 
 
 if __name__ == "__main__":

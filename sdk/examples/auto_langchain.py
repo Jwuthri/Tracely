@@ -1,10 +1,9 @@
-"""LangChain — automatic tracing of a tool-calling agent via `create_agent` (PRD 12, R11).
+"""LangChain — automatic tracing of a two-agent conversation via `create_agent` (PRD 12, R11).
 
-LangChain 1.0+ replaced `create_react_agent` / `create_tool_calling_agent`+`AgentExecutor` with
-`from langchain.agents import create_agent`. It builds a tool-calling agent (a compiled LangGraph)
-that loops until it answers. `tracely.init()` registers the LangChain callback handler, so the
-agent + each LLM step + each tool call trace end-to-end. The LangChain instrumentor owns the LLM
-spans (under `instrument="auto"` the provider instrumentors are skipped to avoid duplicates).
+LangChain 1.0+ builds a tool-calling agent (a compiled LangGraph) with `create_agent`. Here a Support
+Agent answers order/inventory questions and hands the pricing turn to a Billing Agent — two ordinary
+`create_agent` agents, routed per turn. `tracely.init()` registers the LangChain callback handler, so
+each agent + LLM step + tool call traces end-to-end; `agents=AGENTS` declares the two-agent catalog.
 
     pip install "tracely-sdk[langchain]" "langchain>=1.0" langchain-openai
     export OPENAI_API_KEY=sk-...
@@ -17,7 +16,7 @@ import os
 
 import _fake_db
 import tracely_sdk as tracely
-from _fake_db import QUESTION, SYSTEM
+from _fake_db import AGENTS, BILLING_SYSTEM, BILLING_TOOLS, SUPPORT_TOOLS, SYSTEM, TURNS
 
 from pathlib import Path
 
@@ -56,17 +55,32 @@ def main() -> None:
         """Check current stock level and price for a product SKU."""
         return _fake_db.check_inventory(sku)
 
-    # model can be a "provider:model" string (init_chat_model) or a ChatModel instance.
-    agent = create_agent(
-        "openai:gpt-5.4-mini", tools=[get_order_status, check_inventory], system_prompt=SYSTEM
-    )
+    @tool
+    def compare_prices(sku_a: str, sku_b: str) -> dict:
+        """Compare the prices of two SKUs and report which is cheaper."""
+        return _fake_db.compare_prices(sku_a, sku_b)
 
-    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
-        result = agent.invoke({"messages": [{"role": "user", "content": QUESTION}]})
-        print("agent:", result["messages"][-1].content)
+    catalog = {"get_order_status": get_order_status, "check_inventory": check_inventory,
+               "compare_prices": compare_prices}
+
+    def build(tool_names: list[str], system: str):  # model can be a "provider:model" string or a ChatModel
+        return create_agent("openai:gpt-5.4-mini", tools=[catalog[n] for n in tool_names], system_prompt=system)
+
+    handlers = {
+        "support-agent": build(SUPPORT_TOOLS, SYSTEM),
+        "billing-agent": build(BILLING_TOOLS, BILLING_SYSTEM),
+    }
+    conv = os.path.basename(__file__)
+    for i, (question, slug) in enumerate(TURNS):
+        with tracely.trace(
+            agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
+            agents=AGENTS if i == 0 else None,
+        ):
+            result = handlers[slug].invoke({"messages": [{"role": "user", "content": question}]})
+            print(f"[{slug}] turn {i}:", result["messages"][-1].content)
 
     tracely.flush()
-    print("sent — open Tracely → Traces to see the create_agent loop: LLM + tool spans, nested.")
+    print("sent — a multi-turn, two-agent conversation: each create_agent loop → LLM + tool spans, nested.")
 
 
 if __name__ == "__main__":

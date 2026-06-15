@@ -7,8 +7,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from tracely.api.advisory import advisory_score_names
 from tracely.api.auth import get_project_id
 from tracely.api.dto.traces import SpanOut, TraceDetail
+from tracely.domain.evaluation.verdict import rollup_verdict
 from tracely.infrastructure.clickhouse import async_reader
 
 router = APIRouter(prefix="/api")
@@ -16,7 +18,8 @@ router = APIRouter(prefix="/api")
 
 @router.get("/traces")
 async def list_traces(limit: int = 20, project_id: str = Depends(get_project_id)) -> list[dict]:
-    return await async_reader.traces_overview(project_id, limit)
+    advisory = await advisory_score_names(project_id)
+    return await async_reader.traces_overview(project_id, limit, advisory)
 
 
 @router.get("/traces/{trace_id}")
@@ -56,10 +59,7 @@ async def get_trace(
             )
         )
     scores = await async_reader.trace_scores(project_id, trace_id, thread_id)
-    eval_verdict = (
-        "FAIL" if any(s["verdict"] == "FAIL" for s in scores)
-        else ("PASS" if scores else None)
-    )
+    eval_verdict = rollup_verdict(scores, await advisory_score_names(project_id))
     return TraceDetail(
         trace_id=trace_id, thread_id=thread_id, spans=spans, scores=scores, eval_verdict=eval_verdict
     )

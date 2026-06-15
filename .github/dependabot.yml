@@ -1,0 +1,41 @@
+version: 2
+updates:
+  # Python (uv workspace) — reads uv.lock. Addresses the review's "loose version pinning,
+  # pre-1.0 instrumentors break between minors" by surfacing updates as reviewable PRs.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      python-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Frontend (pnpm) — reads frontend/pnpm-lock.yaml.
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Base images for the two backend/frontend Dockerfiles.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "docker"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+
+  # The CI/gate workflows' action versions.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        update-types: ["minor", "patch"]

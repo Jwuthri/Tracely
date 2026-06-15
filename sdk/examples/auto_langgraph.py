@@ -1,10 +1,10 @@
-"""LangGraph — automatic tracing of a custom graph you build yourself (PRD 12, R11).
+"""LangGraph — automatic tracing of custom graphs you build yourself (PRD 12, R11).
 
-For the high-level prebuilt agent, use `create_agent` (see auto_langchain.py — `create_react_agent`
-is deprecated). LangGraph proper is for *custom* control flow: here a hand-built ReAct loop — a model
-node + a `ToolNode` + conditional routing (`tools_condition`). LangGraph runs on LangChain's
-callbacks, so the same instrumentor traces it: the graph → each node → GENERATION/TOOL spans, nested
-under `tracely.trace(...)`.
+For the high-level prebuilt agent, use `create_agent` (see auto_langchain.py). LangGraph proper is
+for *custom* control flow: here a hand-built ReAct loop — a model node + a `ToolNode` + conditional
+routing — compiled once per agent. A Support graph answers order/inventory questions and a Billing
+graph handles the pricing turn. LangGraph runs on LangChain's callbacks, so the same instrumentor
+traces it: graph → nodes → GENERATION/TOOL spans, nested under `tracely.trace(...)`.
 
     pip install "tracely-sdk[langchain]" langgraph langchain-openai
     export OPENAI_API_KEY=sk-...
@@ -17,7 +17,7 @@ import os
 
 import _fake_db
 import tracely_sdk as tracely
-from _fake_db import QUESTION, SYSTEM
+from _fake_db import AGENTS, BILLING_SYSTEM, BILLING_TOOLS, SUPPORT_TOOLS, SYSTEM, TURNS
 
 from pathlib import Path
 
@@ -49,10 +49,6 @@ def main() -> None:
     from langgraph.graph import START, MessagesState, StateGraph
     from langgraph.prebuilt import ToolNode, tools_condition
 
-    # LangGraph's ToolNode opens an OpenInference TOOL span via its callback handler — the
-    # instrumentor only captures the first positional arg as `input.value`, and the callback
-    # context isn't exposed to user code (so we can't stamp tracely.* attributes on it). Live
-    # with the partial capture here; for full tool I/O fidelity, see auto_openai_agents.py.
     @tool
     def get_order_status(order_id: str) -> dict:
         """Look up an order's delivery status and ETA by its order id."""
@@ -63,28 +59,45 @@ def main() -> None:
         """Check current stock level and price for a product SKU."""
         return _fake_db.check_inventory(sku)
 
-    tools = [get_order_status, check_inventory]
-    model = ChatOpenAI(model="gpt-5.4-mini").bind_tools(tools)
+    @tool
+    def compare_prices(sku_a: str, sku_b: str) -> dict:
+        """Compare the prices of two SKUs and report which is cheaper."""
+        return _fake_db.compare_prices(sku_a, sku_b)
 
-    def call_model(state: MessagesState) -> dict:
-        return {"messages": [model.invoke([SystemMessage(SYSTEM), *state["messages"]])]}
+    catalog = {"get_order_status": get_order_status, "check_inventory": check_inventory,
+               "compare_prices": compare_prices}
 
-    graph = StateGraph(MessagesState)
-    graph.add_node("model", call_model)
-    graph.add_node("tools", ToolNode(tools))
-    graph.add_edge(START, "model")
-    graph.add_conditional_edges("model", tools_condition)  # -> "tools" or END
-    graph.add_edge("tools", "model")
-    app = graph.compile()
+    def build(tool_names: list[str], system: str):
+        """Compile a ReAct graph (model ⇄ tools) for one agent's tool set."""
+        tools = [catalog[n] for n in tool_names]
+        model = ChatOpenAI(model="gpt-5.4-mini").bind_tools(tools)
 
-    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
-        out = app.invoke({"messages": [{"role": "user", "content": QUESTION}]})
-        print("agent:", out["messages"][-1].content)
+        def call_model(state: MessagesState) -> dict:
+            return {"messages": [model.invoke([SystemMessage(system), *state["messages"]])]}
+
+        graph = StateGraph(MessagesState)
+        graph.add_node("model", call_model)
+        graph.add_node("tools", ToolNode(tools))
+        graph.add_edge(START, "model")
+        graph.add_conditional_edges("model", tools_condition)  # -> "tools" or END
+        graph.add_edge("tools", "model")
+        return graph.compile()
+
+    handlers = {
+        "support-agent": build(SUPPORT_TOOLS, SYSTEM),
+        "billing-agent": build(BILLING_TOOLS, BILLING_SYSTEM),
+    }
+    conv = os.path.basename(__file__)
+    for i, (question, slug) in enumerate(TURNS):
+        with tracely.trace(
+            agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
+            agents=AGENTS if i == 0 else None,
+        ):
+            out = handlers[slug].invoke({"messages": [{"role": "user", "content": question}]})
+            print(f"[{slug}] turn {i}:", out["messages"][-1].content)
 
     tracely.flush()
-    print(
-        "sent — open Tracely → Traces to see the StateGraph → model/tools nodes → GENERATION/TOOL."
-    )
+    print("sent — a multi-turn, two-agent conversation: each StateGraph → model/tools nodes → GENERATION/TOOL.")
 
 
 if __name__ == "__main__":

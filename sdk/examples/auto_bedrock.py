@@ -1,8 +1,9 @@
-"""AWS Bedrock — automatic tracing of a real tool-calling agent (PRD 12).
+"""AWS Bedrock — automatic tracing of a two-agent conversation (PRD 12).
 
-A support agent using Bedrock's `converse` tool use against the fake DB. `tracely.init()` activates
-the Bedrock instrumentor; each `converse` call + tool round-trip is captured as a GENERATION span.
-Bedrock is opt-in (`instrument=["bedrock"]`) — boto3 is too common to auto-detect.
+A Support Agent using Bedrock's `converse` tool use against the fake DB, handing the pricing turn to
+a Billing Agent. `tracely.init()` activates the Bedrock instrumentor; each `converse` call + tool
+round-trip is captured as a GENERATION span. Bedrock is opt-in (`instrument=["bedrock"]`) — boto3 is
+too common to auto-detect.
 
     pip install "tracely-sdk[bedrock]" boto3
     export AWS_REGION=us-east-1   # + AWS credentials (env / profile / role)
@@ -14,7 +15,16 @@ from __future__ import annotations
 import os
 
 import tracely_sdk as tracely
-from _fake_db import BEDROCK_TOOLS, QUESTION, SYSTEM, observed_tools
+from _fake_db import (
+    AGENTS,
+    BILLING_SYSTEM,
+    BILLING_TOOLS,
+    SUPPORT_TOOLS,
+    SYSTEM,
+    TURNS,
+    bedrock_tools,
+    observed_tools,
+)
 
 from pathlib import Path
 
@@ -46,15 +56,14 @@ def main() -> None:
     client = boto3.client("bedrock-runtime", region_name=region)
     tools = observed_tools()  # your tool fns, decorated once with @observe(as_type="tool")
 
-    @tracely.observe(as_type="agent")
-    def support_agent(question: str) -> str:
+    def run(question: str, system: str, tool_names: list[str]) -> str:
+        """A normal converse tool-use loop. Each agent below is this loop with its own tools."""
         messages: list = [{"role": "user", "content": [{"text": question}]}]
-        for _ in range(5):  # agentic loop: call tools until the model gives a final answer
+        for _ in range(5):
             resp = client.converse(
                 modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
-                system=[{"text": SYSTEM}],
-                messages=messages,
-                toolConfig={"tools": BEDROCK_TOOLS},
+                system=[{"text": system}], messages=messages,
+                toolConfig={"tools": bedrock_tools(tool_names)},
             )
             out_msg = resp["output"]["message"]
             messages.append(out_msg)
@@ -66,26 +75,30 @@ def main() -> None:
                     tu = block["toolUse"]
                     result = tools[tu["name"]](**tu["input"])
                     results.append(
-                        {
-                            "toolResult": {
-                                "toolUseId": tu["toolUseId"],
-                                "content": [{"json": result}],
-                            }
-                        }
+                        {"toolResult": {"toolUseId": tu["toolUseId"], "content": [{"json": result}]}}
                     )
             messages.append({"role": "user", "content": results})
         return "(loop limit hit)"
 
-    with tracely.trace(
-        agent="support-agent",
-        conversation=os.path.basename(__file__),
-        user="ada@example.com",
-        example=os.path.basename(__file__),
-    ):
-        print("agent:", support_agent(QUESTION))
+    @tracely.observe(as_type="agent")
+    def support_agent(question: str) -> str:
+        return run(question, SYSTEM, SUPPORT_TOOLS)
+
+    @tracely.observe(as_type="agent")
+    def billing_agent(question: str) -> str:
+        return run(question, BILLING_SYSTEM, BILLING_TOOLS)
+
+    handlers = {"support-agent": support_agent, "billing-agent": billing_agent}
+    conv = os.path.basename(__file__)
+    for i, (question, slug) in enumerate(TURNS):
+        with tracely.trace(
+            agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
+            agents=AGENTS if i == 0 else None,
+        ):
+            print(f"[{slug}] turn {i}:", handlers[slug](question))
 
     tracely.flush()
-    print("sent — open Tracely → Traces: one AGENT run → converse generations + tool spans.")
+    print("sent — a multi-turn, two-agent conversation → converse generations + tool spans.")
 
 
 if __name__ == "__main__":

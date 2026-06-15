@@ -56,12 +56,30 @@ def check_inventory(sku: str) -> dict:
     return {"error": f"no SKU {sku}"}
 
 
-TOOL_IMPLS = {"get_order_status": get_order_status, "check_inventory": check_inventory}
+def compare_prices(sku_a: str, sku_b: str) -> dict:
+    """Compare two SKUs' prices and report which is cheaper (the Billing Agent's tool)."""
+    a, b = check_inventory(sku_a), check_inventory(sku_b)
+    if "price_usd" not in a or "price_usd" not in b:
+        return {"error": "one of the SKUs was not found"}
+    cheaper = sku_a if a["price_usd"] <= b["price_usd"] else sku_b
+    return {"cheaper": cheaper, "prices": {sku_a: a["price_usd"], sku_b: b["price_usd"]}}
+
+
+TOOL_IMPLS = {
+    "get_order_status": get_order_status,
+    "check_inventory": check_inventory,
+    "compare_prices": compare_prices,
+}
+# Which tools belong to which agent — the Support Agent looks things up; the Billing Agent compares
+# prices. Examples give each agent only its own tools (`openai_tools(SUPPORT_TOOLS)`).
+SUPPORT_TOOLS = ["get_order_status", "check_inventory"]
+BILLING_TOOLS = ["compare_prices"]
 
 
 _DESCRIPTIONS = {
     "get_order_status": "Look up an order's delivery status and ETA by its order id.",
     "check_inventory": "Check current stock level and price for a product SKU.",
+    "compare_prices": "Compare the prices of two SKUs and report which is cheaper.",
 }
 _PARAMETERS: dict[str, dict] = {
     "get_order_status": {
@@ -74,56 +92,76 @@ _PARAMETERS: dict[str, dict] = {
         "properties": {"sku": {"type": "string", "description": "e.g. SKU-COAT-01"}},
         "required": ["sku"],
     },
+    "compare_prices": {
+        "type": "object",
+        "properties": {
+            "sku_a": {"type": "string", "description": "first SKU, e.g. SKU-COAT-01"},
+            "sku_b": {"type": "string", "description": "second SKU, e.g. SKU-MUG-09"},
+        },
+        "required": ["sku_a", "sku_b"],
+    },
 }
 
+
 # ── per-format tool schemas (built from the shared definitions above) ──────────
-# OpenAI / Mistral / LiteLLM
-OPENAI_TOOLS = [
-    {
-        "type": "function",
-        "function": {"name": n, "description": _DESCRIPTIONS[n], "parameters": _PARAMETERS[n]},
-    }
-    for n in TOOL_IMPLS
-]
-# Anthropic
-ANTHROPIC_TOOLS = [
-    {"name": n, "description": _DESCRIPTIONS[n], "input_schema": _PARAMETERS[n]} for n in TOOL_IMPLS
-]
-# AWS Bedrock (converse)
-BEDROCK_TOOLS = [
-    {
-        "toolSpec": {
-            "name": n,
-            "description": _DESCRIPTIONS[n],
-            "inputSchema": {"json": _PARAMETERS[n]},
-        }
-    }
-    for n in TOOL_IMPLS
-]
+# Each builder takes the tool-name list for one agent (default = all tools).
+def openai_tools(names: list[str] | None = None) -> list[dict]:  # OpenAI / Mistral / LiteLLM
+    return [
+        {"type": "function", "function": {"name": n, "description": _DESCRIPTIONS[n], "parameters": _PARAMETERS[n]}}
+        for n in (names or list(TOOL_IMPLS))
+    ]
+
+
+def anthropic_tools(names: list[str] | None = None) -> list[dict]:
+    return [
+        {"name": n, "description": _DESCRIPTIONS[n], "input_schema": _PARAMETERS[n]}
+        for n in (names or list(TOOL_IMPLS))
+    ]
+
+
+def bedrock_tools(names: list[str] | None = None) -> list[dict]:  # AWS Bedrock (converse)
+    return [
+        {"toolSpec": {"name": n, "description": _DESCRIPTIONS[n], "inputSchema": {"json": _PARAMETERS[n]}}}
+        for n in (names or list(TOOL_IMPLS))
+    ]
+
 
 SYSTEM = "You are a customer-support agent. Use the tools to look up real data before answering; be concise."
+BILLING_SYSTEM = "You are a billing agent. Use compare_prices to answer pricing questions; be concise."
 QUESTION = "Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-01) back in stock?"
 
-# Follow-up turns for MULTI-TURN examples: the same conversation, several turns, so the rolling
-# summary accumulates across them. Each reads as a coherent next message from the same customer.
+# Follow-up turns for the MULTI-TURN conversation. Kept SELF-CONTAINED (each names its own order id /
+# SKUs) so every turn grades on its own and the second/third turns don't depend on chat memory.
 FOLLOWUPS = [
     "Thanks! Can you also check on my other order, ORD-5588?",
-    "Is the item in that order (the Ceramic Mug, SKU-MUG-09) in stock?",
-    "Got it. Between the coat and the mug, which one is cheaper?",
+    "Is the Ceramic Mug (SKU-MUG-09) in stock?",
+    "Between the Alpine Winter Coat (SKU-COAT-01) and the Ceramic Mug (SKU-MUG-09), which is cheaper?",
+]
+
+# The conversation is handled by two agents: the Support Agent takes the first turns, then hands the
+# pricing-comparison turn to the Billing Agent. `TURNS` pairs each user message with the slug of the
+# agent that should answer it — examples iterate it, so both agents show up in the trace.
+TURNS: list[tuple[str, str]] = [
+    (QUESTION, "support-agent"),
+    (FOLLOWUPS[0], "support-agent"),
+    (FOLLOWUPS[1], "support-agent"),
+    (FOLLOWUPS[2], "billing-agent"),
 ]
 
 # The DECLARED agent catalog a user sends with the conversation via `tracely.trace(agents=AGENTS)`.
 # Shape: [{name, description, tools: {tool_name: {name, description, parameters}}}] — surfaced in the
 # Conversation Agents panel and usable in evaluation (@LIST_AGENT).
-AGENTS = [
-    {
-        "name": "Support Agent",
-        "description": "Handles customer order and inventory inquiries by calling backend tools.",
-        "tools": {
-            n: {"name": n, "description": _DESCRIPTIONS[n], "parameters": _PARAMETERS[n]}
-            for n in TOOL_IMPLS
-        },
+def _catalog(name: str, description: str, names: list[str]) -> dict:
+    return {
+        "name": name,
+        "description": description,
+        "tools": {n: {"name": n, "description": _DESCRIPTIONS[n], "parameters": _PARAMETERS[n]} for n in names},
     }
+
+
+AGENTS = [
+    _catalog("Support Agent", "Handles customer order and inventory inquiries.", SUPPORT_TOOLS),
+    _catalog("Billing Agent", "Answers pricing/refund questions; consulted by the Support Agent.", BILLING_TOOLS),
 ]
 
 
@@ -133,10 +171,10 @@ def run_tool(name: str, args: dict) -> dict:
     return fn(**args) if fn else {"error": f"unknown tool {name}"}
 
 
-def observed_tools() -> dict:
+def observed_tools(names: list[str] | None = None) -> dict:
     """The fake-DB tools, each wrapped with `@tracely.observe(as_type="tool")` — so a hand-rolled
     tool-calling loop auto-emits a TOOL span per call (input=args, output=result), nested under the
-    agent run.
+    agent run. Pass a name list to wrap just one agent's tools.
 
     This is the whole point: the ONLY change a user makes to trace their own tool calls is decorating
     their tool functions once — the dispatch stays exactly as they wrote it. Provider-SDK examples
@@ -145,4 +183,4 @@ def observed_tools() -> dict:
     they don't double-trace on top of the framework's own tool spans."""
     import tracely_sdk as tracely
 
-    return {name: tracely.observe(fn, name=name, as_type="tool") for name, fn in TOOL_IMPLS.items()}
+    return {n: tracely.observe(TOOL_IMPLS[n], name=n, as_type="tool") for n in (names or list(TOOL_IMPLS))}

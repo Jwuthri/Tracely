@@ -1,8 +1,9 @@
-"""CrewAI — automatic tracing of a crew that uses tools (PRD 12).
+"""CrewAI — automatic tracing of a two-agent conversation (PRD 12).
 
-A support agent in a crew, equipped with the fake-DB tools, completes a task. `tracely.init()`
-activates the CrewAI instrumentor, so the crew, the agent, the task, the tool calls, and the
-underlying LLM calls all trace end-to-end, nested.
+A Support agent (order/inventory tools) and a Billing agent (price comparison), each a CrewAI
+`Agent`. `tracely.init()` activates the CrewAI instrumentor, so the crew, agent, task, tool calls,
+and underlying LLM calls all trace end-to-end, nested. Support takes the first turns and the Billing
+agent handles the pricing turn.
 
     pip install "tracely-sdk[crewai]" crewai
     export OPENAI_API_KEY=sk-...        # CrewAI defaults to OpenAI
@@ -23,7 +24,7 @@ os.environ.setdefault("OTEL_SDK_DISABLED", "false")
 
 import _fake_db
 import tracely_sdk as tracely
-from _fake_db import QUESTION
+from _fake_db import AGENTS, TURNS
 
 from pathlib import Path
 
@@ -71,31 +72,50 @@ def main() -> None:
         """Check current stock level and price for a product SKU."""
         return str(_fake_db.check_inventory(sku))
 
+    @tool("compare_prices")
+    @tracely.observe(as_type="tool")
+    def compare_prices(sku_a: str, sku_b: str) -> str:
+        """Compare the prices of two SKUs and report which is cheaper."""
+        return str(_fake_db.compare_prices(sku_a, sku_b))
+
     support = Agent(
         role="Customer-support agent",
-        goal="Answer the customer's question using the lookup tools",
+        goal="Answer the customer's order and inventory questions using the lookup tools",
         backstory="You resolve order + stock questions accurately and concisely.",
         tools=[get_order_status, check_inventory],
     )
-    task = Task(description=QUESTION, expected_output="A concise, helpful answer.", agent=support)
-    crew = Crew(agents=[support], tasks=[task])
+    billing = Agent(
+        role="Billing agent",
+        goal="Answer pricing-comparison questions",
+        backstory="You compare prices and tell the customer which item is cheaper.",
+        tools=[compare_prices],
+    )
 
-    # Wrap kickoff in an AGENT root so the crew's GENERATION + TOOL spans nest into ONE trace
+    def run(question: str, agent: Agent) -> str:
+        task = Task(description=question, expected_output="A concise, helpful answer.", agent=agent)
+        return str(Crew(agents=[agent], tasks=[task]).kickoff())
+
+    # Wrap each kickoff in an AGENT root so the crew's GENERATION + TOOL spans nest into ONE trace
     # (without it, each model/tool call CrewAI makes becomes its own root → a separate trace).
-    @tracely.observe(as_type="agent", name="support-agent")
-    def run_crew(question: str) -> str:
-        return str(crew.kickoff())
+    @tracely.observe(as_type="agent")
+    def support_agent(question: str) -> str:
+        return run(question, support)
 
-    with tracely.trace(
-        agent="support-agent",
-        conversation=os.path.basename(__file__),
-        user="ada@example.com",
-        example=os.path.basename(__file__),
-    ):
-        print("agent:", run_crew(QUESTION))
+    @tracely.observe(as_type="agent")
+    def billing_agent(question: str) -> str:
+        return run(question, billing)
+
+    handlers = {"support-agent": support_agent, "billing-agent": billing_agent}
+    conv = os.path.basename(__file__)
+    for i, (question, slug) in enumerate(TURNS):
+        with tracely.trace(
+            agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
+            agents=AGENTS if i == 0 else None,
+        ):
+            print(f"[{slug}] turn {i}:", handlers[slug](question))
 
     tracely.flush()
-    print("sent — open Tracely → Traces to see the crew → agent → task → tool/LLM tree.")
+    print("sent — a multi-turn, two-agent conversation: crew → agent → task → tool/LLM tree.")
 
 
 if __name__ == "__main__":

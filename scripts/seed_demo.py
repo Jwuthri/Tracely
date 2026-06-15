@@ -125,7 +125,7 @@ def main() -> None:
     print(f"\n{BOLD}2/3 failure clusters{OFF}")
     status, body = _req("POST", "/api/clusters/rebuild")
     if status == 200:
-        print(f"  rebuilding in the background (the worker groups failures into issues)…")
+        print("  rebuilding in the background (the worker groups failures into issues)…")
         time.sleep(3.0)  # let the task pick up; clusters appear once it finishes
     elif status == 400:
         detail = (body or {}).get("detail", "missing LLM/embedding keys")
@@ -147,7 +147,7 @@ def main() -> None:
         f"\n{OK}{BOLD}demo ready{OFF} — "
         f"{traces} traces · {clusters} clusters · {cases} promoted cases · {gates} gate runs"
     )
-    print(f"  open the app → Cases and Gates are populated (not just Traces + Clusters).")
+    print("  open the app → Cases and Gates are populated (not just Traces + Clusters).")
     if not cases:
         print(
             f"  {WARN}note: 0 promoted cases — the Test/Ship half is still empty. "

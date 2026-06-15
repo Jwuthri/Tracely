@@ -1,7 +1,7 @@
-"""Mistral — automatic tracing of a real tool-calling agent (PRD 12).
+"""Mistral — automatic tracing of a two-agent conversation (PRD 12).
 
-Same support-agent loop as `auto_openai.py` (Mistral uses an OpenAI-compatible tool schema); every
-`chat.complete` call + tool round-trip is captured as a GENERATION span, no span code.
+Same Support→Billing two-agent flow as `auto_openai.py` (Mistral uses an OpenAI-compatible tool
+schema); every `chat.complete` call + tool round-trip is captured as a GENERATION span, no span code.
 
     pip install "tracely-sdk[mistral]" mistralai
     export MISTRAL_API_KEY=...
@@ -14,7 +14,16 @@ import json
 import os
 
 import tracely_sdk as tracely
-from _fake_db import OPENAI_TOOLS, QUESTION, SYSTEM, observed_tools
+from _fake_db import (
+    AGENTS,
+    BILLING_SYSTEM,
+    BILLING_TOOLS,
+    SUPPORT_TOOLS,
+    SYSTEM,
+    TURNS,
+    observed_tools,
+    openai_tools,
+)
 
 from pathlib import Path
 
@@ -49,15 +58,12 @@ def main() -> None:
     client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
     tools = observed_tools()  # your tool fns, decorated once with @observe(as_type="tool")
 
-    @tracely.observe(as_type="agent")
-    def support_agent(question: str) -> str:
-        messages: list = [
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": question},
-        ]
-        for _ in range(5):  # agentic loop: call tools until the model gives a final answer
+    def run(question: str, system: str, tool_names: list[str]) -> str:
+        """A normal tool-calling loop. Each agent below is just this loop with its own tools."""
+        messages: list = [{"role": "system", "content": system}, {"role": "user", "content": question}]
+        for _ in range(5):
             resp = client.chat.complete(
-                model="mistral-large-latest", messages=messages, tools=OPENAI_TOOLS
+                model="mistral-large-latest", messages=messages, tools=openai_tools(tool_names)
             )
             msg = resp.choices[0].message
             calls = msg.tool_calls or []
@@ -66,14 +72,8 @@ def main() -> None:
                     "role": "assistant",
                     "content": msg.content or "",
                     "tool_calls": [
-                        {
-                            "id": c.id,
-                            "type": "function",
-                            "function": {
-                                "name": c.function.name,
-                                "arguments": c.function.arguments,
-                            },
-                        }
+                        {"id": c.id, "type": "function",
+                         "function": {"name": c.function.name, "arguments": c.function.arguments}}
                         for c in calls
                     ],
                 }
@@ -81,28 +81,32 @@ def main() -> None:
             if not calls:
                 return msg.content or ""
             for call in calls:  # dispatch as usual — the decorator makes each a TOOL span
-                args = json.loads(call.function.arguments)
-                result = tools[call.function.name](**args)
+                result = tools[call.function.name](**json.loads(call.function.arguments))
                 messages.append(
-                    {
-                        "role": "tool",
-                        "name": call.function.name,
-                        "tool_call_id": call.id,
-                        "content": json.dumps(result),
-                    }
+                    {"role": "tool", "name": call.function.name, "tool_call_id": call.id,
+                     "content": json.dumps(result)}
                 )
         return "(loop limit hit)"
 
-    with tracely.trace(
-        agent="support-agent",
-        conversation=os.path.basename(__file__),
-        user="ada@example.com",
-        example=os.path.basename(__file__),
-    ):
-        print("agent:", support_agent(QUESTION))
+    @tracely.observe(as_type="agent")
+    def support_agent(question: str) -> str:
+        return run(question, SYSTEM, SUPPORT_TOOLS)
+
+    @tracely.observe(as_type="agent")
+    def billing_agent(question: str) -> str:
+        return run(question, BILLING_SYSTEM, BILLING_TOOLS)
+
+    handlers = {"support-agent": support_agent, "billing-agent": billing_agent}
+    conv = os.path.basename(__file__)
+    for i, (question, slug) in enumerate(TURNS):
+        with tracely.trace(
+            agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
+            agents=AGENTS if i == 0 else None,
+        ):
+            print(f"[{slug}] turn {i}:", handlers[slug](question))
 
     tracely.flush()
-    print("sent — open Tracely → Traces: one AGENT run → generations + tool spans, no span code.")
+    print("sent — a multi-turn, two-agent conversation; generations + tool spans, no span code.")
 
 
 if __name__ == "__main__":

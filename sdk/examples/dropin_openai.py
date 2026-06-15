@@ -1,7 +1,7 @@
-"""Non-patching drop-in — a real tool-calling agent, no global patching (PRD 12, R13).
+"""Non-patching drop-in — a real two-agent conversation, no global patching (PRD 12, R13).
 
 `init(False)` sets up export only; `tracely_sdk.openai.OpenAI` (= `wrap_openai(openai.OpenAI())`)
-traces just this client instance. Same support-agent tool-calling loop as `auto_openai.py`, but
+traces just this client instance. Same Support→Billing two-agent loop as `auto_openai.py`, but
 nothing is monkey-patched globally.
 
     pip install "tracely-sdk[openai]"      # or just: pip install openai
@@ -16,7 +16,16 @@ import json
 import os
 
 import tracely_sdk as tracely
-from _fake_db import OPENAI_TOOLS, QUESTION, SYSTEM, observed_tools
+from _fake_db import (
+    AGENTS,
+    BILLING_SYSTEM,
+    BILLING_TOOLS,
+    SUPPORT_TOOLS,
+    SYSTEM,
+    TURNS,
+    observed_tools,
+    openai_tools,
+)
 
 from pathlib import Path
 
@@ -46,15 +55,12 @@ def main() -> None:
     client = OpenAI()
     tools = observed_tools()  # your tool fns, decorated once with @observe(as_type="tool")
 
-    @tracely.observe(as_type="agent")
-    def support_agent(question: str) -> str:
-        messages: list = [
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": question},
-        ]
+    def run(question: str, system: str, tool_names: list[str]) -> str:
+        """A normal tool-calling loop. Each agent below is just this loop with its own tools."""
+        messages: list = [{"role": "system", "content": system}, {"role": "user", "content": question}]
         for _ in range(5):
             resp = client.chat.completions.create(
-                model="gpt-5.4-mini", messages=messages, tools=OPENAI_TOOLS
+                model="gpt-5.4-mini", messages=messages, tools=openai_tools(tool_names)
             )
             msg = resp.choices[0].message
             messages.append(msg.model_dump(exclude_none=True))
@@ -62,21 +68,28 @@ def main() -> None:
                 return msg.content or ""
             for call in msg.tool_calls:  # dispatch as usual — the decorator makes each a TOOL span
                 result = tools[call.function.name](**json.loads(call.function.arguments))
-                messages.append(
-                    {"role": "tool", "tool_call_id": call.id, "content": json.dumps(result)}
-                )
+                messages.append({"role": "tool", "tool_call_id": call.id, "content": json.dumps(result)})
         return "(loop limit hit)"
 
-    with tracely.trace(
-        agent="support-agent",
-        conversation=os.path.basename(__file__),
-        user="ada@example.com",
-        example=os.path.basename(__file__),
-    ):
-        print("agent:", support_agent(QUESTION))
+    @tracely.observe(as_type="agent")
+    def support_agent(question: str) -> str:
+        return run(question, SYSTEM, SUPPORT_TOOLS)
+
+    @tracely.observe(as_type="agent")
+    def billing_agent(question: str) -> str:
+        return run(question, BILLING_SYSTEM, BILLING_TOOLS)
+
+    handlers = {"support-agent": support_agent, "billing-agent": billing_agent}
+    conv = os.path.basename(__file__)
+    for i, (question, slug) in enumerate(TURNS):
+        with tracely.trace(
+            agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
+            agents=AGENTS if i == 0 else None,
+        ):
+            print(f"[{slug}] turn {i}:", handlers[slug](question))
 
     tracely.flush()
-    print("sent — tool-calling agent traced via the drop-in; nothing patched globally.")
+    print("sent — a multi-turn, two-agent conversation traced via the drop-in; nothing patched globally.")
 
 
 if __name__ == "__main__":

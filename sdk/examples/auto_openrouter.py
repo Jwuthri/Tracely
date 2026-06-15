@@ -1,8 +1,8 @@
-"""OpenRouter — automatic tracing via LangChain `create_agent` (PRD 12).
+"""OpenRouter — automatic tracing of a two-agent conversation via LangChain `create_agent` (PRD 12).
 
-OpenRouter routes one API to 100+ models. LangChain ships a first-party `ChatOpenRouter`
-(`langchain-openrouter`) — drop it into `create_agent` as the model and the LangChain instrumentor
-traces the whole tool-calling agent. The model is the OpenRouter `provider/model` id.
+OpenRouter routes one API to 100+ models. LangChain ships a first-party `ChatOpenRouter` — drop it
+into `create_agent` as the model and the LangChain instrumentor traces the whole tool-calling agent.
+A Support Agent answers order/inventory questions and hands the pricing turn to a Billing Agent.
 
     pip install "tracely-sdk[langchain,openrouter]" "langchain>=1.0" langchain-openrouter
     export OPENROUTER_API_KEY=sk-or-...
@@ -19,7 +19,7 @@ import os
 
 import _fake_db
 import tracely_sdk as tracely
-from _fake_db import QUESTION, SYSTEM
+from _fake_db import AGENTS, BILLING_SYSTEM, BILLING_TOOLS, SUPPORT_TOOLS, SYSTEM, TURNS
 
 from pathlib import Path
 
@@ -64,16 +64,32 @@ def main() -> None:
         """Check current stock level and price for a product SKU."""
         return _fake_db.check_inventory(sku)
 
-    # ChatOpenRouter is a LangChain ChatModel → pass it straight into create_agent as the model.
-    agent = create_agent(
-        ChatOpenRouter(model=MODEL), tools=[get_order_status, check_inventory], system_prompt=SYSTEM
-    )
-    with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
-        result = agent.invoke({"messages": [{"role": "user", "content": QUESTION}]})
-        print("agent:", result["messages"][-1].content)
+    @tool
+    def compare_prices(sku_a: str, sku_b: str) -> dict:
+        """Compare the prices of two SKUs and report which is cheaper."""
+        return _fake_db.compare_prices(sku_a, sku_b)
+
+    catalog = {"get_order_status": get_order_status, "check_inventory": check_inventory,
+               "compare_prices": compare_prices}
+
+    def build(tool_names: list[str], system: str):  # ChatOpenRouter is a LangChain ChatModel
+        return create_agent(ChatOpenRouter(model=MODEL), tools=[catalog[n] for n in tool_names], system_prompt=system)
+
+    handlers = {
+        "support-agent": build(SUPPORT_TOOLS, SYSTEM),
+        "billing-agent": build(BILLING_TOOLS, BILLING_SYSTEM),
+    }
+    conv = os.path.basename(__file__)
+    for i, (question, slug) in enumerate(TURNS):
+        with tracely.trace(
+            agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
+            agents=AGENTS if i == 0 else None,
+        ):
+            result = handlers[slug].invoke({"messages": [{"role": "user", "content": question}]})
+            print(f"[{slug}] turn {i}:", result["messages"][-1].content)
 
     tracely.flush()
-    print(f"sent — OpenRouter '{MODEL}' via create_agent, traced by the LangChain instrumentor.")
+    print(f"sent — a multi-turn, two-agent conversation on OpenRouter '{MODEL}', traced via LangChain.")
 
 
 if __name__ == "__main__":

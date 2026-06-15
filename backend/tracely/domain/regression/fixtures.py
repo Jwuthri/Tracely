@@ -70,8 +70,8 @@ class FixtureBundle:
                 for t in self.tools
             ],
             "llm": [
-                {"model": l.name, "input": l.args, "output": l.output, "error": l.error}
-                for l in self.llm
+                {"model": c.name, "input": c.args, "output": c.output, "error": c.error}
+                for c in self.llm
             ],
         }
 

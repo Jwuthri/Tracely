@@ -9,7 +9,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
+from tracely.api.advisory import advisory_score_names
 from tracely.api.auth import get_project_id
+from tracely.domain.evaluation.verdict import rollup_verdict
 from tracely.infrastructure.clickhouse import async_reader
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
@@ -33,7 +35,10 @@ async def list_sessions(
     `from_ts`/`to_ts` (ISO-8601, treated as UTC) bound the trace's `start_time`; `offset` pages
     the threads (newest first) for the UI's "Load more". Callers derive "has more" from
     `len(rows) == limit`."""
-    rows = await async_reader.sessions_overview(project_id, limit, offset, from_ts, to_ts)
+    advisory = await advisory_score_names(project_id)
+    rows = await async_reader.sessions_overview(
+        project_id, limit, offset, from_ts, to_ts, advisory
+    )
     conv_scores = await async_reader.conversation_scores_by_thread(
         project_id, [r["thread"] for r in rows]
     )
@@ -49,14 +54,12 @@ async def get_session(
     """The turns (traces) inside one thread, oldest-first — a simple conversation replay. Each
     turn carries its auto-eval scores (the same the trace page shows); the thread carries its
     own CONVERSATION-level scores."""
-    turns = await async_reader.session_turns(project_id, thread_id)
+    advisory = await advisory_score_names(project_id)
+    turns = await async_reader.session_turns(project_id, thread_id, advisory)
     by_trace = await async_reader.scores_by_trace(project_id, [t["trace_id"] for t in turns])
     for t in turns:
         t["scores"] = by_trace.get(t["trace_id"], [])
-        t["verdict"] = (
-            "FAIL" if any(s["verdict"] == "FAIL" for s in t["scores"])
-            else ("PASS" if t["scores"] else None)
-        )
+        t["verdict"] = rollup_verdict(t["scores"], advisory)
     thread_scores = await async_reader.conversation_scores(project_id, thread_id)
     return {"thread_id": thread_id, "turns": turns, "scores": thread_scores}
 

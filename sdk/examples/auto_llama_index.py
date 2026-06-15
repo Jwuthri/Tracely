@@ -1,7 +1,8 @@
-"""LlamaIndex — automatic tracing of a ReAct tool-calling agent (PRD 12).
+"""LlamaIndex — automatic tracing of a two-agent conversation (PRD 12).
 
-A `ReActAgent` over the fake-DB tools (`FunctionTool`s). `tracely.init()` activates the LlamaIndex
-instrumentor, so the agent's reasoning steps, tool calls, and LLM calls trace end-to-end, nested.
+Two `ReActAgent`s over the fake-DB tools (`FunctionTool`s): a Support agent (order/inventory) and a
+Billing agent (price comparison). `tracely.init()` activates the LlamaIndex instrumentor, so each
+agent's reasoning steps, tool calls, and LLM calls trace end-to-end, nested.
 
     pip install "tracely-sdk[llama-index]" llama-index llama-index-llms-openai
     export OPENAI_API_KEY=sk-...
@@ -14,7 +15,7 @@ import os
 
 import _fake_db
 import tracely_sdk as tracely
-from _fake_db import QUESTION
+from _fake_db import AGENTS, BILLING_TOOLS, SUPPORT_TOOLS, TURNS
 
 from pathlib import Path
 
@@ -46,22 +47,33 @@ def main() -> None:
     from llama_index.core.tools import FunctionTool
     from llama_index.llms.openai import OpenAI as LlamaOpenAI
 
-    tools = [
-        FunctionTool.from_defaults(fn=_fake_db.get_order_status),
-        FunctionTool.from_defaults(fn=_fake_db.check_inventory),
-    ]
-    # LlamaIndex 0.12+ replaced ReActAgent.from_tools / .chat with a Workflow whose runs are awaitable.
-    # `streaming=False` so each LLM call returns usage tokens (streamed OpenAI calls omit them).
-    agent = ReActAgent(tools=tools, llm=LlamaOpenAI(model="gpt-5.4-mini"), verbose=False, streaming=False)
+    fns = {
+        "get_order_status": _fake_db.get_order_status,
+        "check_inventory": _fake_db.check_inventory,
+        "compare_prices": _fake_db.compare_prices,
+    }
+
+    def build(tool_names: list[str]) -> ReActAgent:
+        tools = [FunctionTool.from_defaults(fn=fns[n]) for n in tool_names]
+        # LlamaIndex 0.12+ replaced ReActAgent.from_tools/.chat with a Workflow whose runs are awaitable.
+        # `streaming=False` so each LLM call returns usage tokens (streamed OpenAI calls omit them).
+        return ReActAgent(tools=tools, llm=LlamaOpenAI(model="gpt-5.4-mini"), verbose=False, streaming=False)
+
+    handlers = {"support-agent": build(SUPPORT_TOOLS), "billing-agent": build(BILLING_TOOLS)}
 
     async def run() -> None:
-        with tracely.trace(agent="support-agent", conversation=os.path.basename(__file__), user="ada@example.com", example=os.path.basename(__file__)):
-            resp = await agent.run(user_msg=QUESTION)
-            print("agent:", resp)
+        conv = os.path.basename(__file__)
+        for i, (question, slug) in enumerate(TURNS):
+            with tracely.trace(
+                agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
+                agents=AGENTS if i == 0 else None,
+            ):
+                resp = await handlers[slug].run(user_msg=question)
+                print(f"[{slug}] turn {i}:", resp)
 
     asyncio.run(run())
     tracely.flush()
-    print("sent — open Tracely → Traces to see the ReAct agent → tool + LLM spans tree.")
+    print("sent — a multi-turn, two-agent conversation: each ReAct agent → tool + LLM spans tree.")
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException
 from starlette.concurrency import run_in_threadpool
 
+from tracely.api.advisory import advisory_score_names
 from tracely.api.auth import get_project_id
 from tracely.infrastructure.clickhouse import async_reader
 from tracely.infrastructure.db import repositories as repo
@@ -23,7 +24,7 @@ router = APIRouter(prefix="/api")
 
 @router.get("/stats")
 async def stats(project_id: str = Depends(get_project_id)) -> dict:
-    counters = await async_reader.stats_counts(project_id)
+    counters = await async_reader.stats_counts(project_id, await advisory_score_names(project_id))
 
     def registry():
         with SyncSessionLocal() as s:

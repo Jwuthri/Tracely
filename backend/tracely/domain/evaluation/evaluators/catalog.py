@@ -31,7 +31,10 @@ TEMPLATES = [
     {"name": "Answer quality · LLM judge", "kind": "llm_judge", "score_name": "tracely.run.quality",
      "level": "AGENT_RUN", "recommended": True, "category": "quality",
      "description": "An LLM grades the answer for correctness and faithfulness to the tool results.",
-     "config": {"prompt": DEFAULT_JUDGE_PROMPT, "threshold": 0.6, "output_type": "score"}},
+     # advisory: a subjective-quality FAIL is recorded + shown per-trace, but doesn't flip the roll-up
+     # verdict (threads dot / trace badge / session / trends), which reflect structural failures.
+     # See domain.evaluation.verdict + repositories.advisory_score_names.
+     "config": {"prompt": DEFAULT_JUDGE_PROMPT, "threshold": 0.6, "output_type": "score", "advisory": True}},
     {"name": "Required tools", "kind": "structural", "score_name": "tracely.run.required_tools",
      "level": "AGENT_RUN", "recommended": False, "category": "reliability",
      "description": "Fails if specific tools weren't called.",

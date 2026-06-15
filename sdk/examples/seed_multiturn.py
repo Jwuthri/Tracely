@@ -19,7 +19,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 import tracely_sdk as tracely
-from _fake_db import AGENTS, check_inventory, get_order_status
+from _fake_db import AGENTS, check_inventory, compare_prices, get_order_status
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(_PROJECT_ROOT / ".env", override=True)
@@ -29,26 +29,9 @@ KEY = os.environ.get("TRACELY_KEY", "tracely_dev_key")
 
 tracely.init(endpoint=API, api_key=KEY, service_name="support-agent", env="prod", instrument=False)
 
-# A two-agent catalog (a support agent that hands off to a billing agent) — declared by the user and
-# sent with the conversation. Extends the shared single-agent AGENTS with a billing sub-agent.
-CATALOG = [
-    *AGENTS,
-    {
-        "name": "Billing Agent",
-        "description": "Answers pricing, refund and payment questions; consulted by the Support Agent.",
-        "tools": {
-            "compare_prices": {
-                "name": "compare_prices",
-                "description": "Compare the prices of two SKUs and report which is cheaper.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"sku_a": {"type": "string"}, "sku_b": {"type": "string"}},
-                    "required": ["sku_a", "sku_b"],
-                },
-            }
-        },
-    },
-]
+# The shared two-agent catalog (Support Agent + Billing Agent) — declared by the user and sent with
+# the conversation; the Support Agent hands the pricing turn off to the Billing Agent.
+CATALOG = AGENTS
 
 CONV = "support-multiturn-demo"
 
@@ -122,7 +105,7 @@ def main() -> None:
         "Got it. Between the coat and the mug, which one is cheaper?",
         "Pricing question — compare the coat ($129.00) and the mug ($14.50).",
         "compare_prices", {"sku_a": "SKU-COAT-01", "sku_b": "SKU-MUG-09"},
-        {"cheaper": "SKU-MUG-09", "coat_usd": 129.0, "mug_usd": 14.5},
+        compare_prices("SKU-COAT-01", "SKU-MUG-09"),
         "The Ceramic Mug is cheaper — $14.50 vs $129.00 for the coat.",
         handoff_from="support-agent",
     )
