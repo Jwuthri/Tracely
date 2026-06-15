@@ -16,7 +16,7 @@ The same `celery_app` the API enqueues onto (Redis broker). Tasks (`backend/trac
 | Task | Triggered by | Does |
 |---|---|---|
 | `ingest_otlp_blob` | `POST /v1/traces` (per batch) | read the durable S3 blob → map OTLP → resolve agent slugs → insert into ClickHouse `events` → enqueue `evaluate_run_task` (4s debounce). |
-| `evaluate_run_task` | after ingest, per trace | run the project's evaluators → write `scores` → cheap structural failure clustering. |
+| `evaluate_run_task` | after ingest, per trace | run the project's evaluators (targeting + sampling) → write `scores` → cheap structural failure clustering → fold the turn into the thread's rolling summary (best-effort). |
 | `rebuild_clusters_task` | "Analyze failures" in the UI / `POST /api/clusters/rebuild` | semantic failure intelligence (embed → cluster → LLM issue write). |
 
 ## Run it

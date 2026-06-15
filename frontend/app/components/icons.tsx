@@ -40,6 +40,14 @@ export const IconShield = (p: P) => (
   </svg>
 );
 
+// balance scale — judge-vs-human calibration
+export const IconScale = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M12 3v18M7 21h10M5 7h14l-3 7H8L5 7Z" />
+    <path d="M5 7 2.5 12.5a2.5 2.5 0 0 0 5 0L5 7ZM19 7l-2.5 5.5a2.5 2.5 0 0 0 5 0L19 7Z" />
+  </svg>
+);
+
 export const IconSearch = (p: P) => (
   <svg {...base(p)}>
     <circle cx="11" cy="11" r="7" />

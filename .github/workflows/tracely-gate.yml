@@ -1,6 +1,11 @@
 name: Tracely regression gate
 
-# Gate every PR on the agent's regression suite: a PR that changes the agent must not
+# ⚠️ This is Tracely DOGFOODING ITSELF: it replays the bundled `weather_agent` example, hence the
+# in-repo `pip install ./sdk` + `--entrypoint weather_agent:run`. It is NOT the template for your
+# own agent. To gate YOUR agent, see README → "Gate your PRs (CI/CD)" and the reusable composite
+# action at .github/actions/tracely-gate (uses: <repo>/.github/actions/tracely-gate@<ref>).
+#
+# What it does: gate every PR on the agent's regression suite — a PR that changes the agent must not
 # reproduce any promoted production failure (fail-to-pass), or the check fails.
 
 on:

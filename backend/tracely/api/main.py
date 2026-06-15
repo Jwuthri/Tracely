@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from tracely.api.routers import (
     analytics,
     cases,
+    calibration,
     clusters,
     evaluations,
     evaluators,
@@ -88,6 +89,7 @@ app.include_router(analytics.router)
 app.include_router(evaluators.router)
 app.include_router(evaluations.router)
 app.include_router(meta_analysis.router)
+app.include_router(calibration.router)
 
 # Auth: /auth/me + /auth/logout always; mode-specific endpoints gated by AUTH_MODE.
 app.include_router(auth_router.common_router)

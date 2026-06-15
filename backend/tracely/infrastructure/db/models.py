@@ -18,6 +18,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -400,6 +401,40 @@ class ConversationAgent(Base):
     thread_id: Mapped[str] = mapped_column(String(64))
     agents: Mapped[list] = mapped_column(JSON, default=list)
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ScoreAnnotation(Base):
+    """A human label on an evaluator's verdict — the judge-vs-human calibration write path. A reviewer
+    agrees/disagrees with a judge score on a target (trace / span / thread); we snapshot the judge
+    verdict at label time so agreement is a pure Postgres query. Keyed by the score's natural
+    identity (matches the ClickHouse `scores` natural key) + the labeler — one label per user per
+    score, upserted."""
+
+    __tablename__ = "score_annotations"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "score_name", "evaluation_level", "trace_id", "session_id",
+            "observation_id", "labeled_by", name="uq_score_annotations_target_labeler",
+        ),
+        Index("ix_score_annotations_project_name", "project_id", "score_name"),
+        Index("ix_score_annotations_project_trace", "project_id", "trace_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    score_name: Mapped[str] = mapped_column(String(128))
+    evaluation_level: Mapped[str] = mapped_column(String(32), default="")
+    trace_id: Mapped[str] = mapped_column(String(64), default="")
+    session_id: Mapped[str] = mapped_column(String(128), default="")
+    observation_id: Mapped[str] = mapped_column(String(64), default="")
+    judge_verdict: Mapped[str] = mapped_column(String(32), default="")  # snapshot at label time
+    human_verdict: Mapped[str] = mapped_column(String(32))  # PASS | FAIL | …
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    labeled_by: Mapped[str] = mapped_column(String(128), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

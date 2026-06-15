@@ -99,6 +99,9 @@ tracely.flush()   # force-flush the exporter (call before the process exits)
 ### What Tracely reads
 Standard `gen_ai.*` / OpenInference attributes, plus first-class hints that become **indexed columns** on the span row: `tracely.agent.id`/`.version`/`.role`, `tracely.user.id`, `tracely.trace.name`, `tracely.conversation.id`, `tracely.turn.id`/`.index`, `tracely.step.id`/`.name`, `tracely.observation.type`, `tracely.tool_calls`, `tracely.handoff.*` + `tracely.edge.type`, the `gen_ai.request.*` sampling params, and `tracely.env` (`prod|staging|ci|dev` — the gating axis). Agent slug + version are auto-registered into the Postgres registry on ingest.
 
+### Declaring a conversation's agent catalog
+Pass `agents=[{name, description, tools:[...]}]` to `tracely.trace(...)` (or call `set_agents([...])`) to declare the agents/tools a conversation uses — emitted once as `tracely.agents`. The backend stores this per conversation; the UI's **Conversation Agents** panel renders it (with per-tool run counts) and the LLM judge can read it as `@LIST_AGENT`. Without it, Tracely still derives the agent view from the spans.
+
 ---
 
 ## 2. Hermetic replay (`call_tool` / `call_llm` / `fixtures`)
@@ -138,10 +141,12 @@ Both **exit 0 (PASS) / 1 (FAIL)** and, inside GitHub Actions (or with `--github`
 ## Examples (`sdk/examples/` + `sdk/example.py`)
 
 [`examples/README.md`](examples/README.md) is the full index — **one runnable file per way of
-tracing**, all the same fake-DB tool-calling support agent: each frontier provider (OpenAI, Anthropic,
-Gemini, Mistral, Bedrock) + OpenRouter, each harness (LangChain `create_agent`, LangGraph, LiteLLM,
-LlamaIndex, CrewAI), each first-party agent SDK (OpenAI Agents, Claude Agent SDK, Google ADK), and
-each approach (`@observe`+`trace`, the `wrap_openai`/`wrap_anthropic` drop-ins, manual spans). Highlights:
+tracing**, all the same fake-DB **two-agent conversation** (a Support Agent that hands the pricing
+turn off to a Billing Agent, declaring its catalog via `tracely.trace(agents=...)`): each frontier
+provider (OpenAI, Anthropic, Gemini, Mistral, Bedrock) + OpenRouter, each harness (LangChain
+`create_agent`, LangGraph, LiteLLM, LlamaIndex, CrewAI), each first-party agent SDK (OpenAI Agents,
+Claude Agent SDK, Google ADK), and each approach (`@observe`+`trace`, the `wrap_openai`/`wrap_anthropic`
+drop-ins, manual spans). Highlights:
 
 | File | Shows |
 |---|---|
@@ -154,6 +159,7 @@ each approach (`@observe`+`trace`, the `wrap_openai`/`wrap_anthropic` drop-ins, 
 | `examples/manual_spans.py` | the manual escape-hatch API as a full agent (no provider/key needed). |
 | `examples/weather_agent.py` / `weather_agent_cli.py` | a real agent wired with `call_tool`/`call_llm` for `tracely replay --entrypoint` / `--cmd`. |
 | `examples/seed_conversations.py` | rich demo data using **every** SDK helper — single/multi-turn, multi-agent + handoffs, RAG (guardrail→embed→retrieve→chain), thinking, multimodal, structured output, multi-model. `make seed-demo`. |
+| `examples/seed_multiturn.py` | one multi-turn conversation (manual API, no key) — the showcase for the **rolling summary** + **declared agents** (`@LIST_AGENT`). |
 | `examples/seed_regression.py` | promote a failing trace → run red→green CI gates (fills Cases + Gates). `make seed-regression`. |
 | `examples/seed_multicall.py` / `seed_handler.py` | repeated-call + handler examples for fixture replay. |
 

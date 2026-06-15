@@ -17,7 +17,7 @@ Production trace  →  Failure detection  →  Regression test  →  CI/CD gate
    (OTLP/OTel)        (auto evaluators)     (one-click promote)   (PR pass/fail)
 ```
 
-The product maps onto it: **Observe** (trace explorer + trends) · **Detect** (online evaluators grade every run) · **Triage** (failures cluster into issues) · **Test** (promote a failing trace into a hermetic regression case) · **Ship** (replay the suite in CI and gate the PR).
+The product maps onto it: **Observe** (trace explorer + trends + cross-metric meta-analysis) · **Detect** (online evaluators grade every run) · **Triage** (failures cluster into issues) · **Test** (promote a failing trace into a hermetic regression case) · **Ship** (replay the suite in CI and gate the PR).
 
 ## Stack
 
@@ -89,6 +89,54 @@ A pre-defined deployment for the whole stack — the three app services plus Pos
 
 Point any OTLP/HTTP exporter at `POST {endpoint}/v1/traces` with `Authorization: Bearer tracely_dev_key`. Tracely reads standard `gen_ai.*` / OpenInference attributes plus first-class hints — `tracely.agent.id` (auto-registered), `tracely.agent.version`, `tracely.conversation.id` / `turn.*` / `step.*`, `tracely.observation.type`, and `tracely.env` (`prod|staging|ci|dev`, the gating axis). The [`tracely-sdk`](sdk/README.md) is the ergonomic path and also ships the `tracely gate` / `tracely replay` CI commands.
 
+## Gate your PRs (CI/CD)
+
+The differentiated half: a promoted production failure becomes a regression test that **blocks the PR** that reintroduces it. The gate **exits non-zero on failure** (so it blocks the check) and posts a commit status + PR comment. All you need is a **`key`** (your ingest key — it identifies your workspace), your Tracely **`api`** URL, and the **`agent`** slug. Wire it one of two ways, depending on how your CI runs your agent.
+
+### Option A — gate the traces your CI already emits (lightest)
+
+If your pipeline already runs your agent instrumented with `tracely.env=ci`, the gate just matches those traces to your promoted cases (by input) and returns PASS/FAIL — no agent code wiring. Use the bundled composite action:
+
+```yaml
+# .github/workflows/tracely.yml
+name: Tracely gate
+on: pull_request
+permissions:
+  contents: read
+  statuses: write          # post the blocking commit status
+  pull-requests: write     # upsert the results comment
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # → your existing step(s) that run the agent and emit env=ci traces go here ←
+      - uses: Jwuthri/Tracely/.github/actions/tracely-gate@master
+        with:
+          agent: planner                       # which agent's promoted suite to run
+          api:   https://tracely.your-co.dev   # your Tracely backend (TRACELY_API)
+          key:   ${{ secrets.TRACELY_KEY }}    # your ingest key = your workspace
+          # the SDK isn't on PyPI yet — install it from this repo until it is:
+          sdk-spec: "tracely-sdk @ git+https://github.com/Jwuthri/Tracely#subdirectory=sdk"
+```
+
+### Option B — replay the recorded cases against your code (hermetic)
+
+This re-runs your agent on each promoted case's *recorded input*, serving the recorded tool/LLM outputs as fixtures — deterministic, offline, **no API keys, no cost** — then gates. It guarantees the exact failing inputs are tested. Run the CLI directly:
+
+```yaml
+      - run: pip install "tracely-sdk @ git+https://github.com/Jwuthri/Tracely#subdirectory=sdk"
+      - run: tracely replay planner --entrypoint my_pkg.agent:run    # a Python agent
+        # …or any language:  tracely replay planner --cmd "node run.js"  (your script reads $TRACELY_INPUT)
+        env:
+          TRACELY_API: https://tracely.your-co.dev
+          TRACELY_KEY: ${{ secrets.TRACELY_KEY }}
+```
+
+Hermetic replay requires your agent to route tool/model calls through the SDK's `call_tool` / `call_llm` seam (see [the SDK guide](sdk/README.md)); add `--live` to make real calls instead. Both commands auto-detect the PR/commit from the Actions context; `web-url` / `TRACELY_WEB_URL` is optional and only builds the "view gate run" link in the PR comment.
+
+> ℹ️ The repo's own [`.github/workflows/tracely-gate.yml`](.github/workflows/tracely-gate.yml) is Tracely **dogfooding itself** — it replays the bundled `weather_agent` example, which is why it uses an in-repo `pip install ./sdk` and `--entrypoint weather_agent:run`. **Your** integration is one of the two options above, not that file.
+
 ## Repo map — each folder has its own detailed README
 
 | Folder | What's inside |
@@ -98,7 +146,7 @@ Point any OTLP/HTTP exporter at `POST {endpoint}/v1/traces` with `Authorization:
 | [`frontend/`](frontend/README.md) | The Next.js web app — the hierarchical trace explorer, clusters, cases, gates, trends, settings, and auth flows. |
 | [`sdk/`](sdk/README.md) | The Python SDK (instrument agents over OTLP, hermetic record-replay) + the `tracely` CI gate CLI. |
 | [`docs/`](docs/README.md) | The **SDK documentation site** (Nextra / Next.js + MDX) — how it works, instrumentation guide, full API reference, hermetic replay, CI gate. `make docs` → :3002. |
-| [`scripts/`](scripts/README.md) | Dev/demo helpers (raw-OTLP sender, gate shim). |
+| [`scripts/`](scripts/README.md) | Dev/demo helpers (raw-OTLP sender, the one-command full-product `seed_demo.py`, gate shim). |
 | [`design/`](design/README.md) | The full design dossier — reverse-engineered Langfuse + the Tracely architecture, eval, regression, CI/CD, and failure-intelligence designs. |
 
 ## What's shipped
@@ -106,11 +154,13 @@ Point any OTLP/HTTP exporter at `POST {endpoint}/v1/traces` with `Authorization:
 The core **trace → detect → cluster → regression → gate** loop is end-to-end:
 
 - **Ingest:** any OTLP/HTTP source, first-class agent semantics, blob-first durability.
-- **Evaluate:** DB-backed evaluators as **TurnWise-style table columns** — CRUD from the UI, run on every ingest. Multi-output LLM-as-judge (score / number / boolean / text / JSON with custom schema) at conversation / run / span granularity. Batch and sequential (chained) execution modes.
-- **Auth:** three modes — `dev` (open), `local` (email/password + invite flow, self-host), `clerk` (hosted SaaS). Team management, API keys, and invitations.
-- **Triage:** structural + semantic failure clustering, suggested evaluators, promote-to-case.
+- **Evaluate:** DB-backed evaluators as **TurnWise-style table columns** — CRUD from the UI, run on every ingest. Multi-output LLM-as-judge (score / number / boolean / text / JSON with custom schema) at conversation / run / span granularity, in **basic** (context auto-injected) or **advanced** (`@VARIABLE` template prompts with live preview + autocomplete) mode. Batch and sequential (chained) execution. Per-evaluator targeting (agent/env) + deterministic sampling to scope judge spend; **advisory** evaluators record a verdict without flipping the roll-up.
+- **Auth:** three modes — `dev` (open), `local` (email/password + invite flow + change-password, self-host), `clerk` (hosted SaaS). Team management, API keys, invitations, account settings.
+- **Triage:** structural + semantic failure clustering, a creatable suggested-evaluator draft, promote-to-case.
 - **Regression:** hermetic fixture bundles, fail-to-pass contracts, CI replay.
 - **Gate:** PR blocking via `tracely replay` / `tracely gate`, GitHub status + comment.
-- **Trends:** daily traces/failures/gate pass-rate dashboard.
+- **Insights:** daily traces/failures/gate pass-rate **Trends** + per-agent cross-metric **meta-analysis** (Spearman correlations + z-score outliers, LLM-synthesized).
+- **Conversation intelligence:** real-time **rolling summary** (accumulating per-turn memory backing the judge's `@HISTORY`) + a **conversation-agents** panel (declared via the SDK, or derived from spans).
+- **CI:** the repo's own GitHub Actions pipeline (ruff + pytest + `next build` + prod Docker images) and Dependabot, alongside the regression-gate dogfood.
 
 The near-term execution plan is in **[design/part2-tracely/11-prd-next-steps.md](design/part2-tracely/11-prd-next-steps.md)** and the long-term roadmap is in [10-mvp-and-roadmap.md](design/part2-tracely/10-mvp-and-roadmap.md).

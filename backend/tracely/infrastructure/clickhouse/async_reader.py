@@ -146,6 +146,46 @@ async def evaluator_cost(project_id: str, days: int = 30) -> dict[str, dict]:
     }
 
 
+async def evaluator_catalog(project_id: str) -> list[dict]:
+    """Every evaluator that has produced a verdict-bearing online score, with its volume + fail count
+    — the set of judges a reviewer can calibrate (independent of whether any have been labeled yet)."""
+    client = await get_async_client()
+    res = await client.query(
+        "SELECT name, anyLast(evaluation_level) AS level, count() AS total, "
+        "countIf(verdict = 'FAIL') AS fails "
+        f"FROM scores FINAL WHERE project_id = {{p:String}} AND {_ONLINE} AND verdict != '' "
+        "GROUP BY name ORDER BY total DESC",
+        parameters={"p": project_id},
+    )
+    return [
+        {"name": r[0], "level": r[1] or "", "total": int(r[2]), "fails": int(r[3])}
+        for r in res.result_rows
+    ]
+
+
+async def evaluator_score_queue(project_id: str, name: str, limit: int = 100) -> list[dict]:
+    """Recent verdict-bearing online scores for one evaluator — the labeling queue. Each row is a
+    judge decision (its target identity + verdict + rationale comment) a reviewer can agree/disagree
+    with. Newest first."""
+    client = await get_async_client()
+    res = await client.query(
+        "SELECT trace_id, observation_id, session_id, evaluation_level, verdict, value, comment, "
+        "toString(created_at) AS created_at "
+        f"FROM scores FINAL WHERE project_id = {{p:String}} AND {_ONLINE} "
+        "AND name = {n:String} AND verdict != '' "
+        "ORDER BY created_at DESC LIMIT {lim:UInt32}",
+        parameters={"p": project_id, "n": name, "lim": limit},
+    )
+    return [
+        {
+            "trace_id": r[0] or "", "observation_id": r[1] or "", "session_id": r[2] or "",
+            "evaluation_level": r[3] or "", "verdict": r[4] or "", "value": r[5],
+            "comment": r[6] or "", "created_at": r[7],
+        }
+        for r in res.result_rows
+    ]
+
+
 # ── sessions / threads ────────────────────────────────────────────────────────
 
 

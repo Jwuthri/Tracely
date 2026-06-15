@@ -63,6 +63,12 @@ Output types: `score` (0..1 + PASS/FAIL via threshold), `number` (any range), `b
 
 Execution modes: `batch` (independent, default) or `sequential` (each item's prompt carries the previous item's result — enabling progressive grading within a trace and chained context across conversation turns).
 
+**Basic vs Advanced prompts.** A *basic* judge gets its context **auto-injected** (request / answer / tool results / transcript / step I/O). An *advanced* judge hands that control to the user: the rubric is written with `@VARIABLE` placeholders (`@REQUEST`, `@ANSWER`, `@TOOLS`, `@HISTORY`, `@LIST_AGENT`, `@STEP_INPUT`, …) resolved against the real trace/thread at run time (`domain/evaluation/template_resolver.py`). A missing variable becomes the literal `[No <REF> available]` — a soft miss, never an error. The same builder + resolver power both the run path and the `POST /api/evaluators/resolve` preview, so "what you preview" matches "what runs".
+
+**Targeting + sampling (the AUTO run).** `domain/evaluation/targeting.py` decides which enabled evaluators run on a given trace: `target_agent` / `target_env` filter by the trace's agent (id or slug) / env, and `sampling` (0..1) rolls a **deterministic** per-`(trace_id, score_name)` die so a trace re-ingested across span batches makes the same keep/drop decision (scores converge under `ReplacingMergeTree` instead of flickering). This is the only lever for LLM-judge spend ("grade 10% of prod traces"). An explicit on-demand run from the UI always grades, ignoring targeting/sampling.
+
+**Advisory verdicts.** `domain/evaluation/verdict.py` is the single roll-up policy: a trace / turn / session / trend counts as **failing** iff it has a `FAIL` on a *non-advisory* evaluator. An *advisory* evaluator (`config.advisory`, e.g. the subjective answer-quality judge) still records its verdict and shows its pill, but a FAIL on it does NOT flip the roll-up. This replaced the old hardcoded `name != 'tracely.run.quality'` magic string; `api/advisory.py` bridges the advisory set onto the async read paths, and the ClickHouse readers apply the identical `name NOT IN {advisory}` rule in SQL — so the threads dot, trace badge, session verdict, and trends agree (migration `0012` backfills the flag on existing installs).
+
 ### 3. Failure intelligence — group failures into Issues
 Two stages:
 - **Ingest-time (cheap, structural):** `cluster.cluster_failure()` builds a masked signature (`failed_evals ## masked_error_text`, ids/numbers/quotes redacted) → sha256 key → upserts a `FailureCluster` + member. Runs automatically when a trace has failures.
@@ -81,7 +87,16 @@ Three modes controlled by `AUTH_MODE` in config:
 - **`local`** — email/password self-hosting. JWT sessions signed with `SESSION_SECRET`. Full user registration, invite flow, team management, and API key management.
 - **`clerk`** — Clerk-hosted SaaS auth. Verifies Clerk JWTs; requires `CLERK_ISSUER`.
 
-All modes share `GET /auth/me` and `POST /auth/logout`. Local mode adds `/auth/register`, `/auth/login`, `/auth/accept-invite`; Clerk mode adds `/auth/clerk/callback`. Users, memberships, and invitations are stored in Postgres (migration `0008_auth`).
+All modes share `GET /auth/me`, `POST /auth/logout`, and `POST /auth/projects` (the project switcher). Local mode adds `/auth/register`, `/auth/login`, `/auth/change-password`, and the invitation endpoints (`POST/GET /auth/invitations`, `DELETE /auth/invitations/{id}`, `POST /auth/invitations/accept`); Clerk mode adds `POST /auth/sync`. Users, memberships, and invitations are stored in Postgres (migration `0008_auth`).
+
+### 7. Rolling summary — accumulating conversation memory
+`RollingSummaryService.build_for_thread()` keeps a per-span, accumulating summary of a conversation (table `rolling_summaries`, migration `0010`). It's a flat JSON **list** of items: a step ≤ `rolling_summary_step_max_tokens` (512) is appended **verbatim** (no LLM, no information loss); a larger step is compressed to ~10–20 words by `rolling_summary_agent`. When the list exceeds `rolling_summary_max_tokens` (20k), the older items fold into one `prev_summary` item and only the last two stay verbatim. One row per span holds the full list up to that point (conversation view = last row, message view = the turn's last step, step view = that exact row). Idempotent + incremental (an up-front read seeds a skip-cache), so the ingest hook re-runs cheaply; `format_summary_as_history` renders the list into the judge's `@HISTORY` string. The `evaluate_run_task` folds each turn in at ingest (best-effort — a summary failure never fails the run); `POST /api/sessions/{thread}/rolling-summary/generate` rebuilds on demand.
+
+### 8. Meta-analysis — cross-metric "Analyze"
+`MetaAnalysisService.analyze_and_save()` runs a cross-metric analysis over **one agent's** evaluator score rows (table `meta_analyses`, migration `0009`). The async ClickHouse gather (`async_reader.agent_score_rows`) happens in the router; the service computes **deterministic** statistics in `domain/analysis/statistics.py` — Spearman correlations (tie-averaged ranks, no scipy dependency; reports the shared-sample `n`, not a fabricated p-value) and z-score outliers — then `infrastructure/llm/meta_analysis_agent.py` synthesizes patterns / recommendations / a summary **on top**, and the precomputed numbers are **merged back in** so the model can never lose or hallucinate them. With no LLM credential the run still succeeds (stats + a templated summary). Surfaced on the Trends page.
+
+### 9. Conversation agents — declared vs derived
+`ConversationAgentsService.for_thread()` reads the user-declared agent/tool catalog a conversation sent via the SDK (`tracely.trace(agents=[...])` → table `conversation_agents`, migration `0011`). A tiny guarded sync seam: it never raises, so a lookup failure degrades to the spans-derived agent view. The catalog feeds both the UI's Conversation Agents panel and the judge's `@LIST_AGENT` variable.
 
 ---
 
@@ -90,7 +105,7 @@ All modes share `GET /auth/me` and `POST /auth/logout`. Local mode adds `/auth/r
 The package is layered: **domain** (pure logic, no I/O), **infrastructure** (DB / CH / S3 / Redis / LLM adapters), **services** (use-case orchestrators, classes), **workers** (Celery tasks), **api** (HTTP). The only top-level Python files are `config.py` (pydantic settings) and `__init__.py` (re-exports `settings`).
 
 ### `tracely/config.py`
-`Settings` (pydantic-settings) — all env: ClickHouse/Postgres/Redis/S3, `OPENROUTER_API_KEY` / `OPENAI_API_KEY`, embedding/judge models, gate thresholds, `AUTH_MODE` (`dev|local|clerk`), `SESSION_SECRET`, `CLERK_ISSUER`, `default_agent_slug`.
+`Settings` (pydantic-settings) — all env: ClickHouse/Postgres/Redis/S3, `OPENROUTER_API_KEY` / `OPENAI_API_KEY`, embedding/judge models, `meta_analysis_model`, `rolling_summary_model` + its `*_step_max_tokens` (512) / `*_max_tokens` (20k) budgets, gate thresholds, `AUTH_MODE` (`dev|local|clerk`), `SESSION_SECRET`, `CLERK_ISSUER`, `default_agent_slug`.
 
 ### `tracely/domain/` — pure logic, no I/O
 | Module | Purpose |
@@ -102,8 +117,13 @@ The package is layered: **domain** (pure logic, no I/O), **infrastructure** (DB 
 | `evaluation/text.py` | Answer / I/O text extraction shared between structural + judge. |
 | `evaluation/output_schema.py` | `model_from_json_schema` / `wrap_with_score` — compile a user's JSON schema definition into a Pydantic model for structured LLM output. |
 | `evaluation/generation.py` | `generate_evaluator_from_prompt` — AI-generate an evaluator config from a natural-language prompt. |
+| `evaluation/template_resolver.py` | `TEMPLATE_VARIABLES` catalog + `build_context` + `TemplateResolver` — `@VARIABLE` resolution for advanced-mode judge prompts (pure; materializes only the referenced vars). |
+| `evaluation/targeting.py` | `spec_applies` — does an evaluator run on this trace? `target_agent`/`target_env` match + deterministic per-`(trace, evaluator)` `sampling`. |
+| `evaluation/verdict.py` | `is_failing` / `rollup_verdict` — the one roll-up policy (FAIL iff a non-advisory FAIL). |
+| `evaluation/rolling_summary.py` | The summary item schema + pure helpers (`step_components`, `format_summary_as_history`, compaction) for the accumulating conversation summary. |
 | `evaluation/evaluators/` | `Evaluator` ABC + `EvaluatorRegistry` + one class per check (`RunOutcomeEvaluator`, `ToolSuccessEvaluator`, `ToolConsistencyEvaluator`, `LatencyEvaluator`, `RequiredToolsEvaluator`, `LLMJudgeEvaluator`) + `TEMPLATES` catalog + `DEFAULT_JUDGE_PROMPT`. |
-| `evaluation/evaluator_suggestion.py` | Generate a starting-point evaluator from a cluster's failure mechanism. |
+| `evaluation/evaluator_suggestion.py` | Generate a starting-point evaluator **draft** (structural check or judge rubric) from a cluster's failure mechanism. |
+| `analysis/statistics.py` | Deterministic cross-metric stats for meta-analysis — Spearman correlations (tie-averaged ranks) + z-score outliers. Pure, numpy-only. |
 | `failure/signature.py` | `FailureSignature` value object — the cheap masked sha256 key. |
 | `failure/text.py` | `embedding_text` / `summarize_failure` — terse mechanism vs. full-context summaries. |
 | `failure/clustering.py` | `ClusterEngine` — UMAP+HDBSCAN regime selection. |
@@ -118,7 +138,7 @@ The package is layered: **domain** (pure logic, no I/O), **infrastructure** (DB 
 | `db/base.py` | SQLAlchemy 2.0 `Base = DeclarativeBase`. |
 | `db/engine.py` | Async + sync engines + sessionmakers. |
 | `db/session.py` | `get_session()` / `sync_session()` helpers. |
-| `db/models.py` | Postgres registry entities + enums (Project, IngestKey, Agent, AgentVersion, EvaluationSuite/Case, GateRun/Case, FailureCluster/Member, FailureEmbedding, Evaluator, CaseReplay, User, Membership, Invitation). |
+| `db/models.py` | Postgres registry entities + enums (Project, IngestKey, Agent, AgentVersion, EvaluationSuite/Case, GateRun/Case, FailureCluster/Member, FailureEmbedding, Evaluator, CaseReplay, User, Membership, Invitation, MetaAnalysis, RollingSummary, ConversationAgents). |
 | `db/repositories.py` | Query helpers for every model (`evaluator_enabled_specs`, user/membership/invitation CRUD, etc.). |
 | `clickhouse/client.py` | sync + async clients; `insert_rows()`. |
 | `clickhouse/events_schema.py` | `EVENT_COLUMNS` + `to_rows()`. |
@@ -130,6 +150,8 @@ The package is layered: **domain** (pure logic, no I/O), **infrastructure** (DB 
 | `llm/embeddings.py` | `Embedder` (OpenAI embeddings, lazy-imported). |
 | `llm/provider.py` | `run_structured_agent` / `run_text_agent` — all LLM calls routed through LangChain `create_agent` on OpenRouter (or OpenAI fallback). `llm_enabled()` returns false when neither key is set. |
 | `llm/analysis_agents.py` | LangGraph/LangChain agents (`analyze_cluster`, `consolidate`) — lazy-imported. |
+| `llm/meta_analysis_agent.py` | `synthesize` — turns the precomputed stats into patterns/recommendations/summary (via the provider; never invents the numbers). |
+| `llm/rolling_summary_agent.py` | `summarize_components` — compresses an oversized step's components to ~10–20 words each (only path that calls the LLM for summaries). |
 | `registry/agents.py` | Idempotent `upsert_agent` / `upsert_agent_version`. |
 | `text.py` | `extract_text` / `message_text` — readable text from stored I/O. |
 
@@ -142,10 +164,13 @@ The package is layered: **domain** (pure logic, no I/O), **infrastructure** (DB 
 | `GateService` | `run_gate`, `replay_suite`, `resolve_agent_id`. |
 | `FailureIntelService` | `rebuild_clusters` — embed → cluster → analyze → consolidate. |
 | `StructuralClusteringService` | `cluster_failure` — ingest-time signature clustering. |
+| `RollingSummaryService` | `build_for_thread` — the per-span accumulate loop (verbatim vs LLM-compressed; budget-folding). |
+| `MetaAnalysisService` | `analyze_and_save` — compute stats + LLM synthesis + merge + persist a per-agent meta-analysis. |
+| `ConversationAgentsService` | `for_thread` — read the declared agent catalog (guarded; degrades to spans). |
 | `seeding_service` | `main()` — default project + ingest key + recommended evaluators. |
 
 ### `tracely/workers/tasks.py`
-Three Celery tasks, each a 3-line dispatch into a service class: `ingest_otlp_blob` → `IngestionService`, `evaluate_run` → `EvaluationService`, `rebuild_clusters` → `FailureIntelService`.
+Three Celery tasks, each a thin dispatch into a service class: `ingest_otlp_blob` → `IngestionService` (then debounce-enqueues evaluation), `evaluate_run` → `EvaluationService` (then folds the turn into the thread's `RollingSummaryService`, best-effort), `rebuild_clusters` → `FailureIntelService`.
 
 ### `tracely/otel/` — OTLP → event mapper
 | Module | Purpose |
@@ -164,15 +189,17 @@ Three Celery tasks, each a 3-line dispatch into a service class: `ingest_otlp_bl
 ### `tracely/api/` — FastAPI
 | Module | Purpose |
 |---|---|
-| `main.py` | App factory + middleware + router mount. |
-| `auth.py` | `Authorization: Bearer <ingest-key>` → `project_id`. |
-| `dto/{common,traces}.py` | Pydantic response models (`SpanOut`, `TraceDetail`, `AgentOut`, `IngestResponse`). |
+| `main.py` | App factory + middleware + router mount (auth routers mounted per `AUTH_MODE`). |
+| `auth.py` (pkg) | `Authorization: Bearer <ingest-key>` → `project_id`. |
+| `advisory.py` | Bridge the project's advisory score-names onto the async read paths (one source for every verdict roll-up). |
+| `dto/{common,traces,auth}.py` | Pydantic response models (`SpanOut`, `TraceDetail`, `AgentOut`, `IngestResponse`, auth DTOs). |
 | `routers/otlp.py` | OTLP ingest. |
-| `routers/traces.py` · `sessions.py` · `search.py` | Trace/session/search reads. |
+| `routers/traces.py` · `sessions.py` · `search.py` | Trace/session/search reads (sessions also serves rolling-summary + conversation-agents). |
 | `routers/cases.py` · `gate.py` · `clusters.py` · `analytics.py` | Regression cases, gate, failure clusters, trends. |
-| `routers/evaluators.py` | Evaluator CRUD (`GET/POST/PUT/DELETE /api/evaluators`), list templates, AI-generate, run on demand with SSE streaming. |
-| `routers/auth.py` | Auth endpoints (`/auth/me`, `/auth/logout`, and mode-specific register/login/clerk routes). |
-| `routers/health.py` | Liveness. |
+| `routers/evaluators.py` · `evaluations.py` | Evaluator CRUD (`GET/POST/PATCH/DELETE`), templates, models/cost, template-variables, `@VARIABLE` resolve-preview, AI-generate; SSE on-demand runs. |
+| `routers/meta_analysis.py` | Per-agent meta-analysis: list agents, run, fetch latest/by-id, delete. |
+| `routers/auth.py` | Auth endpoints (common `me`/`logout`/`projects` + mode-specific local/clerk routers). |
+| `routers/health.py` | Readiness probe (ClickHouse + Postgres; 503 when either is down). |
 
 ## API surface (`backend/tracely/api/routers/`)
 
@@ -181,26 +208,30 @@ Three Celery tasks, each a 3-line dispatch into a service class: `ingest_otlp_bl
 | `POST /v1/traces` | `otlp.py` | OTLP/HTTP ingest (protobuf or JSON) → blob + enqueue. |
 | `GET /api/traces`, `/api/traces/{id}` | `traces.py` | trace list; trace detail (spans + scores + verdict). |
 | `GET /api/sessions`, `/api/sessions/{thread}` | `sessions.py` | conversations (grouped by `conversation_id`) + per-turn rollups (tokens, input/output split, model, cost, verdict). |
+| `GET /api/sessions/{thread}/agents` | `sessions.py` | the conversation's agents — declared (SDK catalog) or derived from spans. |
+| `GET …/{thread}/rolling-summary` · `…/by-level` · `POST …/generate` | `sessions.py` | the accumulated conversation summary (whole / per-level) + on-demand rebuild. |
 | `GET /api/search` | `search.py` | ⌘K search over conversations/issues/cases/gates. |
 | `GET /api/stats` · `POST /api/promote` · `GET /api/cases` · `GET /api/cases/{id}` · `POST /api/cases/{id}/replay` | `cases.py` | dashboard stats; promote a trace → case; case list/detail; manual replay. |
 | `GET /api/clusters`, `/api/clusters/{id}` · `POST …/rebuild` | `clusters.py` | failure clusters list/detail; trigger `rebuild_clusters`. |
 | `POST /api/gate` · `GET /api/gate/suite` · `GET /api/gates`, `/api/gates/{id}` | `gate.py` | run a gate; fetch the replay suite (cases + inputs + fixtures); gate list/detail. |
 | `GET /api/trends` | `analytics.py` | daily traces/failures + gate pass-rate + summary (failure rate, MTTR proxy…). |
-| `GET /api/evaluators` · `POST /api/evaluators` · `PUT /api/evaluators/{id}` · `DELETE /api/evaluators/{id}` | `evaluators.py` | evaluator CRUD. |
-| `GET /api/evaluators/templates` | `evaluators.py` | built-in catalog (structural checks + judge templates). |
+| `GET /api/evaluators` · `POST /api/evaluators` · `PATCH /api/evaluators/{id}` · `DELETE /api/evaluators/{id}` | `evaluators.py` | evaluator CRUD (POST creates, PATCH partial-updates). |
+| `GET /api/evaluators/templates` · `/models` · `/cost` · `/template-variables/{level}` | `evaluators.py` | built-in catalog · selectable judge models · judge cost estimate · `@VARIABLE` catalog for a level. |
+| `POST /api/evaluators/resolve` | `evaluators.py` | resolve an advanced `@VARIABLE` prompt against a real trace/thread (live preview, no LLM). |
 | `POST /api/evaluators/generate` | `evaluators.py` | AI-generate evaluator config from a natural-language prompt. |
-| `POST /api/evaluators/{id}/run` | `evaluators.py` | on-demand SSE run — streams one score dict per event. |
-| `GET /auth/me` · `POST /auth/logout` | `auth.py` | current user + logout (all modes). |
-| `POST /auth/register` · `POST /auth/login` · `POST /auth/accept-invite` | `auth.py` | local-mode auth. |
-| `GET /auth/clerk/callback` | `auth.py` | Clerk-mode callback. |
-| `GET /api/health` | `health.py` | liveness. |
+| `POST /api/evaluations/run` | `evaluations.py` | on-demand SSE run of an evaluator — streams one score dict per event. |
+| `GET /api/meta-analyses/agents` · `POST …/run` · `GET …/agent/{id}` · `GET/DELETE …/{id}` | `meta_analysis.py` | per-agent meta-analysis: analyzable agents, run, latest-for-agent, fetch/delete. |
+| `GET /auth/me` · `POST /auth/logout` · `POST /auth/projects` | `auth.py` | current user + logout + project switch (all modes). |
+| `POST /auth/register` · `/login` · `/change-password` · `POST/GET /auth/invitations` · `DELETE /auth/invitations/{id}` · `POST /auth/invitations/accept` | `auth.py` | local-mode auth + invitations. |
+| `POST /auth/sync` | `auth.py` | Clerk-mode user sync. |
+| `GET /api/health` | `health.py` | readiness — `200` healthy / `503` when ClickHouse or Postgres is unreachable. |
 
 Every read/write is scoped by `project_id`, resolved from the `Authorization: Bearer <ingest-key>` header (`auth.get_project_id`).
 
 ## Data schemas
 
 - **ClickHouse** (`tracely/ch_migrations/*.up.sql`): `0001_events` — the wide span table (identifiers, timing, agent semantics as **first-class indexed columns** `agent_id/agent_run_id/turn_id/step_id/env`, tool edges, `usage_details`/`cost_details` Maps, `input`/`output`, full `metadata` Map), `ReplacingMergeTree(event_ts, is_deleted)`. `0002_scores` — the `scores` sink (`name, verdict, value, evaluation_level, observation_id, source, …`).
-- **Postgres** (`migrations/versions/*`, Alembic): `0001` registry (projects/keys/agents/versions) · `0002` suites/cases/replays · `0003` gate runs/cases · `0004` failure clusters/members/embeddings · `0005` FI extensions · `0006` gate metric columns (latency/tokens/warnings) · `0007` evaluators (user-defined: kind, config, score_name, level, enabled, target_agent/env, sampling) · `0008` auth (users, memberships, invitations).
+- **Postgres** (`migrations/versions/*`, Alembic): `0001` registry (projects/keys/agents/versions) · `0002` suites/cases/replays · `0003` gate runs/cases · `0004` failure clusters/members/embeddings · `0005` FI extensions · `0006` gate metric columns (latency/tokens/warnings) · `0007` evaluators (user-defined: kind, config, score_name, level, enabled, target_agent/env, sampling) · `0008` auth (users, memberships, invitations) · `0009` meta-analyses · `0010` rolling summaries (per-span accumulating summary) · `0011` conversation agents (SDK-declared catalog) · `0012` backfill `config.advisory` on the answer-quality judge.
 
 ## Run it
 
@@ -217,7 +248,7 @@ make test             # OTLP-mapper + evaluator unit tests (no infra needed)
 In Docker, the `backend` and `worker` services run this package off a **source volume-mount** (editable install), so a Python edit needs only `docker compose restart backend worker` — **the Celery worker does not hot-reload**, so always restart it after changing worker/eval/FI/mapping code. New Alembic migrations apply via the mounted `migrate` one-shot.
 
 ## Tests
-`backend/tests/` — unit tests for the OTLP→event mapper, evaluators (all output types, level dispatch, sequential chaining), output schema compilation, and SSE streaming. Run with `make test`.
+`backend/tests/` — unit tests for the OTLP→event mapper, evaluators (all output types, level dispatch, sequential chaining, targeting/sampling), output schema compilation, the `@VARIABLE` template resolver, the advisory verdict policy, the gate/eval contract, rolling summary, meta-analysis statistics, conversation agents, the readiness probe, and SSE streaming. Run with `make test` (no infra needed). CI also runs `ruff check` + this suite + `next build` on every PR (`.github/workflows/ci.yml`).
 
 ## Key decisions (and why)
 

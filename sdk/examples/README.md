@@ -1,15 +1,17 @@
 # `sdk/examples/` — one runnable example per way of tracing
 
-Every example is the **same realistic agent**: a customer-support agent that answers _"Where is my
-order ORD-4471, and is the Alpine Winter Coat back in stock?"_ by calling two tools against a fake
-e-commerce DB ([`_fake_db.py`](_fake_db.py)) — `get_order_status` + `check_inventory` — then
-summarizing. So each file shows a real tool-calling loop (plus thinking, in the `@observe`/manual
-ones), not a toy single call. Each guards on its instrumentor + API key, printing setup hints instead
-of crashing when a dependency or key is missing.
+Every example is the **same realistic two-agent conversation**: a **Support Agent** answers
+order/inventory questions over several turns by calling tools against a fake e-commerce DB
+([`_fake_db.py`](_fake_db.py)) — `get_order_status` + `check_inventory` — then **hands off** the final
+pricing-comparison turn to a **Billing Agent** (`compare_prices`). So each file shows a real
+multi-turn, multi-agent tool-calling loop (plus thinking, in the `@observe`/manual ones), not a toy
+single call. Each guards on its instrumentor + API key, printing setup hints instead of crashing when
+a dependency or key is missing.
 
-Every example also tags its run with its own filename via `tracely.trace(example=os.path.basename(__file__))`,
-so each span carries `tracely.metadata.example = <file>.py` — filter on it in the Tracely UI to find the
-traces a given example produced.
+Each run also declares its two-agent catalog once via `tracely.trace(agents=AGENTS)` (so the
+Conversation Agents panel + the judge's `@LIST_AGENT` see it) and tags itself with its own filename
+via `example=os.path.basename(__file__)`, so each span carries `tracely.metadata.example = <file>.py`
+— filter on it in the Tracely UI to find the traces a given example produced.
 
 ```bash
 pip install "tracely-sdk[<extra>]"     # the extra named in each file's header
@@ -73,6 +75,7 @@ The big labs now ship their own agent harnesses; each has an OpenInference instr
 | File | Shows |
 |---|---|
 | [`seed_conversations.py`](seed_conversations.py) | rich manual-API demo data — every observation type (`make seed-demo`) |
+| [`seed_multiturn.py`](seed_multiturn.py) | one multi-turn conversation via the manual API (no key) — the showcase for the **rolling summary** + **declared agents** (`tracely.trace(agents=...)`) |
 | [`seed_regression.py`](seed_regression.py) | promote a failing trace → red→green CI gates (`make seed-regression`) |
 | [`seed_multicall.py`](seed_multicall.py) / [`seed_handler.py`](seed_handler.py) | repeated-call + handler fixtures for hermetic replay |
 | [`weather_agent.py`](weather_agent.py) / [`weather_agent_cli.py`](weather_agent_cli.py) | a real agent wired for `tracely replay --entrypoint` / `--cmd` |

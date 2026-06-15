@@ -29,6 +29,22 @@ make demo-failures        # loops send_test_trace.py with RANDOM/SILENT/HALLUCIN
 
 For richer, agent-shaped demo data (multi-turn, multi-agent, thinking, multimodal, structured output) use the SDK seeder instead: [`sdk/examples/seed_conversations.py`](../sdk/examples/seed_conversations.py).
 
+## `seed_demo.py` — the whole-product seeder (one command)
+
+Populates **every** surface a visitor sees, in dependency order, so the differentiated Test/Ship half is never left empty:
+
+1. **Observe / Triage** — rich conversations (`seed_conversations.py`): every trace shape + the failures (tool error, hallucination, silent requested-but-not-executed tool, guardrail block).
+2. **Triage** — cluster those failures into issues (`POST /api/clusters/rebuild`).
+3. **Test / Ship** — promote failing traces into regression cases + run red→green CI gates (`seed_regression.py`) — the differentiated half competitors don't have.
+
+```bash
+make demo                                              # local dev (backend + worker already up)
+docker compose --profile demo up -d --build --wait     # Docker: the `demo` compose profile runs exactly this
+docker compose exec backend python scripts/seed_demo.py   # seed an already-running stack
+```
+
+Idempotent — each phase is skipped when its data already exists (promote dedupes by input digest; deterministic trace ids replace in place), so it's safe to run on every `docker compose up`. Pass `--force` to re-run anyway. This is the script behind [`DEMO.md`](../DEMO.md).
+
 ## `tracely_gate.py` — deprecated shim
 
 The CI gate now lives in the SDK as the `tracely` CLI. This file just forwards `python scripts/tracely_gate.py <agent>` → `tracely gate --agent <agent>` so old callers keep working.

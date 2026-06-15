@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from uuid import uuid4
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,7 @@ from tracely.infrastructure.db.models import (
     GateRun,
     MetaAnalysis,
     RollingSummary,
+    ScoreAnnotation,
 )
 
 # ── evaluators (= evaluation columns) ─────────────────────────────────────────
@@ -606,3 +607,107 @@ def conversation_agents_upsert(
     s.commit()
     s.refresh(row)
     return row
+
+
+# ── score annotations (judge-vs-human calibration) ──────────────────────────────
+def _annotation_key(q, project_id, score_name, evaluation_level, trace_id, session_id, observation_id, labeled_by):
+    return q.where(
+        ScoreAnnotation.project_id == project_id,
+        ScoreAnnotation.score_name == score_name,
+        ScoreAnnotation.evaluation_level == evaluation_level,
+        ScoreAnnotation.trace_id == trace_id,
+        ScoreAnnotation.session_id == session_id,
+        ScoreAnnotation.observation_id == observation_id,
+        ScoreAnnotation.labeled_by == labeled_by,
+    )
+
+
+def score_annotation_upsert(
+    s: Session,
+    project_id: str,
+    *,
+    score_name: str,
+    human_verdict: str,
+    evaluation_level: str = "",
+    trace_id: str = "",
+    session_id: str = "",
+    observation_id: str = "",
+    judge_verdict: str = "",
+    note: str | None = None,
+    labeled_by: str = "",
+) -> ScoreAnnotation:
+    """Insert or replace one reviewer's label on a judge score (keyed by the score's natural identity
+    + labeler). `judge_verdict` is snapshotted so agreement reflects what the human reviewed."""
+    row = _annotation_key(
+        select(ScoreAnnotation), project_id, score_name, evaluation_level, trace_id, session_id,
+        observation_id, labeled_by,
+    )
+    row = s.execute(row).scalar_one_or_none()
+    if row is None:
+        row = ScoreAnnotation(
+            id=str(uuid4()), project_id=project_id, score_name=score_name,
+            evaluation_level=evaluation_level, trace_id=trace_id, session_id=session_id,
+            observation_id=observation_id, judge_verdict=judge_verdict,
+            human_verdict=human_verdict, note=note, labeled_by=labeled_by,
+        )
+        s.add(row)
+    else:
+        row.judge_verdict = judge_verdict
+        row.human_verdict = human_verdict
+        row.note = note
+    s.commit()
+    s.refresh(row)
+    return row
+
+
+def score_annotation_delete(
+    s: Session,
+    project_id: str,
+    *,
+    score_name: str,
+    evaluation_level: str = "",
+    trace_id: str = "",
+    session_id: str = "",
+    observation_id: str = "",
+    labeled_by: str = "",
+) -> bool:
+    """Remove a reviewer's label (clearing it). Returns whether a row was deleted."""
+    row = _annotation_key(
+        select(ScoreAnnotation), project_id, score_name, evaluation_level, trace_id, session_id,
+        observation_id, labeled_by,
+    )
+    row = s.execute(row).scalar_one_or_none()
+    if row is None:
+        return False
+    s.delete(row)
+    s.commit()
+    return True
+
+
+def score_annotations_for_trace(
+    s: Session, project_id: str, *, trace_id: str = "", session_id: str = "",
+    labeled_by: str | None = None,
+) -> list[ScoreAnnotation]:
+    """Existing labels on a trace and/or its thread (optionally just one reviewer's) — used to render
+    the current annotation state in the UI."""
+    q = select(ScoreAnnotation).where(ScoreAnnotation.project_id == project_id)
+    keys = []
+    if trace_id:
+        keys.append(ScoreAnnotation.trace_id == trace_id)
+    if session_id:
+        keys.append(ScoreAnnotation.session_id == session_id)
+    if keys:
+        q = q.where(or_(*keys))
+    if labeled_by is not None:
+        q = q.where(ScoreAnnotation.labeled_by == labeled_by)
+    return list(s.execute(q).scalars().all())
+
+
+def score_annotations_for_project(
+    s: Session, project_id: str, score_name: str | None = None
+) -> list[ScoreAnnotation]:
+    """All labels in a project (optionally one evaluator) — the input to the agreement computation."""
+    q = select(ScoreAnnotation).where(ScoreAnnotation.project_id == project_id)
+    if score_name:
+        q = q.where(ScoreAnnotation.score_name == score_name)
+    return list(s.execute(q.order_by(desc(ScoreAnnotation.updated_at))).scalars().all())

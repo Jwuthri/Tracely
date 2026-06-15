@@ -30,7 +30,7 @@ There are **two** ways the UI talks to the backend, and which one you use depend
 | File | Role |
 |---|---|
 | `app/layout.tsx` | Root layout: `_providers` (auth context) + `Sidebar` + content (`Topbar` + `<main>`) + `CommandPalette`. Loads display/sans/mono fonts. `<main>` is capped at `max-w-[1240px]` (the trace table can break out of this — see Enlarge). |
-| `components/Sidebar.tsx` | Left nav (244px), grouped by the spine: **Observe** (Dashboard, Traces, Trends) · **Triage** (Failure clusters) · **Test** (Regression cases) · **Ship** (CI gates). Footer shows the project + `prod` env. |
+| `components/Sidebar.tsx` | Left nav (244px), grouped by the spine: **Observe** (Dashboard, Traces, Trends) · **Triage** (Failure clusters) · **Test** (Regression cases) · **Ship** (CI gates) · **Configure** (Settings). Footer shows the project + `prod` env. |
 | `components/Topbar.tsx` | Breadcrumbs + the ⌘K trigger. |
 | `components/CommandPalette.tsx` | ⌘K/Ctrl-K global search → `/api/search`; result types trace / issue / case / gate with keyboard nav. |
 | `components/AccountMenu.tsx` | User avatar menu (top-right) — profile, sign out, links to settings. Renders only in `local`/`clerk` auth modes. |
@@ -46,6 +46,7 @@ app/
     settings/
       api-keys/     # API key management
       team/         # member list + InviteManager
+      account/      # account settings + change password (local mode)
 ```
 
 ## Pages (`app/**/page.tsx`)
@@ -56,7 +57,7 @@ All are **Server Components** unless noted; each lists the `lib/api.ts` calls it
 |---|---|---|
 | `/` | `getStats`, `getTraces`, `getCases` | Dashboard — 4 stat cards + recent traces & cases. |
 | `/traces` | `getSessions` | `TracesExplorer` (filter + search + date range) wrapping the hierarchical **TraceTable** in list mode. |
-| `/traces/[traceId]` | `getTrace` | Single trace header (spans/latency/**usage totals**, `PromoteButton` if failing) + `SingleTraceView` (Table / Timeline / Evaluations tabs). |
+| `/traces/[traceId]` | `getTrace` | Single trace header (spans/latency/**usage totals**, `PromoteButton` if failing) + `SingleTraceView` (Table / Timeline tabs + an Agents drawer). |
 | `/sessions/[threadId]` | `getSession` + `getTrace` per turn | A conversation, pre-expanded: builds a `ConvNode` with all turns + spans and renders **TraceTable** in detail mode. Header shows conversation usage totals. |
 | `/clusters` | `getClusters` | Failure-cluster table + `RebuildButton` ("Analyze failures"). |
 | `/clusters/[clusterId]` | `getCluster` | Issue detail — histogram, description, proposed fix, suggested evaluator (`CodeBlock`), member traces, `ClusterActions`. |
@@ -64,16 +65,18 @@ All are **Server Components** unless noted; each lists the `lib/api.ts` calls it
 | `/cases/[caseId]` | `getCase` | Case detail — assertions, reference trajectory, `ReplayControls` + replay history. |
 | `/gates` | `getGates` | Gate runs — result, agent/env/ref, passed/failed/skipped, `RunGateButton`. |
 | `/gates/[gateId]` | `getGate` | Gate detail — status banner, soft warnings, per-case verdicts. |
-| `/trends` | `getTrends` | Insights — stat cards + `Bars` charts (daily traces/failures, gate pass/fail). |
+| `/trends` | `getTrends` | Insights — stat cards + `Bars` charts (daily traces/failures, gate pass/fail) + `MetaAnalysisPanel` (per-agent cross-metric analysis). |
 | `/settings/api-keys` | — | API key management (create/revoke ingest keys). |
 | `/settings/team` | — | Team members list + `InviteManager` (send/revoke invitations). |
+| `/settings/account` | — | Account settings + `ChangePasswordForm` (local auth mode). |
 
 ## Data layer
 
 - **`app/lib/api.ts`** — server-side fetchers + all shared types. One function per backend endpoint (`getSessions`, `getSession`, `getTrace`, `getClusters`, `getCases`, `getGates`, `getTrends`, `getStats`, …) plus the type model the whole UI shares: `SpanOut`, `EvalScore`, `Thread`/`ThreadTurn`/`FullTurn`/`ConvNode` (the conversation→turn→span tree), `EvalCase`, `FailureCluster`, `GateRun`, `Stats`, `Trends`.
-- **`app/lib/evaluators.ts`** — evaluator CRUD helpers + types (`EvaluatorRow`, `EvaluatorTemplate`). Wraps the `/api/evaluators/*` proxies for client-side fetches.
+- **`app/lib/evaluators.ts`** — evaluator CRUD helpers + types (`EvaluatorRow`, `EvaluatorTemplate`, `EvaluatorLevel`), the models/cost lookups, and `resolvePromptPreview`. Wraps the `/api/evaluators/*` proxies for client-side fetches.
+- **`app/lib/templateVariables.ts`** — the client mirror of the backend `@VARIABLE` catalog (names, descriptions, applicable levels, nested props) + the `@VARIABLE` regex; drives the advanced editor's highlighting + autocomplete.
 - **`app/lib/usage.ts`** — pure token/cost derivation, shared by the table **and** the detail-page headers so they compute identically. `spanUsage`/`turnUsage`/`convUsage` aggregate input/output/thinking tokens; `rateFor` prices them from a per-model rate table; `usageSummary`/`fmtUsd` format. `total_tokens` = input + output (matches the backend total); thinking tokens are surfaced separately.
-- **`app/api/*/route.ts`** — the client→backend proxies: `session` (lazy-load a conversation's turns), `trace` (lazy-load a turn's spans), `search` (⌘K), `evaluators/` (CRUD + generate + SSE run stream), plus action proxies (`promote`, `cluster`/`cluster-rebuild`, `gate`, `replay`). Each forwards to `TRACELY_API` with the Bearer key + `no-store`.
+- **`app/api/*/route.ts`** — the client→backend proxies: `session` (lazy-load a conversation's turns), `trace` (lazy-load a turn's spans), `search` (⌘K), `evaluators/` (CRUD + generate + models/cost + `resolve` preview), `evaluations/run` (SSE run stream), `meta-analyses/` (agents/run/latest), `sessions/[id]/` (rolling-summary + agents), `auth/` (me/login/register/logout/change-password/invite/accept-invite/projects/switch), plus action proxies (`promote`, `cluster`/`cluster-rebuild`, `gate`, `replay`). Each forwards to `TRACELY_API` with the Bearer key + `no-store`.
 
 ## Components
 
@@ -87,13 +90,21 @@ All are **Server Components** unless noted; each lists the `lib/api.ts` calls it
 | Component | Role |
 |---|---|
 | `TracesExplorer.tsx` | `/traces` filter (All/Failing/Multi-turn) + search + `DateRangePicker`, wrapping `TraceTable` (list mode). |
-| `SingleTraceView.tsx` | One trace as tabs: Table (`TraceTable` detail) / Timeline (`Waterfall`) / Evaluations. |
-| `SessionView.tsx` | Conversation-level view wrapping `TraceTable` (detail mode). |
+| `SingleTraceView.tsx` | One trace as tabs: Table (`TraceTable` detail) / Timeline (`Waterfall`), plus an Agents drawer button (evaluations are inline columns now — no Evaluations tab). |
+| `SessionView.tsx` | Conversation-level view wrapping `TraceTable` (detail mode) + the Agents drawer (`AgentsSidePanel`). |
 | `Waterfall.tsx` | Gantt-style span timeline (bars by type, depth-indented, I/O on expand). |
 | `IO.tsx` | Smart input/output renderer (chat arrays → bubbles, objects → JSON, else text). |
 | `JsonView.tsx` | Shared JSON rendering primitives: `HighlightedJson`, `prettyJson`, `Pill`, `FloatingPanel`, `IconBox`, `JsonPill`, `ExpandableText`, `Plain`. Used by the table, timeline, and attributes panel. |
-| `AddColumnModal.tsx` | Multi-step modal for adding evaluator columns: pick type (browse catalog / manual / AI-generate) → pick granularity level → configure (prompt, output type, model, threshold, output schema). |
+| `AddColumnModal.tsx` | Multi-step modal for adding/editing evaluator columns: pick type (browse catalog / manual / AI-generate) → pick granularity level → configure (basic prompt **or** advanced `@VARIABLE` editor + live preview, output type, model, threshold, output schema, targeting/sampling/advisory). |
+| `AdvancedPromptEditor.tsx` | The advanced judge prompt editor — a transparent `<textarea>` over a synced highlight overlay (so `@VARIABLE` tokens glow), with `@`/`.`-triggered autocomplete at the caret. |
+| `VariableAutocomplete.tsx` | The presentational autocomplete dropdown for the advanced editor (editor owns the candidate list + insertion). |
+| `PromptPreview.tsx` | Live preview — resolves the advanced prompt against a real conversation/turn/step (`/api/evaluators/resolve`) with used (green) / missing (amber) variable badges. |
 | `OutputSchemaBuilder.tsx` | Drag-and-drop JSON schema builder for LLM-judge `json` output type — fields with names, types, descriptions, and enum constraints. |
+| `SuggestedEvaluatorCard.tsx` | The cluster-detail "Suggested evaluator" panel — opens the backend's creatable draft prefilled in `AddColumnModal` to review/edit/save. |
+| `MetaAnalysisPanel.tsx` | The Trends-page meta-analysis ("Analyze") — pick an agent, run, render patterns/correlations/outliers/recommendations, export as Markdown. |
+| `AgentsSidePanel.tsx` | Right-side drawer (portal) listing a conversation's agents — declared (SDK catalog, with per-tool run counts) or observed (derived from spans). |
+| `Markdown.tsx` | Minimal dependency-free Markdown renderer (used by previews + the meta-analysis panel). |
+| `ChangePasswordForm.tsx` | Account-settings change-password form (local auth mode). |
 | `InviteManager.tsx` | Team invite flow (send invitation by email, list pending invitations, revoke). |
 | `DateRangePicker.tsx` | Date range filter for the traces explorer. |
 | `ui.tsx` | `Badge`, `verdictVariant`/`statusVariant`, `TypeChip` (span-type chip), `StatCard`. |
