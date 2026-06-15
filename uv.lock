@@ -5394,7 +5394,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "opentelemetry-proto", specifier = ">=1.25" },
     { name = "pgvector", specifier = ">=0.3" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.4" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pydantic-settings", specifier = ">=2.3" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.8" },
