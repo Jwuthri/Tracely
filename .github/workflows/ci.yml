@@ -42,7 +42,7 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9
       - uses: actions/setup-node@v4
@@ -98,7 +98,7 @@ jobs:
         run: |
           uv export --frozen --no-emit-workspace --format requirements-txt -o requirements.txt
           uvx pip-audit -r requirements.txt
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9
       - name: pnpm audit (frontend deps)
