@@ -15,7 +15,7 @@ import os
 
 import _fake_db
 import tracely_sdk as tracely
-from _fake_db import AGENTS, BILLING_TOOLS, SUPPORT_TOOLS, TURNS
+from _fake_db import AGENTS, BILLING_TOOLS, SUPPORT_TOOLS, TURNS, Conversation
 
 from pathlib import Path
 
@@ -44,6 +44,7 @@ def main() -> None:
     import asyncio
 
     from llama_index.core.agent import ReActAgent
+    from llama_index.core.llms import ChatMessage
     from llama_index.core.tools import FunctionTool
     from llama_index.llms.openai import OpenAI as LlamaOpenAI
 
@@ -63,12 +64,16 @@ def main() -> None:
 
     async def run() -> None:
         conv = os.path.basename(__file__)
+        history = Conversation()  # carries prior turns forward so each turn sees the conversation
         for i, (question, slug) in enumerate(TURNS):
             with tracely.trace(
                 agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
                 agents=AGENTS if i == 0 else None,
             ):
-                resp = await handlers[slug].run(user_msg=question)
+                # Thread the conversation: prior turns seed the agent's memory for this run.
+                chat_history = [ChatMessage(role=m["role"], content=m["content"]) for m in history.prior()]
+                resp = await handlers[slug].run(user_msg=question, chat_history=chat_history)
+                history.record(question, str(resp))
                 print(f"[{slug}] turn {i}:", resp)
 
     asyncio.run(run())

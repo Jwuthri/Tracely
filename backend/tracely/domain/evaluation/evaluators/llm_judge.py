@@ -232,10 +232,11 @@ class LLMJudgeEvaluator(Evaluator):
         result = self._grade(config, body, previous=_previous_from_config(config))
         return [result] if result else []
 
-    def _step_candidates(self, ctx: RunContext, config: dict) -> list[dict]:
+    def _step_candidates(self, ctx: RunContext, config: dict) -> tuple[list[dict], int]:
         """The spans a step-level judge grades: the level's span type(s) (SPAN ⇒ `config.span_types`,
         default TOOL+GENERATION; TOOL/GENERATION/CHAIN ⇒ exactly that type), with I/O, capped at
-        `max_spans`. Shared by the basic and advanced step paths."""
+        `max_spans`. Shared by the basic and advanced step paths. Returns `(candidates, eligible)`
+        where `eligible` is the pre-cap count so callers can surface partial coverage."""
         if self.level == SPAN:
             wanted = {str(t).upper() for t in (config.get("span_types") or [TOOL, GENERATION])}
         else:
@@ -244,18 +245,27 @@ class LLMJudgeEvaluator(Evaluator):
             s for s in ctx.spans
             if s.get("type") in wanted and (s.get("input") or s.get("output"))
         ]
+        eligible = len(candidates)
         max_spans = int(config.get("max_spans") or _DEFAULT_MAX_SPANS)
-        if len(candidates) > max_spans:
+        if eligible > max_spans:
             log.info(
-                "llm_judge_step_cap", trace_id=ctx.trace_id, candidates=len(candidates), cap=max_spans
+                "llm_judge_step_cap", trace_id=ctx.trace_id, candidates=eligible, cap=max_spans
             )
             candidates = candidates[:max_spans]
-        return candidates
+        return candidates, eligible
 
     def _run_steps(self, ctx: RunContext, config: dict) -> list[EvalResult]:
         """One grade per step. Level SPAN grades `config.span_types` (default TOOL+GENERATION);
         a TOOL/GENERATION/CHAIN-level judge grades exactly that span type."""
-        candidates = self._step_candidates(ctx, config)
+        candidates, eligible = self._step_candidates(ctx, config)
+        # Honest partial-coverage signal: a capped run grades only the first `len(candidates)` of
+        # `eligible` steps. Surface it on each result's comment instead of dropping the rest silently.
+        coverage = (
+            f" [coverage: graded {len(candidates)} of {eligible} steps; "
+            f"{eligible - len(candidates)} not evaluated (max_spans cap)]"
+            if eligible > len(candidates)
+            else ""
+        )
         user_in = content_text(ctx.root.get("input")) or first_io(ctx.spans, "input")
         sequential = _is_sequential(config)
         previous = _previous_from_config(config)
@@ -272,6 +282,8 @@ class LLMJudgeEvaluator(Evaluator):
             )
             if result:
                 result.target_span_id = s.get("span_id", "")
+                if coverage:
+                    result.comment = (result.comment or "") + coverage
                 out.append(result)
                 if sequential:
                     previous = _result_payload(result)
@@ -379,8 +391,15 @@ class LLMJudgeEvaluator(Evaluator):
         threading the previous result into `@METRIC_PREVIOUS_RESULT` in sequential mode."""
         sequential = _is_sequential(config)
         previous = _previous_from_config(config)
+        candidates, eligible = self._step_candidates(ctx, config)
+        coverage = (
+            f" [coverage: graded {len(candidates)} of {eligible} steps; "
+            f"{eligible - len(candidates)} not evaluated (max_spans cap)]"
+            if eligible > len(candidates)
+            else ""
+        )
         out: list[EvalResult] = []
-        for s in self._step_candidates(ctx, config):
+        for s in candidates:
             context = build_context(
                 self.level,
                 thread_spans=thread_spans,
@@ -394,6 +413,8 @@ class LLMJudgeEvaluator(Evaluator):
             result = self._grade_resolved(config, template, context)
             if result:
                 result.target_span_id = s.get("span_id", "")
+                if coverage:
+                    result.comment = (result.comment or "") + coverage
                 out.append(result)
                 if sequential:
                     previous = _result_payload(result)

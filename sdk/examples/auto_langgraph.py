@@ -17,7 +17,7 @@ import os
 
 import _fake_db
 import tracely_sdk as tracely
-from _fake_db import AGENTS, BILLING_SYSTEM, BILLING_TOOLS, SUPPORT_TOOLS, SYSTEM, TURNS
+from _fake_db import AGENTS, BILLING_SYSTEM, BILLING_TOOLS, SUPPORT_TOOLS, SYSTEM, TURNS, Conversation
 
 from pathlib import Path
 
@@ -67,8 +67,9 @@ def main() -> None:
     catalog = {"get_order_status": get_order_status, "check_inventory": check_inventory,
                "compare_prices": compare_prices}
 
-    def build(tool_names: list[str], system: str):
-        """Compile a ReAct graph (model ⇄ tools) for one agent's tool set."""
+    def build(tool_names: list[str], system: str, name: str):
+        """Compile a ReAct graph (model ⇄ tools) for one agent's tool set. `name` names the compiled
+        graph so the trace's root span reads as the agent (e.g. "support-agent"), not "LangGraph"."""
         tools = [catalog[n] for n in tool_names]
         model = ChatOpenAI(model="gpt-5.4-mini").bind_tools(tools)
 
@@ -81,20 +82,25 @@ def main() -> None:
         graph.add_edge(START, "model")
         graph.add_conditional_edges("model", tools_condition)  # -> "tools" or END
         graph.add_edge("tools", "model")
-        return graph.compile()
+        return graph.compile(name=name)
 
     handlers = {
-        "support-agent": build(SUPPORT_TOOLS, SYSTEM),
-        "billing-agent": build(BILLING_TOOLS, BILLING_SYSTEM),
+        "support-agent": build(SUPPORT_TOOLS, SYSTEM, "support-agent"),
+        "billing-agent": build(BILLING_TOOLS, BILLING_SYSTEM, "billing-agent"),
     }
     conv = os.path.basename(__file__)
+    history = Conversation()  # carries prior turns forward so each turn sees the conversation
     for i, (question, slug) in enumerate(TURNS):
         with tracely.trace(
             agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
             agents=AGENTS if i == 0 else None,
         ):
-            out = handlers[slug].invoke({"messages": [{"role": "user", "content": question}]})
-            print(f"[{slug}] turn {i}:", out["messages"][-1].content)
+            # Thread the conversation: prior turns + this question. The model node prepends the
+            # system message, so the model sees system + prev user + prev assistant + … + new user.
+            out = handlers[slug].invoke({"messages": [*history.prior(), {"role": "user", "content": question}]})
+            answer = out["messages"][-1].content
+            history.record(question, answer)
+            print(f"[{slug}] turn {i}:", answer)
 
     tracely.flush()
     print("sent — a multi-turn, two-agent conversation: each StateGraph → model/tools nodes → GENERATION/TOOL.")

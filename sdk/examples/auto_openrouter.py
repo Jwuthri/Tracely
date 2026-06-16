@@ -19,7 +19,7 @@ import os
 
 import _fake_db
 import tracely_sdk as tracely
-from _fake_db import AGENTS, BILLING_SYSTEM, BILLING_TOOLS, SUPPORT_TOOLS, SYSTEM, TURNS
+from _fake_db import AGENTS, BILLING_SYSTEM, BILLING_TOOLS, SUPPORT_TOOLS, SYSTEM, TURNS, Conversation
 
 from pathlib import Path
 
@@ -72,21 +72,27 @@ def main() -> None:
     catalog = {"get_order_status": get_order_status, "check_inventory": check_inventory,
                "compare_prices": compare_prices}
 
-    def build(tool_names: list[str], system: str):  # ChatOpenRouter is a LangChain ChatModel
-        return create_agent(ChatOpenRouter(model=MODEL), tools=[catalog[n] for n in tool_names], system_prompt=system)
+    def build(tool_names: list[str], system: str, name: str):  # ChatOpenRouter is a LangChain ChatModel
+        # `name` names the agent's compiled graph, so the trace's root span reads as the agent
+        # (e.g. "support-agent") instead of the generic "LangGraph".
+        return create_agent(ChatOpenRouter(model=MODEL), tools=[catalog[n] for n in tool_names], system_prompt=system, name=name)
 
     handlers = {
-        "support-agent": build(SUPPORT_TOOLS, SYSTEM),
-        "billing-agent": build(BILLING_TOOLS, BILLING_SYSTEM),
+        "support-agent": build(SUPPORT_TOOLS, SYSTEM, "support-agent"),
+        "billing-agent": build(BILLING_TOOLS, BILLING_SYSTEM, "billing-agent"),
     }
     conv = os.path.basename(__file__)
+    history = Conversation()  # carries prior turns forward so each turn sees the conversation
     for i, (question, slug) in enumerate(TURNS):
         with tracely.trace(
             agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
             agents=AGENTS if i == 0 else None,
         ):
-            result = handlers[slug].invoke({"messages": [{"role": "user", "content": question}]})
-            print(f"[{slug}] turn {i}:", result["messages"][-1].content)
+            # Thread the conversation: prior turns + this question (the agent prepends its system prompt).
+            result = handlers[slug].invoke({"messages": [*history.prior(), {"role": "user", "content": question}]})
+            answer = result["messages"][-1].content
+            history.record(question, answer)
+            print(f"[{slug}] turn {i}:", answer)
 
     tracely.flush()
     print(f"sent — a multi-turn, two-agent conversation on OpenRouter '{MODEL}', traced via LangChain.")

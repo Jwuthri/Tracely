@@ -24,7 +24,7 @@ os.environ.setdefault("OTEL_SDK_DISABLED", "false")
 
 import _fake_db
 import tracely_sdk as tracely
-from _fake_db import AGENTS, TURNS
+from _fake_db import AGENTS, TURNS, Conversation
 
 from pathlib import Path
 
@@ -92,7 +92,15 @@ def main() -> None:
     )
 
     def run(question: str, agent: Agent) -> str:
-        task = Task(description=question, expected_output="A concise, helpful answer.", agent=agent)
+        # Thread the conversation: a Task is one-shot, so fold the prior turns into its description
+        # (CrewAI has no chat-history param) — the agent answers the new message in context.
+        prior = history.prior()
+        if prior:
+            convo = "\n".join(f"{m['role']}: {m['content']}" for m in prior)
+            description = f"Conversation so far:\n{convo}\n\nNow answer the customer's new message: {question}"
+        else:
+            description = question
+        task = Task(description=description, expected_output="A concise, helpful answer.", agent=agent)
         return str(Crew(agents=[agent], tasks=[task]).kickoff())
 
     # Wrap each kickoff in an AGENT root so the crew's GENERATION + TOOL spans nest into ONE trace
@@ -107,12 +115,15 @@ def main() -> None:
 
     handlers = {"support-agent": support_agent, "billing-agent": billing_agent}
     conv = os.path.basename(__file__)
+    history = Conversation()  # carries prior turns forward so each turn sees the conversation
     for i, (question, slug) in enumerate(TURNS):
         with tracely.trace(
             agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
             agents=AGENTS if i == 0 else None,
         ):
-            print(f"[{slug}] turn {i}:", handlers[slug](question))
+            answer = handlers[slug](question)
+            history.record(question, answer)
+            print(f"[{slug}] turn {i}:", answer)
 
     tracely.flush()
     print("sent — a multi-turn, two-agent conversation: crew → agent → task → tool/LLM tree.")

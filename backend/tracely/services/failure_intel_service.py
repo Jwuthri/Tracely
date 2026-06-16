@@ -235,9 +235,14 @@ class FailureIntelService:
             old_state.append((ec.id, ec.status, ec.candidate_case_id, ec.first_seen_at, mtids))
         old_ids = [ec.id for ec in existing]
         if old_ids:
+            # Stage the delete but DON'T commit here — the old carried-over state is captured in
+            # `old_state` above, and committing now would expose a window where the project has ZERO
+            # clusters (and a crash before the inserts would wipe all promote/ignore state). The new
+            # rows use fresh uuids, so there's no PK conflict with the staged deletes. One commit at
+            # the end makes the whole replace atomic.
             session.execute(delete(ClusterMember).where(ClusterMember.cluster_id.in_(old_ids)))
             session.execute(delete(FailureCluster).where(FailureCluster.id.in_(old_ids)))
-            session.commit()
+            session.flush()
 
         consumed: set[str] = set()
 

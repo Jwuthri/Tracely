@@ -25,7 +25,7 @@ import os
 
 import _fake_db
 import tracely_sdk as tracely
-from _fake_db import AGENTS, BILLING_SYSTEM, BILLING_TOOLS, SUPPORT_TOOLS, SYSTEM, TURNS, openai_tools
+from _fake_db import AGENTS, BILLING_SYSTEM, BILLING_TOOLS, SUPPORT_TOOLS, SYSTEM, TURNS, Conversation, openai_tools
 
 from pathlib import Path
 
@@ -86,7 +86,8 @@ def main() -> None:
     def run(question: str, system: str, tool_names: list[str]) -> str:
         """A normal think→tool-loop→answer agent. Each agent below is this loop with its own tools."""
         plan(question)  # THINKING span
-        messages: list = [{"role": "system", "content": system}, {"role": "user", "content": question}]
+        # Thread the conversation: system + prior turns + this question (a real multi-turn dialogue).
+        messages: list = [{"role": "system", "content": system}, *history.prior(), {"role": "user", "content": question}]
         for _ in range(5):
             resp = client.chat.completions.create(
                 model="gpt-5.4-mini", messages=messages, tools=openai_tools(tool_names)
@@ -110,12 +111,15 @@ def main() -> None:
 
     handlers = {"support-agent": support_agent, "billing-agent": billing_agent}
     conv = os.path.basename(__file__)
+    history = Conversation()  # carries prior turns forward so each turn sees the conversation
     for i, (question, slug) in enumerate(TURNS):
         with tracely.trace(
             agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
             agents=AGENTS if i == 0 else None,
         ):
-            print(f"[{slug}] turn {i}:", handlers[slug](question))
+            answer = handlers[slug](question)
+            history.record(question, answer)
+            print(f"[{slug}] turn {i}:", answer)
     tracely.flush()
     print("sent — a multi-turn, two-agent run: agent → thinking · generations · tools, no span code on LLM calls.")
 

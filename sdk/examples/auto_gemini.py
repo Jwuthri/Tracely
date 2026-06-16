@@ -24,6 +24,7 @@ from _fake_db import (
     SUPPORT_TOOLS,
     SYSTEM,
     TURNS,
+    Conversation,
     check_inventory,
     compare_prices,
     get_order_status,
@@ -74,7 +75,12 @@ def main() -> None:
             # disable the SDK's auto-calling so WE dispatch the tools — each becomes a TOOL span
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
-        contents: list = [types.Content(role="user", parts=[types.Part(text=question)])]
+        # Thread the conversation: prior turns (assistant → Gemini's "model" role) + this question.
+        contents: list = [
+            types.Content(role="model" if m["role"] == "assistant" else "user", parts=[types.Part(text=m["content"])])
+            for m in history.prior()
+        ]
+        contents.append(types.Content(role="user", parts=[types.Part(text=question)]))
         for _ in range(5):
             resp = client.models.generate_content(
                 model="gemini-3.1-flash-lite", contents=contents, config=config
@@ -100,12 +106,15 @@ def main() -> None:
 
     handlers = {"support-agent": support_agent, "billing-agent": billing_agent}
     conv = os.path.basename(__file__)
+    history = Conversation()  # carries prior turns forward so each turn sees the conversation
     for i, (question, slug) in enumerate(TURNS):
         with tracely.trace(
             agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
             agents=AGENTS if i == 0 else None,
         ):
-            print(f"[{slug}] turn {i}:", handlers[slug](question))
+            answer = handlers[slug](question)
+            history.record(question, answer)
+            print(f"[{slug}] turn {i}:", answer)
 
     tracely.flush()
     print("sent — a multi-turn, two-agent conversation → generations + tool spans, no span code.")

@@ -2,6 +2,38 @@ import { authHeaders } from "./auth";
 
 const API = process.env.TRACELY_API ?? "http://localhost:8000";
 
+/** A non-2xx API response. Thrown (not swallowed) so a backend outage surfaces in the route's
+ *  `error.tsx` boundary instead of rendering as an empty state — the worst failure mode for an
+ *  observability tool is "looks like there's no data" when the backend is actually down. */
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public path: string,
+  ) {
+    super(`Tracely API ${status} on ${path}`);
+    this.name = "ApiError";
+  }
+}
+
+async function apiGet(path: string): Promise<Response> {
+  return fetch(`${API}${path}`, { headers: await authHeaders(), cache: "no-store" });
+}
+
+/** GET + parse JSON; throws `ApiError` on any non-2xx (→ error boundary). */
+async function getJson<T>(path: string): Promise<T> {
+  const res = await apiGet(path);
+  if (!res.ok) throw new ApiError(res.status, path);
+  return res.json() as Promise<T>;
+}
+
+/** GET a single resource by id: `404` → `null` (→ `notFound()`), other non-2xx throw. */
+async function getJsonOrNull<T>(path: string): Promise<T | null> {
+  const res = await apiGet(path);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new ApiError(res.status, path);
+  return res.json() as Promise<T>;
+}
+
 export type TraceRow = {
   trace_id: string;
   ts: string;
@@ -49,9 +81,7 @@ export type SpanOut = {
 };
 
 export async function getTraces(): Promise<TraceRow[]> {
-  const res = await fetch(`${API}/api/traces?limit=50`, { headers: await authHeaders(), cache: "no-store" });
-  if (!res.ok) return [];
-  return res.json();
+  return getJson<TraceRow[]>(`/api/traces?limit=50`);
 }
 
 export type Thread = {
@@ -84,12 +114,7 @@ export async function getSessions(opts: SessionsQuery = {}): Promise<Thread[]> {
   const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (from) qs.set("from_ts", from);
   if (to) qs.set("to_ts", to);
-  const res = await fetch(`${API}/api/sessions?${qs.toString()}`, {
-    headers: await authHeaders(),
-    cache: "no-store",
-  });
-  if (!res.ok) return [];
-  return res.json();
+  return getJson<Thread[]>(`/api/sessions?${qs.toString()}`);
 }
 
 export type ThreadTurn = {
@@ -111,9 +136,7 @@ export type ThreadTurn = {
 export async function getSession(
   id: string,
 ): Promise<{ thread_id: string; turns: ThreadTurn[]; scores?: EvalScore[] }> {
-  const res = await fetch(`${API}/api/sessions/${id}`, { headers: await authHeaders(), cache: "no-store" });
-  if (!res.ok) return { thread_id: id, turns: [], scores: [] };
-  return res.json();
+  return getJson(`/api/sessions/${id}`);
 }
 
 // ── Hierarchical trace table (conversation → message → step) ──────────────────
@@ -131,9 +154,7 @@ export type TraceDetailData = {
 };
 
 export async function getTrace(traceId: string): Promise<TraceDetailData> {
-  const res = await fetch(`${API}/api/traces/${traceId}`, { headers: await authHeaders(), cache: "no-store" });
-  if (!res.ok) return { trace_id: traceId, spans: [], scores: [], eval_verdict: null };
-  return res.json();
+  return getJson<TraceDetailData>(`/api/traces/${traceId}`);
 }
 
 export type Replay = {
@@ -162,15 +183,11 @@ export type EvalCase = {
 };
 
 export async function getCases(): Promise<EvalCase[]> {
-  const res = await fetch(`${API}/api/cases`, { headers: await authHeaders(), cache: "no-store" });
-  if (!res.ok) return [];
-  return res.json();
+  return getJson<EvalCase[]>(`/api/cases`);
 }
 
 export async function getCase(caseId: string): Promise<EvalCase | null> {
-  const res = await fetch(`${API}/api/cases/${caseId}`, { headers: await authHeaders(), cache: "no-store" });
-  if (!res.ok) return null;
-  return res.json();
+  return getJsonOrNull<EvalCase>(`/api/cases/${caseId}`);
 }
 
 export type Stats = {
@@ -184,10 +201,7 @@ export type Stats = {
 };
 
 export async function getStats(): Promise<Stats> {
-  const res = await fetch(`${API}/api/stats`, { headers: await authHeaders(), cache: "no-store" });
-  if (!res.ok)
-    return { traces: 0, spans: 0, failing_traces: 0, auto_failures: 0, open_clusters: 0, agents: 0, cases: 0 };
-  return res.json();
+  return getJson<Stats>(`/api/stats`);
 }
 
 export type ClusterMember = {
@@ -230,15 +244,11 @@ export type FailureCluster = {
 };
 
 export async function getClusters(): Promise<FailureCluster[]> {
-  const res = await fetch(`${API}/api/clusters`, { headers: await authHeaders(), cache: "no-store" });
-  if (!res.ok) return [];
-  return res.json();
+  return getJson<FailureCluster[]>(`/api/clusters`);
 }
 
 export async function getCluster(id: string): Promise<FailureCluster | null> {
-  const res = await fetch(`${API}/api/clusters/${id}`, { headers: await authHeaders(), cache: "no-store" });
-  if (!res.ok) return null;
-  return res.json();
+  return getJsonOrNull<FailureCluster>(`/api/clusters/${id}`);
 }
 
 export type GateCaseResult = {
@@ -268,15 +278,11 @@ export type GateRun = {
 };
 
 export async function getGates(): Promise<GateRun[]> {
-  const res = await fetch(`${API}/api/gates`, { headers: await authHeaders(), cache: "no-store" });
-  if (!res.ok) return [];
-  return res.json();
+  return getJson<GateRun[]>(`/api/gates`);
 }
 
 export async function getGate(gateId: string): Promise<GateRun | null> {
-  const res = await fetch(`${API}/api/gates/${gateId}`, { headers: await authHeaders(), cache: "no-store" });
-  if (!res.ok) return null;
-  return res.json();
+  return getJsonOrNull<GateRun>(`/api/gates/${gateId}`);
 }
 
 export type Trends = {
@@ -296,18 +302,6 @@ export type Trends = {
   };
 };
 
-const EMPTY_TRENDS: Trends = {
-  days: 14,
-  daily: [],
-  gates_daily: [],
-  summary: {
-    total_traces: 0, total_failures: 0, failure_rate: 0, gate_runs: 0, gate_pass_rate: 0,
-    cases: 0, open_clusters: 0, resolved_clusters: 0, mttr_hours: null,
-  },
-};
-
 export async function getTrends(days = 14): Promise<Trends> {
-  const res = await fetch(`${API}/api/trends?days=${days}`, { headers: await authHeaders(), cache: "no-store" });
-  if (!res.ok) return EMPTY_TRENDS;
-  return res.json();
+  return getJson<Trends>(`/api/trends?days=${days}`);
 }

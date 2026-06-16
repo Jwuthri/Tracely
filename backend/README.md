@@ -115,7 +115,7 @@ The package is layered: **domain** (pure logic, no I/O), **infrastructure** (DB 
 | `traces/metadata.py` | Parse the ClickHouse-aggregated `tracely.metadata.*` JSON. |
 | `evaluation/results.py` | `EvalResult`, `RunContext` dataclasses. |
 | `evaluation/text.py` | Answer / I/O text extraction shared between structural + judge. |
-| `evaluation/output_schema.py` | `model_from_json_schema` / `wrap_with_score` — compile a user's JSON schema definition into a Pydantic model for structured LLM output. |
+| `evaluation/output_schema.py` | `model_from_json_schema` — compile a user's JSON schema definition into a Pydantic model for structured LLM output (runtime enum→`Literal` enforcement). |
 | `evaluation/generation.py` | `generate_evaluator_from_prompt` — AI-generate an evaluator config from a natural-language prompt. |
 | `evaluation/template_resolver.py` | `TEMPLATE_VARIABLES` catalog + `build_context` + `TemplateResolver` — `@VARIABLE` resolution for advanced-mode judge prompts (pure; materializes only the referenced vars). |
 | `evaluation/targeting.py` | `spec_applies` — does an evaluator run on this trace? `target_agent`/`target_env` match + deterministic per-`(trace, evaluator)` `sampling`. |

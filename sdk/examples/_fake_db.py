@@ -130,8 +130,10 @@ SYSTEM = "You are a customer-support agent. Use the tools to look up real data b
 BILLING_SYSTEM = "You are a billing agent. Use compare_prices to answer pricing questions; be concise."
 QUESTION = "Where is my order ORD-4471, and is the Alpine Winter Coat (SKU-COAT-01) back in stock?"
 
-# Follow-up turns for the MULTI-TURN conversation. Kept SELF-CONTAINED (each names its own order id /
-# SKUs) so every turn grades on its own and the second/third turns don't depend on chat memory.
+# Follow-up turns for the MULTI-TURN conversation. Each turn is threaded with the prior turns (see
+# `Conversation` below) so it's a real dialogue — the model sees system + prev user + prev assistant
+# + … + this turn's question. The questions stay SELF-CONTAINED (each names its own order id / SKUs)
+# so every turn still grades on its own even though it now carries the conversation's context.
 FOLLOWUPS = [
     "Thanks! Can you also check on my other order, ORD-5588?",
     "Is the Ceramic Mug (SKU-MUG-09) in stock?",
@@ -147,6 +149,37 @@ TURNS: list[tuple[str, str]] = [
     (FOLLOWUPS[1], "support-agent"),
     (FOLLOWUPS[2], "billing-agent"),
 ]
+
+
+class Conversation:
+    """The conversation's memory — its prior user/assistant turns — so each new turn is threaded with
+    the context that came before it instead of being an isolated one-shot. Without this, every turn
+    would be sent as just `[system, user]` and a follow-up like "check my *other* order" would have no
+    prior turn to refer to; with it the model sees `system + prev user + prev assistant + … + new user`.
+
+    Only the *clean* turns are carried forward — the user's question and the assistant's final answer,
+    which is what a chat app persists. The intra-turn tool-call scaffolding stays inside the turn that
+    produced it (so threaded history never contains a dangling tool call without its result).
+
+    Usage (in the per-turn loop):
+        history = Conversation()
+        for question, slug in TURNS:
+            answer = run(question, ...)          # build the turn's input from `history.prior()`
+            history.record(question, answer)
+    """
+
+    def __init__(self) -> None:
+        self.turns: list[dict[str, str]] = []
+
+    def prior(self) -> list[dict[str, str]]:
+        """The conversation so far as plain `{role, content}` messages — prepend before the new user
+        message to thread the turn (a fresh list each call, safe to splice into a provider payload)."""
+        return list(self.turns)
+
+    def record(self, question: str, answer: str) -> None:
+        """Append a completed turn (the user question + the assistant's final answer)."""
+        self.turns.append({"role": "user", "content": question})
+        self.turns.append({"role": "assistant", "content": answer or ""})
 
 # The DECLARED agent catalog a user sends with the conversation via `tracely.trace(agents=AGENTS)`.
 # Shape: [{name, description, tools: {tool_name: {name, description, parameters}}}] — surfaced in the

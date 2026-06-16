@@ -23,6 +23,7 @@ from _fake_db import (
     SUPPORT_TOOLS,
     SYSTEM,
     TURNS,
+    Conversation,
     observed_tools,
     openai_tools,
 )
@@ -57,7 +58,8 @@ def main() -> None:
 
     def run(question: str, system: str, tool_names: list[str]) -> str:
         """A normal tool-calling loop. Each agent below is just this loop with its own tools."""
-        messages: list = [{"role": "system", "content": system}, {"role": "user", "content": question}]
+        # Thread the conversation: system + prior turns + this question (a real multi-turn dialogue).
+        messages: list = [{"role": "system", "content": system}, *history.prior(), {"role": "user", "content": question}]
         for _ in range(5):
             resp = litellm.completion(
                 model="gpt-5.4-mini", messages=messages, tools=openai_tools(tool_names)
@@ -81,12 +83,15 @@ def main() -> None:
 
     handlers = {"support-agent": support_agent, "billing-agent": billing_agent}
     conv = os.path.basename(__file__)
+    history = Conversation()  # carries prior turns forward so each turn sees the conversation
     for i, (question, slug) in enumerate(TURNS):
         with tracely.trace(
             agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
             agents=AGENTS if i == 0 else None,
         ):
-            print(f"[{slug}] turn {i}:", handlers[slug](question))
+            answer = handlers[slug](question)
+            history.record(question, answer)
+            print(f"[{slug}] turn {i}:", answer)
 
     tracely.flush()
     print("sent — a multi-turn, two-agent conversation traced via one LiteLLM callback.")

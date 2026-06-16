@@ -99,13 +99,21 @@ class RegressionService:
         if quality_failed:
             assertions["quality"] = {"score_names": quality_failed}
         fixture_key = self._store_fixtures(project_id, digest, spans)
+        # One logical promote = one transaction. The helpers FLUSH (so later steps see the rows) but
+        # never commit mid-way; a crash anywhere rolls the whole thing back instead of leaving a
+        # half-promoted case (case without suite link, or a PROMOTED case with no validation replay).
         case = self._create_case(
             project_id=project_id, agent_id=agent_id, trace_id=trace_id, root=root,
             digest=digest, title=title, assertions=assertions, fixture_key=fixture_key,
             trajectory_json=traj.to_json(),
         )
         self._attach_to_regression_suite(project_id, agent_id, case)
-        self._validate_fail_to_pass(case, traj, trace_id, quality_failed=bool(quality_failed))
+        recorded = self._record_fail_to_pass(
+            case, traj, trace_id, quality_failed=bool(quality_failed)
+        )
+        self.session.commit()
+        # ClickHouse write is external (non-transactional) → do it only after the PG commit succeeds.
+        self.score_writer.write_regression_verdict(case, trace_id, recorded)
         return case
 
     def replay_case(
@@ -203,7 +211,7 @@ class RegressionService:
             fail_to_pass_validated=False, version=1, created_by="ui",
         )
         self.session.add(case)
-        self.session.commit()
+        self.session.flush()
         return case
 
     def _attach_to_regression_suite(
@@ -222,20 +230,24 @@ class RegressionService:
                 slug="regressions", name="Regressions", kind="REGRESSION",
             )
             self.session.add(suite)
-            self.session.commit()
+            self.session.flush()
         self.session.add(EvaluationSuiteCase(suite_id=suite.id, case_id=case.id))
-        self.session.commit()
+        self.session.flush()
 
-    def _validate_fail_to_pass(
+    def _record_fail_to_pass(
         self,
         case: EvaluationCase,
         traj: Trajectory,
         trace_id: str,
         quality_failed: bool = False,
-    ) -> None:
+    ) -> str:
         """The source (failing) trace must currently FAIL the case for it to be PROMOTED — either
         structurally (the tool/error contract) OR on answer quality (a hallucination whose trace
-        is structurally clean). Otherwise the case is a non-discriminating no-op and stays DRAFT."""
+        is structurally clean). Otherwise the case is a non-discriminating no-op and stays DRAFT.
+
+        Stages the verdict replay + status into the session (no commit — the caller commits the whole
+        promote as one transaction) and returns the recorded verdict so the caller can write the
+        external ClickHouse score row AFTER the commit succeeds."""
         verdict, detail = self._evaluate(case, traj)
         recorded = "FAIL" if (verdict == "FAIL" or quality_failed) else verdict
         if quality_failed and verdict != "FAIL":
@@ -246,5 +258,5 @@ class RegressionService:
             id=str(uuid.uuid4()), case_id=case.id, candidate_trace_id=trace_id,
             verdict=recorded, detail={**detail, "validation": True},
         ))
-        self.session.commit()
-        self.score_writer.write_regression_verdict(case, trace_id, recorded)
+        self.session.flush()
+        return recorded

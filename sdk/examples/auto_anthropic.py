@@ -24,6 +24,7 @@ from _fake_db import (
     SUPPORT_TOOLS,
     SYSTEM,
     TURNS,
+    Conversation,
     anthropic_tools,
     observed_tools,
 )
@@ -59,7 +60,8 @@ def main() -> None:
 
     def run(question: str, system: str, tool_names: list[str]) -> str:
         """A normal Claude tool-use loop. Each agent below is just this loop with its own tools."""
-        messages: list = [{"role": "user", "content": question}]
+        # Thread the conversation: prior turns + this question (system is a separate Claude param).
+        messages: list = [*history.prior(), {"role": "user", "content": question}]
         for _ in range(5):
             resp = client.messages.create(
                 model="claude-haiku-4-5-20251001", max_tokens=1024, system=system,
@@ -88,12 +90,15 @@ def main() -> None:
 
     handlers = {"support-agent": support_agent, "billing-agent": billing_agent}
     conv = os.path.basename(__file__)
+    history = Conversation()  # carries prior turns forward so each turn sees the conversation
     for i, (question, slug) in enumerate(TURNS):
         with tracely.trace(
             agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
             agents=AGENTS if i == 0 else None,
         ):
-            print(f"[{slug}] turn {i}:", handlers[slug](question))
+            answer = handlers[slug](question)
+            history.record(question, answer)
+            print(f"[{slug}] turn {i}:", answer)
 
     tracely.flush()
     print("sent — a multi-turn, two-agent conversation → generations + tool spans, no span code.")

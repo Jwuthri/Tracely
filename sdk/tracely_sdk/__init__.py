@@ -32,6 +32,7 @@ import functools
 import inspect
 import json
 import logging
+import re
 import threading
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
@@ -140,12 +141,91 @@ class TracelyContextSpanProcessor(SpanProcessor):
         return True
 
 
+# ── redaction (PII / sensitive content) ──────────────────────────────────────
+# Scrub on the EXPORT path: every span — manual or auto-instrumentor — passes through the exporter,
+# so this is the one place that covers prompts/completions/tool args captured by zero-touch
+# instrumentors (which never call set_io). Off by default; opt in via init(redact=...).
+
+# Conservative built-in patterns for init(redact=True). Deliberately high-precision (few false
+# positives) rather than exhaustive — pass your own patterns/callable for stricter policies.
+_DEFAULT_PII_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),  # email
+    re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),  # US SSN
+    re.compile(r"\b(?:\d[ -]?){13,16}\b"),  # credit-card-shaped digit run
+    re.compile(r"\b(?:\+?\d{1,2}[ .-]?)?\(?\d{3}\)?[ .-]?\d{3}[ .-]?\d{4}\b"),  # phone
+]
+
+_REDACTED = "[REDACTED]"
+
+
+def _build_redactor(
+    redact: bool | list[str] | Callable[[str, str], str] | None,
+) -> Callable[[str, str], str] | None:
+    """Resolve the `redact` argument into a `(attr_key, value) -> value` function, or None (off)."""
+    if not redact:
+        return None
+    if callable(redact):
+        return redact
+    patterns = _DEFAULT_PII_PATTERNS if redact is True else [re.compile(p) for p in redact]
+
+    def _scrub(_key: str, value: str) -> str:
+        out = value
+        for pat in patterns:
+            out = pat.sub(_REDACTED, out)
+        return out
+
+    return _scrub
+
+
+def _scrub_mapping(attrs: Any, redactor: Callable[[str, str], str]) -> None:
+    """Apply `redactor` to every string (or string-sequence) value in a span/event attribute map,
+    in place. Best-effort: a read-only/immutable map is silently skipped (never crash export)."""
+    if not attrs:
+        return
+    for k, v in list(attrs.items()):
+        try:
+            if isinstance(v, str):
+                nv = redactor(k, v)
+                if nv != v:
+                    attrs[k] = nv
+            elif isinstance(v, (list, tuple)) and v and all(isinstance(x, str) for x in v):
+                nv_list = [redactor(k, x) for x in v]
+                if nv_list != list(v):
+                    attrs[k] = nv_list
+        except Exception:  # noqa: BLE001 — redaction must never break the export path
+            continue
+
+
+class _RedactingSpanExporter:
+    """Decorates the OTLP exporter: scrubs span + event attributes through `redactor` just before
+    handing spans to the wrapped exporter. Implements the SpanExporter duck-type (export/shutdown/
+    force_flush) so BatchSpanProcessor treats it as the exporter."""
+
+    def __init__(self, inner: Any, redactor: Callable[[str, str], str]) -> None:
+        self._inner = inner
+        self._redactor = redactor
+
+    def export(self, spans: Any) -> Any:
+        for span in spans:
+            _scrub_mapping(getattr(span, "_attributes", None), self._redactor)
+            for ev in getattr(span, "events", None) or ():
+                _scrub_mapping(getattr(ev, "attributes", None), self._redactor)
+        return self._inner.export(spans)
+
+    def shutdown(self) -> Any:
+        return self._inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30_000) -> bool:
+        return self._inner.force_flush(timeout_millis)
+
+
 def init(
     endpoint: str = "http://localhost:8000",
     api_key: str = "tracely_dev_key",
     service_name: str = "agent",
     env: str = "prod",
     instrument: str | list[str] | bool = "auto",
+    redact: bool | list[str] | Callable[[str, str], str] | None = None,
 ) -> otel_trace.Tracer:
     """One-call setup (R1). Configures the OTel provider + OTLP exporter pointing at Tracely,
     registers the context-stamping processor, and activates the matching auto-instrumentors so your
@@ -155,6 +235,15 @@ def init(
       - "auto" (default) — activate instrumentors for whatever provider SDKs are importable.
       - ["openai", "anthropic", "litellm", …] — activate exactly these.
       - False — set up export only; no auto-instrumentation (use the manual API / @observe).
+
+    `redact` — scrub sensitive content from span/event attributes BEFORE they leave the process
+    (applied at export, so it covers both manual `set_io`/metadata AND zero-touch auto-instrumentor
+    prompts/completions/args). For regulated data this is the adoption gate; off by default.
+      - None / False (default) — no redaction; payloads ship verbatim.
+      - True — apply the built-in PII patterns (email, phone, SSN, credit-card-shaped digit runs).
+      - ["regex", …] — replace every match of these patterns with `[REDACTED]`.
+      - callable `(attr_key, value) -> value` — full control; return the scrubbed string.
+    Set it on the FIRST `init()` call (the exporter is built once).
 
     Call once at startup; idempotent (provider built once; instrumentor activation de-duped, R7).
     Streaming token usage requires `stream_options={"include_usage": True}` on OpenAI calls (R3)."""
@@ -166,10 +255,15 @@ def init(
         )
         provider = TracerProvider(resource=resource)
         provider.add_span_processor(TracelyContextSpanProcessor())  # stamps tracely.* on every span
-        exporter = OTLPSpanExporter(
+        exporter: Any = OTLPSpanExporter(
             endpoint=f"{endpoint.rstrip('/')}/v1/traces",
             headers={"Authorization": f"Bearer {api_key}"},
         )
+        redactor = _build_redactor(redact)
+        if redactor is not None:
+            # Wrap the OTLP exporter so EVERY span (manual + auto-instrumentor) is scrubbed on the
+            # way out — the one chokepoint all spans pass through.
+            exporter = _RedactingSpanExporter(exporter, redactor)
         provider.add_span_processor(BatchSpanProcessor(exporter))
         otel_trace.set_tracer_provider(provider)
         _provider = provider

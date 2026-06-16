@@ -53,6 +53,9 @@ jobs:
       # Matches the prod Dockerfile (Dockerfile.railway) — its lockfile is installed non-frozen.
       - name: Install deps
         run: pnpm install --no-frozen-lockfile
+      # Vitest unit/component tests (pure trace-table helpers + a TraceTable render guard).
+      - name: Test
+        run: pnpm test
       # `next build` type-checks (tsc) + lints + compiles — the frontend's fast feedback gate.
       - name: Build
         run: pnpm build

@@ -22,6 +22,7 @@ from _fake_db import (
     SUPPORT_TOOLS,
     SYSTEM,
     TURNS,
+    Conversation,
     bedrock_tools,
     observed_tools,
 )
@@ -58,7 +59,9 @@ def main() -> None:
 
     def run(question: str, system: str, tool_names: list[str]) -> str:
         """A normal converse tool-use loop. Each agent below is this loop with its own tools."""
-        messages: list = [{"role": "user", "content": [{"text": question}]}]
+        # Thread the conversation: prior turns + this question (converse content is a block list).
+        messages: list = [{"role": m["role"], "content": [{"text": m["content"]}]} for m in history.prior()]
+        messages.append({"role": "user", "content": [{"text": question}]})
         for _ in range(5):
             resp = client.converse(
                 modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
@@ -90,12 +93,15 @@ def main() -> None:
 
     handlers = {"support-agent": support_agent, "billing-agent": billing_agent}
     conv = os.path.basename(__file__)
+    history = Conversation()  # carries prior turns forward so each turn sees the conversation
     for i, (question, slug) in enumerate(TURNS):
         with tracely.trace(
             agent=slug, conversation=conv, turn=i, user="ada@example.com", example=conv,
             agents=AGENTS if i == 0 else None,
         ):
-            print(f"[{slug}] turn {i}:", handlers[slug](question))
+            answer = handlers[slug](question)
+            history.record(question, answer)
+            print(f"[{slug}] turn {i}:", answer)
 
     tracely.flush()
     print("sent — a multi-turn, two-agent conversation → converse generations + tool spans.")

@@ -38,4 +38,7 @@ CREATE TABLE IF NOT EXISTS scores
 ENGINE = ReplacingMergeTree(event_ts, is_deleted)
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (project_id, name, id)
+-- Retention: scores age out 90 days after they were written (same horizon as `events`). Tune via
+-- 0004_scores_ttl (ALTER MODIFY TTL).
+TTL toDateTime(created_at) + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192

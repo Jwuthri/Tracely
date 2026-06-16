@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     s3_event_prefix: str = "events/"
 
     ingestion_delay_seconds: int = 0
+    # Max accepted OTLP /v1/traces body size. The endpoint reads the whole body into memory before
+    # offloading, so an unbounded post (or a flood of large ones) can exhaust backend memory. Bodies
+    # over this many bytes are rejected with 413. Default 16 MiB (well above a normal OTLP batch).
+    max_ingest_bytes: int = 16 * 1024 * 1024
     # Spans/traces with no agent are attributed to this fallback agent slug, so agent-scoped
     # features (failure clusters, CI gates) still apply to plain LLM calls. Set to "" to disable
     # and leave agent-less traces unattributed.

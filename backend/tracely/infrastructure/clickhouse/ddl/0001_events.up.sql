@@ -86,4 +86,7 @@ ENGINE = ReplacingMergeTree(event_ts, is_deleted)
 PARTITION BY toYYYYMM(start_time)
 ORDER BY (project_id, toStartOfMinute(start_time), xxHash32(trace_id), span_id, start_time)
 SAMPLE BY xxHash32(trace_id)
+-- Retention: drop spans 90 days after they happened so the single-volume ClickHouse can't grow
+-- unbounded and fill its disk. Tune via 0003_events_ttl (ALTER MODIFY TTL) without a table rebuild.
+TTL toDateTime(start_time) + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192

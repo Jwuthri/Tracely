@@ -47,12 +47,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Tracely API", version="0.1.0", lifespan=lifespan)
 
+# The web app fetches the API via same-origin Next proxy routes. Allow direct browser calls from a
+# local dev frontend on any port (dev/staging only — never punch a localhost hole in prod), plus the
+# hosted frontend origin when configured (CORS for SaaS).
+_is_prod = settings.tracely_env.lower() in ("prod", "production")
 app.add_middleware(
     CORSMiddleware,
-    # The web app fetches the API via same-origin Next proxy routes. Allow direct browser calls from a
-    # local dev frontend on any port, plus the hosted frontend origin when configured (CORS for SaaS).
     allow_origins=[settings.frontend_origin] if settings.frontend_origin else [],
-    allow_origin_regex=r"http://localhost:\d+",
+    allow_origin_regex=None if _is_prod else r"http://localhost:\d+",
     allow_methods=["*"],
     allow_headers=["*"],
 )
