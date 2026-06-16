@@ -1266,6 +1266,13 @@ function EmptyTr({ cols, text }: { cols: Col[]; text: string }) {
 }
 
 // ── column-visibility menu ──────────────────────────────────────────────────────
+function fmtCostCents(cents: number): string {
+  // Show "<¢" for sub-cent totals so a real $0.003/30d isn't displayed as a fake $0.00.
+  if (cents <= 0) return "<¢";
+  if (cents < 100) return `${cents}¢`;
+  return `$${(cents / 100).toFixed(cents < 10_000 ? 2 : 0)}`;
+}
+
 function ColumnsMenu({ all, hidden, cost, onToggle, onClose }: { all: Col[]; hidden: Set<string>; cost: Record<string, EvaluatorCost>; onToggle: (k: string) => void; onClose: () => void }) {
   return (
     <>
@@ -1283,9 +1290,9 @@ function ColumnsMenu({ all, hidden, cost, onToggle, onClose }: { all: Col[]; hid
                 {c && (
                   <span
                     className="rounded bg-slate-700/60 px-1 font-mono text-[9px] text-slate-400"
-                    title={`${c.runs} judge run(s) · ${c.total_tokens.toLocaleString()} tokens over 30d${c.model ? ` · ${c.model}` : ""}`}
+                    title={`${c.runs} run(s) · ${c.total_tokens.toLocaleString()} tokens · ${fmtCostCents(c.cost_usd_cents)} over 30d${c.model ? ` · ${c.model}` : ""}`}
                   >
-                    {fmtTokens(c.total_tokens)} tok
+                    {fmtCostCents(c.cost_usd_cents)} · {fmtTokens(c.total_tokens)}
                   </span>
                 )}
                 <span className={clsx("ml-auto rounded px-1 text-[10px] font-medium", LEVEL_BADGE[col.group])}>{col.group}</span>
@@ -1465,7 +1472,7 @@ export function TraceTable({
   });
   useEffect(() => {
     void listEvaluators().then(setEvaluators).catch(() => {});
-    void getEvaluatorCost(30).then(setEvalCost).catch(() => {});
+    void getEvaluatorCost(30).then((c) => setEvalCost(c.evaluators)).catch(() => {});
   }, []);
 
   // ── rolling summary: fetch a thread's by-level summaries once (the conversation row triggers

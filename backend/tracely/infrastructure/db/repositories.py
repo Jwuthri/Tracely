@@ -26,6 +26,7 @@ from tracely.infrastructure.db.models import (
     GateCase,
     GateRun,
     MetaAnalysis,
+    Monitor,
     RollingSummary,
     ScoreAnnotation,
 )
@@ -711,3 +712,79 @@ def score_annotations_for_project(
     if score_name:
         q = q.where(ScoreAnnotation.score_name == score_name)
     return list(s.execute(q.order_by(desc(ScoreAnnotation.updated_at))).scalars().all())
+
+
+# ── monitors ──────────────────────────────────────────────────────────────────
+
+
+def monitors_list(s: Session, project_id: str) -> list[Monitor]:
+    """A project's monitors, oldest first (CRUD UI ordering matches creation)."""
+    return list(
+        s.execute(
+            select(Monitor).where(Monitor.project_id == project_id).order_by(Monitor.created_at)
+        ).scalars()
+    )
+
+
+def monitor_get(s: Session, project_id: str, monitor_id: str) -> Monitor | None:
+    m = s.get(Monitor, monitor_id)
+    return m if m and m.project_id == project_id else None
+
+
+def monitor_create(
+    s: Session,
+    project_id: str,
+    *,
+    name: str,
+    description: str,
+    target_agent: str,
+    condition: dict,
+    channels: list,
+    enabled: bool,
+    min_interval_seconds: int,
+) -> Monitor:
+    m = Monitor(
+        id=str(uuid4()),
+        project_id=project_id,
+        name=name.strip(),
+        description=description.strip(),
+        target_agent=(target_agent or "").strip(),
+        condition=condition or {},
+        channels=channels or [],
+        enabled=enabled,
+        min_interval_seconds=max(int(min_interval_seconds or 0), 0),
+    )
+    s.add(m)
+    s.commit()
+    s.refresh(m)
+    return m
+
+
+def monitor_update(
+    s: Session, project_id: str, monitor_id: str, patch: dict
+) -> Monitor | None:
+    m = monitor_get(s, project_id, monitor_id)
+    if m is None:
+        return None
+    for field_name, value in patch.items():
+        setattr(m, field_name, value)
+    s.commit()
+    s.refresh(m)
+    return m
+
+
+def monitor_delete(s: Session, project_id: str, monitor_id: str) -> bool:
+    m = monitor_get(s, project_id, monitor_id)
+    if m is None:
+        return False
+    s.delete(m)
+    s.commit()
+    return True
+
+
+def enabled_monitors_across_projects(s: Session) -> list[Monitor]:
+    """Every enabled monitor across every project — the worker's fan-out input. Cheap (small
+    table, indexed `(project_id, enabled)`)."""
+    return list(
+        s.execute(select(Monitor).where(Monitor.enabled.is_(True))).scalars()
+    )

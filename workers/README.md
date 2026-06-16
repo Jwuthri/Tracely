@@ -32,5 +32,5 @@ In Docker it's the `worker` service (same `tracely-backend` image, source volume
 ## Key decisions (and why)
 
 1. **Separate package, shared domain.** The worker imports `tracely` rather than redefining anything, so the API producer and the worker consumer can never drift on mapping/DB logic — yet the worker deploys and scales independently of the API.
-2. **`--pool=solo` in dev.** Simplest, and avoids fork issues with the native numba/UMAP/HDBSCAN stack used by failure intelligence. Production can switch pools/concurrency.
+2. **`--pool=solo` in dev, `prefork` in prod (env-driven).** `CELERY_POOL` (default `solo`) and `CELERY_CONCURRENCY` (default `1`) drive the docker-compose worker's CLI. Local dev keeps `solo` — fork-safety with the native numba/UMAP/HDBSCAN stack used by failure intelligence. Prod sets `CELERY_POOL=prefork CELERY_CONCURRENCY=4` (or higher); switch to `threads` if a numba/UMAP fork bug resurfaces.
 3. **It's a queue consumer, not a server.** No HTTP surface; everything reaches it via Redis, so backpressure and retries are the queue's job (tasks set `max_retries` + backoff).

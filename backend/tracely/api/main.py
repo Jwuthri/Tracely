@@ -19,25 +19,69 @@ from tracely.api.routers import (
     gate,
     health,
     meta_analysis,
+    monitors,
     otlp,
     search,
     sessions,
     traces,
 )
+from sqlalchemy import select
+
 from tracely.api.routers import auth as auth_router
 from tracely.auth import AuthError
 from tracely.config import settings
 from tracely.infrastructure.clickhouse.client import close_async_client
-from tracely.infrastructure.db.engine import async_engine, sync_engine
+from tracely.infrastructure.db.engine import AsyncSessionLocal, async_engine, sync_engine
+from tracely.infrastructure.db.models import IngestKey
 from tracely.log_config import configure_logging
+from tracely.services.seeding_service import DEFAULT_KEY
 
 log = structlog.get_logger()
+
+
+def _init_sentry() -> None:
+    """Optional Sentry init — no-op when `SENTRY_DSN` is unset or `sentry-sdk` isn't installed
+    (we don't pin sentry-sdk as a hard dependency; operators add it in prod via `uv add sentry-sdk`)."""
+    if not settings.sentry_dsn:
+        return
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+    except ImportError:
+        log.warning("sentry_skipped_no_sdk", hint="pip install sentry-sdk")
+        return
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment or settings.tracely_env,
+        integrations=[FastApiIntegration()],
+        # Default conservative — operators tune via the Sentry project UI / their own wrapper.
+        traces_sample_rate=0.0,
+    )
+
+
+async def _refuse_dev_key_in_prod() -> None:
+    """Defense in depth: even if the operator forgot to scrub the seed key, refuse to boot in prod
+    when `tracely_dev_key` is still a valid IngestKey. The seeding service won't create it in prod
+    going forward, but pre-existing DBs need this fail-fast at startup."""
+    if not settings.is_prod:
+        return
+    async with AsyncSessionLocal() as session:
+        row = (
+            await session.execute(select(IngestKey).where(IngestKey.key == DEFAULT_KEY))
+        ).scalar_one_or_none()
+    if row is not None:
+        raise RuntimeError(
+            f"TRACELY_ENV=prod but the seeded dev ingest key '{DEFAULT_KEY}' is still active "
+            f"(project_id={row.project_id}). Delete that IngestKey row before booting."
+        )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
+    _init_sentry()
     log.info("api_startup", env=settings.tracely_env, auth_mode=settings.auth_mode)
+    await _refuse_dev_key_in_prod()
     yield
     # Release pooled connections so reloads/restarts/shutdowns don't leak sockets + file descriptors.
     await close_async_client()
@@ -50,11 +94,10 @@ app = FastAPI(title="Tracely API", version="0.1.0", lifespan=lifespan)
 # The web app fetches the API via same-origin Next proxy routes. Allow direct browser calls from a
 # local dev frontend on any port (dev/staging only — never punch a localhost hole in prod), plus the
 # hosted frontend origin when configured (CORS for SaaS).
-_is_prod = settings.tracely_env.lower() in ("prod", "production")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_origin] if settings.frontend_origin else [],
-    allow_origin_regex=None if _is_prod else r"http://localhost:\d+",
+    allow_origin_regex=None if settings.is_prod else r"http://localhost:\d+",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -92,6 +135,7 @@ app.include_router(evaluators.router)
 app.include_router(evaluations.router)
 app.include_router(meta_analysis.router)
 app.include_router(calibration.router)
+app.include_router(monitors.router)
 
 # Auth: /auth/me + /auth/logout always; mode-specific endpoints gated by AUTH_MODE.
 app.include_router(auth_router.common_router)

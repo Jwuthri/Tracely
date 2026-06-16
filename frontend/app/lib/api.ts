@@ -204,6 +204,32 @@ export async function getStats(): Promise<Stats> {
   return getJson<Stats>(`/api/stats`);
 }
 
+// Per-evaluator LLM-judge cost over the last `days` — server-component shape (the browser
+// equivalent lives in `lib/evaluators.ts:getEvaluatorCost` for the Columns-menu chip).
+export type EvaluatorCostRow = {
+  runs: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd_cents: number;
+  model: string;
+};
+export type EvaluatorCostPayload = {
+  evaluators: Record<string, EvaluatorCostRow>;
+  summary: {
+    days: number;
+    traces_in_window: number;
+    total_runs: number;
+    total_input_tokens: number;
+    total_output_tokens: number;
+    total_cost_usd_cents: number;
+  };
+};
+
+export async function getEvaluatorCost(days = 30): Promise<EvaluatorCostPayload> {
+  return getJson<EvaluatorCostPayload>(`/api/evaluators/cost?days=${days}`);
+}
+
 export type ClusterMember = {
   trace_id: string;
   is_medoid: boolean;

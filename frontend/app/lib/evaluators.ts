@@ -86,12 +86,42 @@ export async function listEvaluators(): Promise<EvaluatorDef[]> {
   return res.json();
 }
 
-// Per-evaluator LLM-judge token usage (keyed by score_name) — what each judge column costs to run.
-export type EvaluatorCost = { runs: number; input_tokens: number; output_tokens: number; total_tokens: number; model: string };
+// Per-evaluator LLM-judge token usage + USD-cents cost (priced live from OpenRouter when
+// reachable, else a static fallback table) — what each judge column actually costs to run.
+export type EvaluatorCost = {
+  runs: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd_cents: number; // 0 when pricing for `model` is unknown
+  model: string;
+};
 
-export async function getEvaluatorCost(days = 30): Promise<Record<string, EvaluatorCost>> {
+export type CostSummary = {
+  days: number;
+  traces_in_window: number; // production traces (env != 'ci') — denominator for $/1k traces
+  total_runs: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cost_usd_cents: number;
+};
+
+export type EvaluatorCostPayload = {
+  evaluators: Record<string, EvaluatorCost>;
+  summary: CostSummary;
+};
+
+const _EMPTY_COST: EvaluatorCostPayload = {
+  evaluators: {},
+  summary: {
+    days: 30, traces_in_window: 0, total_runs: 0,
+    total_input_tokens: 0, total_output_tokens: 0, total_cost_usd_cents: 0,
+  },
+};
+
+export async function getEvaluatorCost(days = 30): Promise<EvaluatorCostPayload> {
   const res = await fetch(`/api/evaluators/cost?days=${days}`, { cache: "no-store" });
-  if (!res.ok) return {};
+  if (!res.ok) return { ..._EMPTY_COST, summary: { ..._EMPTY_COST.summary, days } };
   return res.json();
 }
 

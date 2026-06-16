@@ -1,4 +1,8 @@
-"""Seed the default project + a dev ingest key + the recommended online evaluators."""
+"""Seed the default project + a dev ingest key + the recommended online evaluators.
+
+In prod (`TRACELY_ENV=prod`) the dev ingest key is NEVER seeded — `tracely_dev_key` is published
+in the docs and would be a world-pwnable credential if it survived into prod. The default project
+still gets created (operators add their own real keys via the UI / `IngestKey` API)."""
 
 from __future__ import annotations
 
@@ -6,6 +10,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
+from tracely.config import settings
 from tracely.domain.evaluation.evaluators import TEMPLATES
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.db.models import Evaluator, IngestKey, Project
@@ -44,13 +49,18 @@ def main() -> None:
             s.add(project)
             s.commit()
 
-        key = s.execute(select(IngestKey).where(IngestKey.key == DEFAULT_KEY)).scalar_one_or_none()
-        if not key:
-            s.add(IngestKey(id=str(uuid4()), project_id=project.id, key=DEFAULT_KEY))
-            s.commit()
+        seeded_key: str
+        if settings.is_prod:
+            seeded_key = "(skipped: TRACELY_ENV=prod)"
+        else:
+            key = s.execute(select(IngestKey).where(IngestKey.key == DEFAULT_KEY)).scalar_one_or_none()
+            if not key:
+                s.add(IngestKey(id=str(uuid4()), project_id=project.id, key=DEFAULT_KEY))
+                s.commit()
+            seeded_key = DEFAULT_KEY
 
         evaluators = _seed_evaluators(s, project.id)
-        print(f"project_id={project.id}  slug={project.slug}  ingest_key={DEFAULT_KEY}  evaluators+={evaluators}")
+        print(f"project_id={project.id}  slug={project.slug}  ingest_key={seeded_key}  evaluators+={evaluators}")
 
 
 if __name__ == "__main__":

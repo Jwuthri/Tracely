@@ -49,3 +49,19 @@ def evaluate_run_task(self, project_id: str, trace_id: str) -> dict:
 @celery_app.task(name="tracely.rebuild_clusters", bind=True, max_retries=0)
 def rebuild_clusters_task(self, project_id: str) -> dict:
     return FailureIntelService().rebuild_clusters(project_id)
+
+
+@celery_app.task(name="tracely.evaluate_monitors", bind=True, max_retries=0)
+def evaluate_monitors_task(self) -> dict:
+    """Fire the monitoring engine for every enabled monitor in every project — driven by Celery
+    beat (`beat_schedule` in `celery_app.py`). Best-effort: one bad monitor is logged + skipped,
+    transient errors are NOT retried (the next beat tick will pick up where we left off)."""
+    import asyncio
+
+    from tracely.services.monitoring_service import MonitoringService
+
+    try:
+        return asyncio.run(MonitoringService().evaluate_all())
+    except Exception as exc:  # CH outage / Redis blip — the next tick will retry
+        log.warning("evaluate_monitors_failed", error=str(exc))
+        return {"monitors": 0, "fired": 0, "error": str(exc)}

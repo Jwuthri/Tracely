@@ -30,7 +30,12 @@ from tracely.infrastructure.clickhouse import async_reader
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.db.models import Evaluator
-from tracely.infrastructure.llm.provider import default_model_id, list_models, llm_enabled
+from tracely.infrastructure.llm.provider import (
+    default_model_id,
+    estimate_cost_usd_cents,
+    list_models,
+    llm_enabled,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -122,11 +127,38 @@ async def list_judge_models(project_id: str = Depends(get_project_id)) -> dict:
 @router.get("/evaluators/cost")
 async def evaluator_cost(
     days: int = 30, project_id: str = Depends(get_project_id)
-) -> dict[str, dict]:
-    """Per-evaluator LLM-judge token usage over the last `days`, keyed by `score_name` — what
-    each judge column has cost to run. Empty for structural checks / before any judge has run."""
+) -> dict:
+    """Per-evaluator LLM-judge cost over the last `days`: token counts + USD cents (priced from
+    OpenRouter when reachable, else a static fallback table — see `provider.model_pricing`).
+    Includes a project summary with `traces_in_window` so the UI can show $/1k-traces.
+
+    Shape: `{evaluators: {<score_name>: {runs, input_tokens, output_tokens, total_tokens,
+    cost_usd_cents, model}}, summary: {days, traces_in_window, total_runs, total_input_tokens,
+    total_output_tokens, total_cost_usd_cents}}`."""
     days = max(1, min(int(days), 365))
-    return await async_reader.evaluator_cost(project_id, days)
+    by_name = await async_reader.evaluator_cost(project_id, days)
+    traces = await async_reader.traces_in_window(project_id, days)
+
+    evaluators: dict[str, dict] = {}
+    total_in = total_out = total_runs = total_cents = 0
+    for name, c in by_name.items():
+        cents = estimate_cost_usd_cents(c["model"], c["input_tokens"], c["output_tokens"])
+        evaluators[name] = {**c, "cost_usd_cents": cents}
+        total_runs += c["runs"]
+        total_in += c["input_tokens"]
+        total_out += c["output_tokens"]
+        total_cents += cents
+    return {
+        "evaluators": evaluators,
+        "summary": {
+            "days": days,
+            "traces_in_window": traces,
+            "total_runs": total_runs,
+            "total_input_tokens": total_in,
+            "total_output_tokens": total_out,
+            "total_cost_usd_cents": total_cents,
+        },
+    }
 
 
 @router.get("/evaluators/templates")

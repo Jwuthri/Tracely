@@ -13,6 +13,10 @@ x-app-env: &app-env
   CLICKHOUSE_PASSWORD: ""
   CLICKHOUSE_DATABASE: tracely
   REDIS_URL: redis://redis:6379/0
+  # Celery worker pool — solo/1 for local (numba/UMAP/HDBSCAN are fork-fragile). Prod sets these
+  # to prefork / >=2 in the deploy env. Also forwarded to the worker command above.
+  CELERY_POOL: ${CELERY_POOL:-solo}
+  CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-1}
   S3_ENDPOINT_URL: http://minio:9000
   S3_REGION: us-east-1
   S3_ACCESS_KEY_ID: tracely
@@ -177,7 +181,10 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
-    command: ["celery", "-A", "tracely_workers.worker", "worker", "--pool=solo", "--loglevel=info"]
+    # Pool + concurrency come from CELERY_POOL / CELERY_CONCURRENCY (defaults: solo / 1 for local dev,
+    # since numba/UMAP/HDBSCAN in failure-intelligence are fork-fragile). Prod uses prefork with
+    # concurrency >= 2 — set both in the prod env and recreate the worker.
+    command: ["sh", "-c", "celery -A tracely_workers.worker worker --pool=${CELERY_POOL:-solo} --concurrency=${CELERY_CONCURRENCY:-1} --loglevel=info"]
     volumes:                       # editable install -> live source for fast iteration
       - ./backend:/app/backend
       - ./workers:/app/workers

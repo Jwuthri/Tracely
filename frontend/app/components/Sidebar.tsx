@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { usePathname } from "next/navigation";
 import type { Me } from "@/app/lib/auth/types";
 import { AccountMenu } from "./AccountMenu";
-import { IconActivity, IconGate, IconGrid, IconLayers, IconScale, IconSettings, IconShield, IconTrend } from "./icons";
+import { IconActivity, IconBolt, IconGate, IconGrid, IconLayers, IconScale, IconSettings, IconShield, IconTrend } from "./icons";
 
 const NAV = [
   {
@@ -13,6 +13,7 @@ const NAV = [
       { href: "/", label: "Dashboard", Icon: IconGrid, exact: true },
       { href: "/traces", label: "Traces", Icon: IconActivity },
       { href: "/trends", label: "Trends", Icon: IconTrend },
+      { href: "/monitors", label: "Monitors", Icon: IconBolt },
     ],
   },
   {
