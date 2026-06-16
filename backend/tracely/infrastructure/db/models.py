@@ -439,3 +439,42 @@ class ScoreAnnotation(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class Monitor(Base):
+    """A threshold rule over the regression-loop metrics already in ClickHouse — when its
+    `condition` fires over a sliding window, it POSTs to each configured `channel`. Per-monitor
+    `min_interval_seconds` dedupes alerts so a noisy condition doesn't page every minute.
+
+    `condition` shape (JSON) — the engine dispatches on `type`:
+      `fail_rate_over` — `{score_name, window_minutes, min_samples, threshold}` — fraction of
+        FAIL verdicts on a given evaluator over the window must stay BELOW threshold.
+      `score_below`    — `{score_name, window_minutes, min_samples, threshold}` — average
+        numeric `value` over the window must stay AT OR ABOVE threshold.
+      `trace_failure_rate` — `{window_minutes, min_samples, threshold}` — overall failing-trace
+        rate (advisory FAILs excluded) over the window must stay BELOW threshold.
+
+    `channels` (JSON list): `[{type: 'slack', url}, {type: 'webhook', url, headers?}]`."""
+
+    __tablename__ = "monitors"
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_monitors_project_name"),
+        Index("ix_monitors_project_enabled", "project_id", "enabled"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(String(400), default="")
+    target_agent: Mapped[str] = mapped_column(String(80), default="")
+    condition: Mapped[dict] = mapped_column(JSON, default=dict)
+    channels: Mapped[list] = mapped_column(JSON, default=list)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    min_interval_seconds: Mapped[int] = mapped_column(Integer, default=900)
+    last_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_fired_summary: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

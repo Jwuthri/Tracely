@@ -186,3 +186,18 @@ Resolved: ~~no CI~~ (§0a #6); ~~fake healthcheck~~ (§0a #5); ~~no `acks_late`~
 ---
 
 > **Bottom line.** The three category-defining moves from the original review have shipped: the gate is honest (no more false-green, judge-in-the-gate), the moat is visible and seeded, and the eval feature is trustworthy (unified FAIL + calibration + real sampling). This pass closed the remaining correctness/durability quick-wins (atomic writes, retention, ingest cap, redaction, honest coverage). What's left is mostly **operability** (backups, worker scaling, observability) and the one honest thesis gap — **auto-instrument → hermetic replay** — plus finishing the frontend split that's already underway.
+
+---
+
+## 7. Sequencing — what's underway vs. queued (2026-06-15)
+
+**In flight (this arc, branch `feat/monitors-and-cost-dashboard`):**
+- **§6 #3 Monitors + alerts** — threshold rules over the regression-loop metrics already in ClickHouse (fail-rate spike / pass-rate drop over last N traces), Slack + generic-webhook sinks, evaluated periodically and dedup'd per alert.
+- **§6 #5 Eval cost dashboard** — extends the `provider.on_usage` → `scores.metadata` capture into per-evaluator **$ math** (OpenRouter `/models` already returns per-model prompt/completion pricing; the cache just needs to keep it), **$/1k-traces** view in `/trends`, and a per-judge chip in the Columns menu.
+
+**Next (after the arc above):**
+- **§5 P1 — Auto-instrument → hermetic replay bridge.** A fixture-serving shim that intercepts OpenInference instrumentor exits inside an active `fixtures(...)` context and substitutes recorded outputs for the real network call. Closes the one remaining "README oversells" claim. Touches every provider — scoped, multi-day work.
+
+**Queued (will land after the honesty gap):**
+- **§6 #1 — "Re-break it" demo.** A 60–90s scripted flow (modify prompt → push → gate blocks with a step-aligned trajectory diff). Lands on the landing page and as the first step in `/onboarding`. Make it the *first* thing a visitor sees. The seeding (`seed_demo.py`) is already in place.
+- **§6 #2 — Zero-config GitHub App.** Register the App; on Install, auto-detect the agent (look for `tracely.toml` or sniff for `tracely_sdk` usage), inject the workflow via the App's contents API, post the check via the App token. Removes the workflow-file + secrets + manual-seam friction from adoption.

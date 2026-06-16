@@ -61,7 +61,29 @@ _CURATED_MODELS: list[tuple[str, str]] = [
     ("meta-llama/llama-4-maverick", "Llama 4 Maverick"),
     ("mistralai/mistral-large-2512", "Mistral Large 3"),
 ]
+# Fallback prices in USD per 1M tokens, used when OpenRouter isn't reachable (or the model id
+# isn't in OpenRouter's catalog). Approximate but order-of-magnitude correct so the cost view
+# doesn't read $0.00 in disconnected demos / dev. Override per-deployment by setting the
+# OpenRouter key — live pricing wins.
+_FALLBACK_PRICING_USD_PER_MTOK: dict[str, tuple[float, float]] = {
+    "openai/gpt-5.4-nano":             (0.10,  0.40),
+    "openai/gpt-5.4-mini":             (0.40,  1.60),
+    "openai/gpt-5.1":                  (2.50, 10.00),
+    "openai/gpt-5-mini":               (0.25,  1.00),
+    "openai/gpt-4o":                   (2.50, 10.00),
+    "openai/gpt-4o-mini":              (0.15,  0.60),
+    "anthropic/claude-haiku-4.5":      (0.80,  4.00),
+    "anthropic/claude-fable-5":        (3.00, 15.00),
+    "anthropic/claude-opus-4.6":      (15.00, 75.00),
+    "google/gemini-3.5-flash":         (0.075, 0.30),
+    "google/gemini-3.1-pro-preview":   (1.25,  5.00),
+    "meta-llama/llama-4-maverick":     (0.18,  0.55),
+    "mistralai/mistral-large-2512":    (2.00,  6.00),
+}
 _MODELS_TTL_S = 3600
+# `by_id`: {model_id: {"name": str, "prompt_per_mtok": float|None, "completion_per_mtok": float|None}}.
+# Pricing is per 1M tokens (OpenRouter publishes per-token strings; we multiply by 1M on parse so
+# every downstream consumer can do `tokens / 1_000_000 * per_mtok` symmetrically).
 _models_cache: dict[str, Any] = {"ts": 0.0, "by_id": None}
 
 
@@ -80,11 +102,22 @@ def default_model_id() -> str:
     return _normalize_model(settings.llm_judge_model.strip())
 
 
-def _openrouter_model_names() -> dict[str, str]:
-    """`{model_id: display_name}` from OpenRouter's /models, cached for an hour. On a failed
-    refresh the last-known catalog keeps serving (with a 60s retry cooldown so outages don't
-    stack 10s-timeout fetches on every modal open). Empty when no key is configured — callers
-    fall back to the static curated labels."""
+def _per_mtok(raw: Any) -> float | None:
+    """OpenRouter's `pricing.prompt`/`pricing.completion` are USD-per-token strings (e.g.
+    "0.00000015" = $0.15/Mtok). Convert to USD-per-million-tokens (the unit our cost math uses).
+    None for free/missing fields so 'unknown price' stays distinct from '$0.00'."""
+    try:
+        v = float(raw)
+        return v * 1_000_000.0 if v > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _openrouter_models() -> dict[str, dict]:
+    """`{model_id: {name, prompt_per_mtok, completion_per_mtok}}` from OpenRouter's /models,
+    cached for an hour. On a failed refresh the last-known catalog keeps serving (with a 60s
+    retry cooldown so outages don't stack 10s-timeout fetches on every modal open). Empty when
+    no key is configured — callers fall back to the curated labels + static pricing table."""
     now = time.monotonic()
     if _models_cache["by_id"] is not None and now - _models_cache["ts"] < _MODELS_TTL_S:
         return _models_cache["by_id"]
@@ -99,11 +132,17 @@ def _openrouter_model_names() -> dict[str, str]:
             timeout=10,
         )
         resp.raise_for_status()
-        by_id = {
-            str(m.get("id")): str(m.get("name") or m.get("id"))
-            for m in resp.json().get("data", [])
-            if m.get("id")
-        }
+        by_id: dict[str, dict] = {}
+        for m in resp.json().get("data", []):
+            mid = m.get("id")
+            if not mid:
+                continue
+            pricing = m.get("pricing") or {}
+            by_id[str(mid)] = {
+                "name": str(m.get("name") or mid),
+                "prompt_per_mtok": _per_mtok(pricing.get("prompt")),
+                "completion_per_mtok": _per_mtok(pricing.get("completion")),
+            }
         _models_cache.update(ts=now, by_id=by_id)
         return by_id
     except Exception as exc:
@@ -111,6 +150,39 @@ def _openrouter_model_names() -> dict[str, str]:
         # serve stale (or nothing) and retry in 60s instead of on every request
         _models_cache["ts"] = now - _MODELS_TTL_S + 60
         return _models_cache["by_id"] or {}
+
+
+def _openrouter_model_names() -> dict[str, str]:
+    """Back-compat shim: `{model_id: display_name}` projected from `_openrouter_models()`."""
+    return {mid: info["name"] for mid, info in _openrouter_models().items()}
+
+
+def model_pricing(model_id: str) -> tuple[float | None, float | None]:
+    """`(prompt_per_mtok, completion_per_mtok)` in USD per 1M tokens for `model_id`.
+
+    Priority: live OpenRouter catalog → static fallback table → `(None, None)` for unknown
+    models. Normalizes bare ids the same way `get_chat_model` does (`openai/` prefix), so callers
+    can pass whatever the judge stamped on the score metadata."""
+    mid = _normalize_model((model_id or "").strip())
+    if not mid:
+        return None, None
+    live = _openrouter_models().get(mid)
+    if live:
+        return live.get("prompt_per_mtok"), live.get("completion_per_mtok")
+    fb = _FALLBACK_PRICING_USD_PER_MTOK.get(mid)
+    if fb:
+        return fb
+    return None, None
+
+
+def estimate_cost_usd_cents(model_id: str, input_tokens: int, output_tokens: int) -> int:
+    """Per-call cost in **integer USD cents** (no floats stored downstream → no rounding drift).
+    Returns 0 when pricing is unknown — caller's responsibility to surface "no price" distinctly."""
+    pin, pout = model_pricing(model_id)
+    if pin is None and pout is None:
+        return 0
+    dollars = (input_tokens * (pin or 0.0) + output_tokens * (pout or 0.0)) / 1_000_000.0
+    return int(round(dollars * 100))
 
 
 def list_models() -> list[dict[str, str]]:

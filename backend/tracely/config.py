@@ -27,6 +27,13 @@ class Settings(BaseSettings):
 
     # Redis (Celery)
     redis_url: str = "redis://localhost:6379/0"
+    # Celery worker pool. `solo` (default for local dev) avoids fork issues with native libs
+    # (numba/UMAP/HDBSCAN used by failure intelligence). Prod uses `prefork` so multiple workers
+    # process tasks in parallel; switch to `threads` if a numba/UMAP fork bug resurfaces. The
+    # docker-compose worker reads these at startup — `prefork` here makes the worker pick up the
+    # CONCURRENCY too.
+    celery_pool: str = "solo"
+    celery_concurrency: int = 1
 
     # S3 / MinIO
     s3_endpoint_url: str = "http://localhost:9000"
@@ -124,6 +131,9 @@ class Settings(BaseSettings):
     clerk_jwks_cache_seconds: int = 600
     # Hosted CORS: the browser-facing frontend origin allowed to call the API directly (blank → localhost only).
     frontend_origin: str = ""
+    # Sentry: optional. Blank disables it; non-blank + `sentry-sdk` installed activates error capture.
+    sentry_dsn: str = ""
+    sentry_environment: str = ""  # default = tracely_env if blank
 
     # ── Transactional email (Resend) ──────────────────────────────────────────────
     # Optional. When RESEND_API_KEY is set, team invites are emailed automatically; when blank the
@@ -144,7 +154,18 @@ class Settings(BaseSettings):
             raise ValueError("AUTH_MODE=local requires SESSION_SECRET (>=32 chars)")
         if self.auth_mode == "clerk" and not self.clerk_issuer:
             raise ValueError("AUTH_MODE=clerk requires CLERK_ISSUER")
+        # Prod refuses dev-mode auth: dev mode means "no human auth" and the seeded `tracely_dev_key`
+        # is a valid ingest credential, so booting prod in dev mode is world-pwnable. Fail fast at
+        # startup instead of shipping an open backend. (Set TRACELY_ENV=prod only in real prod.)
+        if self.is_prod and self.auth_mode == "dev":
+            raise ValueError(
+                "TRACELY_ENV=prod requires AUTH_MODE=local or clerk (dev mode has no human auth)"
+            )
         return self
+
+    @property
+    def is_prod(self) -> bool:
+        return self.tracely_env.lower() in ("prod", "production")
 
     @property
     def resolved_clerk_jwks_url(self) -> str:

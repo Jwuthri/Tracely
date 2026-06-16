@@ -123,7 +123,7 @@ async def trace_scores(project_id: str, trace_id: str, thread_id: str) -> list[d
 async def evaluator_cost(project_id: str, days: int = 30) -> dict[str, dict]:
     """Per-evaluator LLM-judge token usage over the last `days` (from `scores.metadata`), keyed by
     `score_name` — the cost of each judge column. Structural checks make no LLM call so they don't
-    appear. `{score_name: {runs, input_tokens, output_tokens, total_tokens, model}}`."""
+    appear. Shape: `{<score_name>: {runs, input_tokens, output_tokens, total_tokens, model}}`."""
     client = await get_async_client()
     res = await client.query(
         "SELECT name, "
@@ -144,6 +144,107 @@ async def evaluator_cost(project_id: str, days: int = 30) -> dict[str, dict]:
         }
         for r in res.result_rows
     }
+
+
+async def traces_in_window(project_id: str, days: int) -> int:
+    """Distinct production trace count over the last `days` — the denominator for $/1k-traces
+    math on the cost view (so judge spend is normalized to traffic, not just an absolute total
+    that grows with the demo seed). Production-only: env='ci' replay traces don't dilute the
+    customer-facing rate."""
+    client = await get_async_client()
+    res = await client.query(
+        "SELECT countDistinct(trace_id) FROM events FINAL "
+        "WHERE project_id = {p:String} "
+        "AND start_time >= now() - toIntervalDay({d:UInt32}) "
+        "AND env != 'ci'",
+        parameters={"p": project_id, "d": days},
+    )
+    rows = res.result_rows
+    return int(rows[0][0]) if rows else 0
+
+
+# ── monitors: score & trace samples over a time window ───────────────────────
+
+
+async def score_samples_in_window(
+    project_id: str,
+    score_name: str,
+    window_minutes: int,
+    target_agent: str = "",
+) -> list[dict]:
+    """Samples (`{verdict, value}` dicts) for one evaluator over the last `window_minutes`,
+    optionally scoped to `target_agent` (matched on `agent_id`). Used by the monitoring engine —
+    `domain.monitoring.conditions.evaluate_condition` consumes these.
+
+    Trace-scoped scores carry an `agent_run_id` we can match against — conversation scores don't
+    (they're keyed by thread). When `target_agent` is set and the score is conversation-level the
+    join would be ambiguous, so we restrict to trace-scoped rows. Empty `target_agent` matches
+    everything across the project."""
+    client = await get_async_client()
+    if target_agent:
+        # Join scores → events to filter by agent_id. Cheap because both are partitioned by month
+        # and the window is short; we only pull rows in `target_agent`'s production traces.
+        sql = (
+            "SELECT s.verdict AS verdict, s.value AS value "
+            "FROM scores AS s FINAL "
+            "INNER JOIN ("
+            "  SELECT trace_id FROM events FINAL WHERE project_id = {p:String} "
+            "  AND agent_id = {ag:String} AND env != 'ci' "
+            "  AND start_time >= now() - toIntervalMinute({w:UInt32}) "
+            "  GROUP BY trace_id"
+            ") AS e USING trace_id "
+            f"WHERE s.project_id = {{p:String}} AND s.{_ONLINE} "
+            "AND s.name = {n:String} "
+            "AND s.created_at >= now() - toIntervalMinute({w:UInt32})"
+        )
+        params = {"p": project_id, "n": score_name, "w": window_minutes, "ag": target_agent}
+    else:
+        sql = (
+            "SELECT verdict, value FROM scores FINAL "
+            f"WHERE project_id = {{p:String}} AND {_ONLINE} "
+            "AND name = {n:String} "
+            "AND created_at >= now() - toIntervalMinute({w:UInt32})"
+        )
+        params = {"p": project_id, "n": score_name, "w": window_minutes}
+    res = await client.query(sql, parameters=params)
+    return [{"verdict": r[0] or "", "value": r[1]} for r in res.result_rows]
+
+
+async def trace_failure_samples_in_window(
+    project_id: str,
+    window_minutes: int,
+    advisory: Sequence[str],
+    target_agent: str = "",
+) -> list[dict]:
+    """One sample per production trace in the window (`{verdict: 'FAIL'|'PASS'}`), using the same
+    advisory-aware failing-trace definition as the trends page. Used by `trace_failure_rate`.
+
+    Trace-scoped reads only: we collect each trace's `(agent_id, has_failing_non_advisory_score)`
+    over its spans + scores. Empty `target_agent` matches everything."""
+    client = await get_async_client()
+    sql = (
+        "WITH trace_meta AS ( "
+        "  SELECT trace_id, anyIf(agent_id, parent_span_id = '') AS root_agent "
+        "  FROM events FINAL "
+        "  WHERE project_id = {p:String} AND env != 'ci' "
+        "  AND start_time >= now() - toIntervalMinute({w:UInt32}) "
+        "  GROUP BY trace_id"
+        "), trace_verdict AS ( "
+        "  SELECT trace_id, maxIf(1, verdict = 'FAIL' AND name NOT IN {adv:Array(String)}) AS fail "
+        f"  FROM scores FINAL WHERE project_id = {{p:String}} AND {_ONLINE} "
+        "  GROUP BY trace_id"
+        ") "
+        "SELECT IF(coalesce(v.fail, 0) = 1, 'FAIL', 'PASS') AS verdict "
+        "FROM trace_meta AS m LEFT JOIN trace_verdict AS v USING trace_id "
+        + ("WHERE m.root_agent = {ag:String}" if target_agent else "")
+    )
+    params: dict[str, object] = {
+        "p": project_id, "w": window_minutes, "adv": list(advisory),
+    }
+    if target_agent:
+        params["ag"] = target_agent
+    res = await client.query(sql, parameters=params)
+    return [{"verdict": r[0]} for r in res.result_rows]
 
 
 async def evaluator_catalog(project_id: str) -> list[dict]:

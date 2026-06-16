@@ -13,7 +13,7 @@
 3. [🦴 The spine + the product map](#-the-spine--the-product-map)
 4. [🏗️ Architecture](#️-architecture)
 5. [📚 The features](#-the-features)
-   - [👀 Observe](#-observe--see-everything-your-agents-do) · [🔬 Detect](#-detect--grade-every-run) · [🧹 Triage](#-triage--group-failures-into-issues) · [🧪 Test](#-test--freeze-a-failure-into-a-regression) · [🚢 Ship](#-ship--gate-the-pull-request) · [📈 Insights](#-insights--trends) · [🎨 The UI](#-the-ui)
+   - [👀 Observe](#-observe--see-everything-your-agents-do) · [🔬 Detect](#-detect--grade-every-run) · [⚖️ Judge calibration](#-judge-calibration--trust-your-evaluators-before-they-block-ci) · [🗂️ Conversation context](#-conversation-context--rolling-summary--declared-agents) · [🧹 Triage](#-triage--group-failures-into-issues) · [🧪 Test](#-test--freeze-a-failure-into-a-regression) · [🚢 Ship](#-ship--gate-the-pull-request) · [📈 Insights](#-insights--trends--meta-analysis) · [🎨 The UI](#-the-ui)
 6. [🔑 Key decisions](#-key-decisions--why)
 7. [🐛 War stories](#-war-stories-bugs-we-hunted)
 8. [⚠️ Honest limitations](#️-honest-limitations)
@@ -66,9 +66,9 @@ One closed loop. The sidebar teaches it as four stages (+ Insights):
 | 👀 **Observe** | *Traces · Trends · Dashboard* | OTLP traces, grouped into **conversation threads**, with a tabbed detail view |
 | 🔬 **Detect** | *(automatic)* | Every run auto-graded — incl. **silent** failures |
 | 🧹 **Triage** | *Failure clusters* | Failures grouped into named **Issues** (Engine-style) |
-| 🧪 **Test** | *Regression cases* | One failure → a fail-to-pass test with hermetic fixtures |
-| 🚢 **Ship** | *CI gates* | A PR replays the suite → a blocking green/red check |
-| 📈 **Insights** | *Trends* | Failure-rate, gate pass-rate, MTTR over time |
+| 🧪 **Test** | *Regression cases · Judge calibration* | One failure → a fail-to-pass test with hermetic fixtures; ✓agree/✗disagree with judge verdicts |
+| 🚢 **Ship** | *CI gates* | A PR replays the suite → a blocking green/red check (with judge-in-gate + `NO_COVERAGE`) |
+| 📈 **Insights** | *Trends* | Failure-rate, gate pass-rate, MTTR over time + per-agent **Meta-Analysis** ("Analyze") cross-metric correlations |
 
 Plus a **⌘K command palette** to jump anywhere.
 
@@ -145,9 +145,53 @@ Plus a **⌘K command palette** to jump anywhere.
 
 > 🥷 **Silent failures are the star** — a run with zero error spans can still be broken (the model claims it called a tool but didn't, then hallucinates). No structural-only tool catches this.
 
-**✅ User-defined** — per your steer that *the user must own evaluators*, the engine runs **configurable `Evaluator` records** (`models.Evaluator`, migration `0007`): each has a kind (`structural` | `llm_judge`), target agent/env, sampling, and config. The runner (`eval_runner`) loads the project's **enabled** records and dispatches each via `evaluators.run_evaluator` (the LLM judge takes a **custom rubric + threshold**); `seed.py` installs the recommended **template catalog** (`evaluators.TEMPLATES`) as editable rows so eval works out of the box. Evaluation is opt-in — a project with no enabled evaluators produces no scores (no hidden fallback). Still to add: a CRUD **API** + a management **UI**.
+**✅ User-owned evaluators (live)** — the engine runs **configurable `Evaluator` records** (`models.Evaluator`, migration `0007`): each has a kind (`structural` | `llm_judge`), target agent/env, sampling, an **`advisory` flag**, and config. The runner loads the project's enabled records, with **deterministic per-(trace,score) sampling** (so the same trace yields the same decision across re-runs) and **real target filtering** (`target_agent` / `target_env` actually filter on the ingest path). The seeder installs the recommended template catalog as editable rows; the **Add Column modal** + Columns menu in the table edit them inline.
 
-`evaluators.py` · `eval_runner.py` · scores → ClickHouse `scores` (deterministic ids → idempotent re-eval)
+**🔍 Multi-level evaluation ✅** — each evaluator is scoped at one of three levels (config JSON):
+- **`SPAN`** — graded per-step (a tool span, a generation).
+- **`AGENT_RUN`** — graded per trace (the run-level checks above).
+- **`CONVERSATION`** — graded across an entire thread (multi-turn quality, conversation-level invariants). Stored on `scores.session_id` (no trace_id) — one canonical row per thread per evaluator.
+
+**📜 Advisory vs blocking ✅** — the answer-quality judge is intentionally subjective; marked **advisory** (per-evaluator flag, migration `0012`), its FAILs are kept as signal but **do not flip** the roll-up `failing` flag. One policy in `domain/evaluation/verdict.py` — every roll-up (thread dot, trace verdict, session verdict, analytics counters) reads from the same source. End of the "green dot but EVALS FAIL" inconsistency.
+
+**🧪 Calibrate before you trust ✅** — let an LLM judge block CI only after you've checked it agrees with you. The **Judge calibration** page lets a reviewer ✓agree / ✗disagree with each judge verdict; agreement %, **missed failures** (false_pass) and **over-flags** (false_fail) surface per evaluator (see [Judge calibration](#judge-calibration-trust-your-evaluators-before-they-block-ci) below).
+
+`evaluators.py` · `eval_runner.py` · `domain/evaluation/{verdict,calibration}.py` · scores → ClickHouse `scores` (deterministic ids → idempotent re-eval)
+
+---
+
+### ⚖️ Judge calibration — trust your evaluators before they block CI
+
+> 🍼 Letting an LLM judge fail your CI is scary. Tracely lets you ✓agree or ✗disagree with each judge verdict, then tells you how often the judge matches a human — and which way it errs.
+
+**What's built ✅**
+- **Human-label write path** — Postgres `score_annotations` (migration `0013`), keyed by the score's **natural identity** + reviewer (`score_name, evaluation_level, trace_id, session_id, observation_id, labeled_by`). One label per reviewer per score, upserted. We **snapshot the judge verdict at label time** so agreement is a pure Postgres query (no ClickHouse join) and reflects what the human actually reviewed.
+- **`/calibration` page** — left rail = evaluator agreement cards (colored % — ok≥0.8 / warn≥0.5 / fail); right rail = the labeling queue with the judge's verdict + rationale + ✓agree / ✗disagree toggle.
+- **The two metrics that matter** — **`false_pass` (missed failures)**: judge passed a trace the human would fail (the dangerous one for a gate); **`false_fail` (over-flags)**: judge failed something the human says is fine (noisy gate).
+- **Pure math** — `domain/evaluation/calibration.py` is fully unit-tested; the router shapes HTTP only.
+
+> 🧭 **Why this is the moat-widener:** every competitor ships LLM judges and a gate. Tracely is the only one that says "let's check the judge against you first." Trustworthy evals = a gate teams will actually enable.
+
+`api/routers/calibration.py` · `domain/evaluation/calibration.py` · `components/CalibrationView.tsx`
+
+---
+
+### 🗂️ Conversation context — rolling summary + declared agents
+
+> 🍼 A 30-turn conversation is too long for any single judge call. Tracely keeps a **rolling summary** that accumulates per-span (verbatim for short steps, LLM-compressed for long ones), and lets the user **declare their agent catalog** so the judge sees "Support Agent uses get_order_status" instead of just span ids.
+
+**Rolling summary ✅** *(migration `0010`)* — per-span accumulating summary stored at the step level (one row per span = the full history-so-far at that point), so the conversation view = the last row, the message view = its turn's last step, the step view = that exact row. Algorithm:
+- **RULE 1** — a step ≤ `step_max_tokens` (default 512) is kept **verbatim**; larger steps are summarized to ~10-20 words by a small model.
+- **RULE 2** — when the running list exceeds `max_tokens` (default 20k), the older items (all but the last 2) **fold into one item with the `prev_summary` role**, recursively. The summary stays a flat list `[{role, type, content, …}]` — `prev_summary` is a *role*, not a key, so renderers and judges treat it uniformly.
+- Auto-generates on ingest. Surfaced as **3 per-row columns** in the trace table (C / M / S levels) rendered as JSON pills; available to advanced evaluators as **`@HISTORY` / `@ROLLING_SUMMARY`** template variables.
+
+**Conversation agents panel ✅** *(migration `0011`)* — two sources, merged into one panel:
+1. **Observed** — derived from spans (`agent_id` + executed TOOL spans + `tool_call_names` for requested-but-not-executed).
+2. **Declared** — the user sends a rich catalog via `tracely.trace(agents=[{name, description, tools: {...}}])` on the first turn; the ingestion service parses + upserts to `conversation_agents` and **strips it from metadata** before the ClickHouse insert (lossless-metadata path, no mapper change).
+
+The judge gets the **declared** catalog via `@LIST_AGENT` when present, falls back to observed otherwise — a major quality win for multi-agent traces.
+
+`services/rolling_summary_service.py` · `domain/evaluation/rolling_summary.py` · `components/AgentsSidePanel.tsx`
 
 ---
 
@@ -193,17 +237,23 @@ Plus a **⌘K command palette** to jump anywhere.
 - **Explicit pairing** — replay knows which trace ran which case, so it gates with an exact `{case_id: trace_id}` map (no digest guessing).
 - **Hermetic by default** — fixtures served via `call_tool`/`call_llm`; `--live` opts into real calls.
 - **GitHub PR check** — a commit status `tracely/regression-gate` (the blocking check) + an upserted PR comment, exit codes `0/1/2`. A composite **GitHub Action** + example workflow ship in `.github/`.
-- **💸 Soft delta gates** *(new)* — the gate rolls up candidate **latency** and **token usage**, compares to the agent's last **green** gate, and posts non-blocking **⚠️ warnings** when a metric regresses (default 25% thresholds). **Fail-to-pass stays the only hard gate** unless `gate_block_on_warnings`. Metrics + warnings persist on `GateRun` (migration `0006`) and render in the CLI, the PR comment, and the gate UI.
+- **💸 Soft delta gates** — the gate rolls up candidate **latency** and **token usage**, compares to the agent's last **green** gate, and posts non-blocking **⚠️ warnings** when a metric regresses (default 25% thresholds). Metrics + warnings persist on `GateRun` (migration `0006`) and render in the CLI, the PR comment, and the gate UI.
 
-`gate.py` · `api/routers/gate.py` · `sdk/tracely_sdk/cli.py` · `.github/actions/tracely-gate/`
+**🧑‍⚖️ Honest gate (no more false-green)** *(new — strategic capstone)*
+- **`NO_COVERAGE` status** — a gate that exercised NONE of its promoted cases (every case SKIPped) is treated as a blocking non-PASS, not green. A merge-blocker that tested nothing is the worst possible failure mode. Set `gate_require_full_coverage=true` to extend this to partial coverage too.
+- **Judge in the gate** — cases promoted from an *answer-quality* failure (a hallucination with a structurally-clean trace) carry a `quality` assertion. At gate time the answer judge re-grades the replayed answer; a sub-threshold score **FAILs the case**. This is what turns the gate from "catches crashes" into "catches the bad answers customers fear". Gated by `settings.gate_quality_blocks` (default on) — set false to keep it advisory while you calibrate (see [Judge calibration](#judge-calibration-trust-your-evaluators-before-they-block-ci)). The canonical judge is `tracely.run.quality`.
+
+`gate.py` · `domain/regression/contract.py` · `api/routers/gate.py` · `sdk/tracely_sdk/cli.py` · `.github/actions/tracely-gate/`
 
 ---
 
-### 📈 Insights — Trends
+### 📈 Insights — Trends + Meta-analysis
 
-**What's built ✅** — `GET /api/trends` + a `/trends` page: **failure-rate over time, gate pass-rate, open-vs-resolved issues, regression-test count, and an MTTR (failure → test) proxy**, with hand-rolled bar charts. Scoped to **regression-loop health** (on-thesis), not generic Datadog-style metrics.
+**Trends ✅** — `GET /api/trends` + a `/trends` page: **failure-rate over time, gate pass-rate, open-vs-resolved issues, regression-test count, and an MTTR (failure → test) proxy**, with hand-rolled bar charts. Scoped to **regression-loop health** (on-thesis), not generic Datadog-style metrics.
 
-`api/routers/analytics.py` · `trends/page.tsx` · `components/Bars.tsx`
+**🔬 Meta-Analysis ("Analyze") ✅** *(migration `0009`)* — cross-metric **Spearman correlations + z-score outliers** computed deterministically in NumPy (tie-averaged ranks → Pearson; reports sample-size `n`, not a fake p-value), then an LLM **synthesis** call merged with the stats (stats stay authoritative; the LLM contributes interpretations, patterns, recommendations, summary). Scoped **per agent**, persisted in Postgres `meta_analyses`. Shows up as the `MetaAnalysisPanel` on the Trends page — re-runs on demand, exportable as Markdown.
+
+`api/routers/analytics.py` · `api/routers/meta_analysis.py` · `domain/analysis/statistics.py` · `trends/page.tsx` · `components/{Bars,MetaAnalysisPanel}.tsx`
 
 ---
 
@@ -246,45 +296,53 @@ Signature touches: **`[ID]` copy chips** (long ids never shown raw), the **⌘K 
 
 ## ⚠️ Honest limitations
 
-- 🛠️ **No evaluator management API/UI yet** — evaluators are fully DB-backed and the runner loads them (seeded with the recommended catalog), but editing/adding one means touching the `evaluators` table directly; the CRUD API + Evaluators page are still to build.
-- 🔓 **Auth is wide open** — single dev key `tracely_dev_key`, no multi-tenancy/RBAC, single project.
-- 🟰 **All-SKIP passes the gate** — a replay harness that emits no matching traces yields a false green.
-- 🧱 **Single-node, single-process worker** (`--pool=solo`) — fine for the demo, not for scale.
-- 🤖 **Structural gating only** — a *bad answer* with no error span isn't caught by the gate yet (needs the LLM-judge wired into replay).
-- ⏱️ **Latency/cost ≈ 0 in hermetic replay** — the soft gates are most meaningful for live cases / instrumented token usage.
+- 🔌 **Auto-instrument agents can record but can't replay** — `instrument="auto"` traces a real agent run perfectly, but hermetic CI replay still requires the manual `call_tool` / `call_llm` seam. Most provider examples (`auto_openai`, `auto_anthropic`, …) demonstrate Tracely's signature feature but produce traces the gate can't replay. **The biggest thesis honesty gap** — closing it bridges the record→replay seam without a code rewrite.
+- ⏱️ **Latency/cost ≈ 0 in hermetic replay** — the soft delta gates are most meaningful for live cases / instrumented token usage; in pure replay the comparison is informational.
+- 📊 **Version attribution scaffolding is unsurfaced** — `agent_versions` is content-hashed and `EvaluationCase.agent_version_first_failed` is set at promote, but no UI shows "v12 introduced this regression". Cheap follow-up, real moat.
+- 🛟 **Backups need an operator action** — Postgres + ClickHouse snapshots are a one-click toggle in your provider's UI (see [`DEPLOY.md`](DEPLOY.md)); nothing in Tracely takes them for you.
 
 ---
 
 ## 🚀 What's next
 
+The strategic plan ("honest gate, visible moat, trustworthy evals") shipped — gate honesty + judge-in-gate + calibration are live. The remaining moves:
+
 **Near-term**
-1. **Evaluator management API + UI** — the runner already loads DB `Evaluator` records and `seed.py` installs the recommended (editable) catalog; what's left is a CRUD API + an Evaluators page with a "set up evaluator" flow (so the "Create evaluator" button on a cluster lands somewhere).
-2. **Eval-score-delta gate** + an LLM-judge assertion inside replay.
-3. **Multi-tenancy + real auth.**
+1. **Bridge auto-instrument → hermetic replay** — make a tool decorated with `@observe(as_type="tool")` consult `tracely.fixtures()` automatically, so any `auto_*` example becomes replayable by the gate without a code rewrite (the largest thesis honesty gap today).
+2. **Surface agent-version attribution** — the scaffolding exists; show "v12 (prompt edit, git a1b2c3) introduced cluster #4" on case + cluster pages.
+3. **SDK auth-aware ingest in prod** — first-party Clerk org → ingest key bootstrap so SaaS users don't have to provision keys by hand.
 
-**The bigger vision** *(designed in the dossier, not built 📐)* — content-addressed `AgentVersion` gating (`config_hash`), full 7-signal detection + RCA + auto-test-gen, the canary-as-GateRun loop, multi-agent edges + impact analysis, a zero-config GitHub App, and codebase-aware fixes.
+**The bigger vision** *(designed in the dossier, partially built 📐)* — content-addressed `AgentVersion` *gating* (the table exists; the gate doesn't pin to a hash yet), full 7-signal detection + RCA + auto-test-gen, the canary-as-GateRun loop, multi-agent edges + impact analysis, a zero-config GitHub App, and codebase-aware fixes.
 
-> 🧱 **The bet:** the *left* half (ingest → store) is ~70% borrowed from Langfuse's proven substrate; the *right* half (promote → replay → gate) is net-new on top. Build only the trace-native CI layer nobody else has.
+> 🧱 **The bet:** the *left* half (ingest → store) is ~70% borrowed from Langfuse's proven substrate; the *right* half (promote → replay → gate, judge-in-gate, calibration) is net-new on top. Build only the trace-native CI layer nobody else has.
 
 ---
 
 ## 🏃 Run it
 
 ```bash
-# whole stack (ports 8088 backend / 3001 frontend on this machine)
-TRACELY_BACKEND_PORT=8088 TRACELY_WEB_PORT=3001 docker compose up -d
+# Whole stack (backend → :8000, frontend → :3001). The `migrate` one-shot applies CH + Alembic
+# migrations and seeds the default project + (in dev only) `tracely_dev_key`.
+docker compose up -d
 
-make demo-failures      TRACELY_API=http://localhost:8088   # seed errors/silent/hallucination runs
-# (multi-turn convos: uv run python sdk/examples/seed_conversations.py)
+# Populate the WHOLE product in one shot — conversations, failure clusters, regression cases.
+docker compose --profile demo up -d --build --wait
+# …or, if the stack is already running:  make demo  /  docker compose exec backend python scripts/seed_demo.py
 
-# UI → localhost:3001  →  Failure clusters → "Analyze failures" (needs OPENAI_API_KEY in .env)
-#                     →  open an Issue → Promote → a regression case
+# UI → localhost:3001
+#   Traces      → conversation threads (multi-turn) with C/M/S rolling summary columns
+#   Clusters    → "Analyze failures" → semantic Issues (needs OPENROUTER_API_KEY in .env)
+#   Cases       → Promote a failure → a fail-to-pass regression test
+#   Judge calibration → ✓agree/✗disagree with judge verdicts before they block CI
+#   Gates       → make gate / make replay → hermetic re-run + GitHub PR check
 
-make gate    TRACELY_API=http://localhost:8088              # gate pre-emitted ci traces
-make replay  TRACELY_API=http://localhost:8088              # re-run the agent (hermetic) + gate
+make gate     # gate pre-emitted ci traces by digest
+make replay   # re-run the agent (hermetic) + gate (the turnkey path)
 ```
 
-> 🔑 `OPENAI_API_KEY` lives in `.env` (gitignored) — it powers the FI agents/embeddings *and* the LLM judge. Without it, the core pipeline runs 100% local & free.
+> 🔑 `OPENROUTER_API_KEY` (judge, failure-intel agents, rolling summary, meta-analysis) + `OPENAI_API_KEY` (embeddings only) live in `.env` (gitignored). Without them the core pipeline runs 100% local & free.
+
+> 🚀 **Deploying to prod?** See [**`DEPLOY.md`**](DEPLOY.md) — required env vars, the refuse-to-boot guards (no `AUTH_MODE=dev` in prod, no seeded `tracely_dev_key`), the worker pool (`CELERY_POOL=prefork`), backups, and post-deploy verification.
 
 ---
 
@@ -292,27 +350,60 @@ make replay  TRACELY_API=http://localhost:8088              # re-run the agent (
 
 ```
 Tracely/
-├── backend/tracely/            # the shared brain (API + all domain logic)
-│   ├── api/routers/            # otlp, reads (traces+sessions), cases, clusters, gate, analytics, health
-│   ├── otel/mapping.py         # OTLP → first-class columns (multi-vendor)
-│   ├── evaluators.py           # check implementations + run_evaluator dispatch + TEMPLATES 🔬
-│   ├── eval_runner.py · fi.py · agents.py · cluster.py   # detect + failure intelligence 🧹
-│   ├── regression.py · trajectory.py                     # promote / fail-to-pass / fixtures / replay 🧪
-│   ├── gate.py                 # CI/CD gate + soft delta gates 🚢
-│   ├── models.py               # Postgres registry (incl. Evaluator, GateRun metrics)
-│   ├── ch_migrations/ · migrations/ (0001–0007)
-├── workers/tracely_workers/    # thin Celery runtime
-├── sdk/tracely_sdk/            # SDK (agent/conversation/call_tool/call_llm/fixtures) + the `tracely` CLI
-│   └── examples/               # weather agents, seed_conversations, seed_handler, seed_multicall
-├── frontend/app/               # Next.js 15 — traces(threads)/sessions, clusters, cases, gates, trends, dashboard 🎨
-│   └── components/             # ThreadList, TraceBody(tabs), Waterfall, IO, CommandPalette, Bars, CodeBlock, …
-├── .github/actions/tracely-gate/   # composite Action + README
-├── design/part2-tracely/       # the design dossier (00-canonical is authoritative)
+├── backend/tracely/                    # the shared brain (one package; API + worker share it)
+│   ├── api/
+│   │   ├── main.py                     # FastAPI app + lifespan (CORS, Sentry, prod guards)
+│   │   ├── routers/                    # otlp, traces, sessions, cases, clusters, gate, evaluators,
+│   │   │                               #   evaluations, meta_analysis, calibration, analytics, health, auth
+│   │   └── auth.py                     # get_principal / get_project_id deps
+│   ├── auth/                           # AUTH_MODE=dev|local|clerk — Principal, JWTs, JWKS, provisioning
+│   ├── domain/                         # pure logic, no I/O — testable in isolation
+│   │   ├── evaluation/                 #   evaluators, verdict (advisory policy), calibration, rolling_summary
+│   │   ├── regression/                 #   contract (assertions + judge-in-gate), fixtures, match modes
+│   │   ├── failure_intelligence/       #   signatures, clustering, mechanism embedding
+│   │   ├── analysis/                   #   meta-analysis statistics (Spearman, z-score, NumPy-deterministic)
+│   │   └── traces/                     #   span shaping, metadata, root resolution
+│   ├── services/                       # the orchestration layer (sync; uses domain + infrastructure)
+│   │   ├── ingestion_service.py        #   OTLP → S3 → enqueue
+│   │   ├── evaluation_service.py       #   auto-eval, sampling, targeting
+│   │   ├── regression_service.py       #   promote, version_first_failed (scaffolding)
+│   │   ├── gate_service.py             #   NO_COVERAGE + soft deltas + judge-in-gate
+│   │   ├── rolling_summary_service.py  #   per-span accumulating summary
+│   │   ├── meta_analysis_service.py    #   "Analyze" run + persist
+│   │   └── seeding_service.py          #   default project; dev-key seeding SKIPPED in prod
+│   ├── infrastructure/
+│   │   ├── clickhouse/                 #   async_reader, trace_reader (sync), score_writer, schema, migrations
+│   │   ├── db/                         #   engine, models, repositories
+│   │   ├── llm/                        #   provider (LangChain create_agent on OpenRouter), judge agents
+│   │   └── queue/celery_app.py         #   broker config (visibility 3h, time limits)
+│   ├── otel/                           # OTLP → first-class columns (multi-vendor lift)
+│   ├── workers/tasks.py                # Celery tasks (ingestion + evaluation + cluster rebuild)
+│   ├── config.py                       # pydantic settings + prod refuse-to-boot
+│   └── log_config.py                   # structlog: JSON in prod, console in dev
+├── migrations/versions/                # Alembic — 0001 baseline … 0013 score_annotations
+├── workers/tracely_workers/            # thin Celery runtime (entrypoint only)
+├── sdk/tracely_sdk/                    # OpenTelemetry SDK + `tracely` CLI (`gate` / `replay`)
+│   ├── __init__.py                     #   init/agent/observe/trace/call_tool/call_llm/fixtures/Conversation
+│   └── examples/                       #   16 examples: auto_*/dropin_* per provider, multi-turn + 2 agents
+├── frontend/app/                       # Next.js 15 / React 19 — server components, no UI libs
+│   ├── (app)/                          #   authed dashboard shell (Sidebar + error.tsx + loading.tsx)
+│   │   ├── traces · clusters · cases · gates · trends · calibration · settings · sessions
+│   ├── (auth)/                         #   login/register (local mode) + Clerk sign-in/up
+│   ├── api/                            #   BFF proxies (forward server-side with auth)
+│   └── components/                     #   TraceTable, TracesExplorer, IO, CalibrationView, MetaAnalysisPanel, …
+│       └── trace-table/format.{ts,test.ts}  # extracted pure helpers + 37 unit tests
+├── scripts/                            # seed_demo.py, run_all_examples.sh, …
+├── .github/
+│   ├── workflows/ci.yml                # real CI: ruff + pytest + frontend test + build + docker images + audit
+│   ├── actions/tracely-gate/           # composite Action for the gate
+│   └── dependabot.yml                  # uv / npm / docker × 2 / github-actions
+├── design/part2-tracely/               # design dossier (00-canonical is authoritative)
+├── DEPLOY.md  ·  DEMO.md  ·  TRACELY_REVIEW.md
 └── docker-compose.yml · Makefile
 ```
 
 ---
 
-> 🛰️ **In one line:** Tracely turns your AI agents' worst production moments into tests that guard every future pull request — observed as conversation threads, auto-detected, grouped into Issues, frozen with one click, and replayed for free (and faithfully) on every PR.
+> 🛰️ **In one line:** Tracely turns your AI agents' worst production moments into tests that guard every future pull request — observed as conversation threads, auto-detected (and **calibrated against humans**), grouped into Issues, frozen with one click, and replayed for free (and faithfully) on every PR with a **judge in the gate**.
 >
-> *The core loop is closed end-to-end; the UI is now LangSmith-grade; user-defined evaluators are the live build. 🟢*
+> *The full closed loop ships — honest gate, visible moat, trustworthy evals. The next frontier is bridging auto-instrument → hermetic replay and surfacing AgentVersion attribution. 🟢*

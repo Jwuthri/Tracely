@@ -5,6 +5,7 @@ Tasks live in tracely.workers.tasks (included via `include`).
 from __future__ import annotations
 
 from celery import Celery
+from celery.schedules import crontab
 
 from tracely.config import settings
 
@@ -29,4 +30,15 @@ celery_app.conf.update(
     # Bound task runtime so a hung task can't pin the (solo) worker forever.
     task_time_limit=30 * 60,  # hard kill at 30m
     task_soft_time_limit=25 * 60,  # SoftTimeLimitExceeded at 25m (lets a task clean up)
+    # Periodic schedule: drive the monitoring engine every 5 minutes. (Celery beat must be running
+    # to actually fire — `celery -A tracely beat`. In local docker we run it alongside the worker
+    # via `celery worker -B`.) Quiet by default; only fires when a monitor condition crosses its
+    # threshold + the dedup interval has elapsed.
+    beat_schedule={
+        "tracely.evaluate_monitors-every-5-min": {
+            "task": "tracely.evaluate_monitors",
+            "schedule": crontab(minute="*/5"),
+        },
+    },
+    timezone="UTC",
 )
