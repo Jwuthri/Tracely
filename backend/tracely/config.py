@@ -55,6 +55,10 @@ class Settings(BaseSettings):
 
     # online evaluation
     eval_latency_budget_ms: int = 60000
+    # Trailing debounce for eval-on-ingest: a trace whose spans arrive in several OTLP batches is
+    # evaluated once, this many seconds after the last batch (not once per batch). See
+    # infrastructure/queue/eval_debounce.py.
+    eval_debounce_seconds: int = 4
     # LLM access — every chat call goes through LangChain `create_agent` against OpenRouter
     # (see infrastructure/llm/provider.py). Model ids are OpenRouter-style `provider/model`.
     openrouter_api_key: str = ""

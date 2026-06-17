@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import structlog
 
+from tracely.config import settings
+from tracely.infrastructure.queue import eval_debounce
 from tracely.infrastructure.queue.celery_app import celery_app
 from tracely.services.evaluation_service import EvaluationService
 from tracely.services.failure_intel_service import FailureIntelService
@@ -19,9 +21,15 @@ log = structlog.get_logger()
 def ingest_otlp_blob(self, project_id: str, key: str, content_type: str) -> dict:
     try:
         result = IngestionService().process_blob(project_id, key, content_type)
-        # Online evaluation: fire (debounced) once per trace so late spans settle first.
+        # Online evaluation: debounce per trace so a run whose spans span several OTLP batches is
+        # evaluated ONCE after it goes quiet — not once per batch (wasted judge spend) and not on a
+        # partial trace. Each batch bumps the trace's generation; the scheduled eval runs only if its
+        # generation is still the latest when it fires (see infrastructure/queue/eval_debounce.py).
         for trace_id in result.get("trace_ids", []):
-            evaluate_run_task.apply_async((project_id, trace_id), countdown=4)
+            gen = eval_debounce.bump(project_id, trace_id)
+            evaluate_run_task.apply_async(
+                (project_id, trace_id, gen), countdown=settings.eval_debounce_seconds
+            )
         return {"events": result.get("events", 0)}
     except Exception as exc:  # transient failures -> retry with backoff
         log.warning("ingest_failed", key=key, error=str(exc))
@@ -29,7 +37,11 @@ def ingest_otlp_blob(self, project_id: str, key: str, content_type: str) -> dict
 
 
 @celery_app.task(name="tracely.evaluate_run", bind=True, max_retries=3, default_retry_delay=3)
-def evaluate_run_task(self, project_id: str, trace_id: str) -> dict:
+def evaluate_run_task(self, project_id: str, trace_id: str, gen: int = 0) -> dict:
+    # Debounce: skip if a newer batch for this trace arrived after we were scheduled — the later
+    # task will evaluate the settled trace. `gen=0` is the ungated sentinel (always runs).
+    if not eval_debounce.is_latest(project_id, trace_id, gen):
+        return {"skipped": "superseded", "trace_id": trace_id}
     try:
         result = EvaluationService().evaluate_trace(project_id, trace_id)
     except Exception as exc:

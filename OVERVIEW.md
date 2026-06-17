@@ -296,7 +296,7 @@ Signature touches: **`[ID]` copy chips** (long ids never shown raw), the **⌘K 
 
 ## ⚠️ Honest limitations
 
-- 🔌 **Auto-instrument agents can record but can't replay** — `instrument="auto"` traces a real agent run perfectly, but hermetic CI replay still requires the manual `call_tool` / `call_llm` seam. Most provider examples (`auto_openai`, `auto_anthropic`, …) demonstrate Tracely's signature feature but produce traces the gate can't replay. **The biggest thesis honesty gap** — closing it bridges the record→replay seam without a code rewrite.
+- 🔌 **Replay bridge covers tools, not yet the auto-instrumented LLM call.** `@observe(as_type="tool")`-decorated tools are now **transparently hermetic**: under `with tracely.fixtures(bundle):` the decorator serves the recorded output (or raises `ToolError`) instead of running — no `call_tool` rewrite. So an agent that decorates its tools (e.g. via `observed_tools()`) replays its tool side deterministically. **Still open:** the LLM call in a pure `instrument="auto"` agent is monkeypatch-*observed*, not intercepted, so it hits the real model in replay — use `call_llm` or the `wrap_openai`/`wrap_anthropic` drop-in for a fully-hermetic LLM side.
 - ⏱️ **Latency/cost ≈ 0 in hermetic replay** — the soft delta gates are most meaningful for live cases / instrumented token usage; in pure replay the comparison is informational.
 - 📊 **Version attribution scaffolding is unsurfaced** — `agent_versions` is content-hashed and `EvaluationCase.agent_version_first_failed` is set at promote, but no UI shows "v12 introduced this regression". Cheap follow-up, real moat.
 - 🛟 **Backups need an operator action** — Postgres + ClickHouse snapshots are a one-click toggle in your provider's UI (see [`DEPLOY.md`](DEPLOY.md)); nothing in Tracely takes them for you.
@@ -308,7 +308,7 @@ Signature touches: **`[ID]` copy chips** (long ids never shown raw), the **⌘K 
 The strategic plan ("honest gate, visible moat, trustworthy evals") shipped — gate honesty + judge-in-gate + calibration are live. The remaining moves:
 
 **Near-term**
-1. **Bridge auto-instrument → hermetic replay** — make a tool decorated with `@observe(as_type="tool")` consult `tracely.fixtures()` automatically, so any `auto_*` example becomes replayable by the gate without a code rewrite (the largest thesis honesty gap today).
+1. **Finish the replay bridge on the LLM side** — the tool side is done (`@observe(as_type="tool")` now consults `tracely.fixtures()` transparently). Next: make the `wrap_openai`/`wrap_anthropic` drop-in clients serve recorded completions in replay, so a drop-in agent is fully hermetic end-to-end.
 2. **Surface agent-version attribution** — the scaffolding exists; show "v12 (prompt edit, git a1b2c3) introduced cluster #4" on case + cluster pages.
 3. **SDK auth-aware ingest in prod** — first-party Clerk org → ingest key bootstrap so SaaS users don't have to provision keys by hand.
 

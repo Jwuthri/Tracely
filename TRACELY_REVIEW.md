@@ -152,13 +152,13 @@ Resolved: ~~no CI~~ (§0a #6); ~~fake healthcheck~~ (§0a #5); ~~no `acks_late`~
 
 ### P0 — data-loss / false-confidence (ops + code)
 - [ ] **Back up Postgres + MinIO + ClickHouse** (volume snapshots + scheduled `pg_dump`/`clickhouse-backup`). Highest-leverage infra fix.
-- [ ] **Don't ship `AUTH_MODE=dev` + the well-known `tracely_dev_key` to prod** — fail fast (or rotate) when env is prod.
+- [x] **Don't ship `AUTH_MODE=dev` + the well-known `tracely_dev_key` to prod** — fail fast (or rotate) when env is prod. *(done: `config._validate_auth` rejects prod+dev; `main._refuse_dev_key_in_prod` refuses boot when the seed key is still a live IngestKey; seeding skips the dev key in prod.)*
 
 ### P1 — make it operable / true
 - [ ] **Bridge auto-instrument → hermetic replay** (fixture-serving shim) *or* document the manual-seam requirement + migration recipe. *(Biggest honesty gap left in the thesis.)*
 - [ ] **Scale the worker off `--pool=solo`** + split queues + add a dead-letter path; Redis persistence/eviction policy.
 - [ ] **Self-observability:** Sentry (FastAPI + Celery), basic metrics, Flower.
-- [ ] **Replace the blind `countdown=4`** eval-on-ingest with a trace-complete signal (debounce on last-span-seen).
+- [x] **Replace the blind `countdown=4`** eval-on-ingest with a trace-complete signal (debounce on last-span-seen). *(done: per-trace generation counter in Redis — `infrastructure/queue/eval_debounce.py`; each OTLP batch bumps the gen + schedules the eval tagged with it, and a scheduled eval runs only if its gen is still latest, so a multi-batch run is evaluated once after it goes quiet. Idempotent + fail-open. `eval_debounce_seconds` setting; `test_eval_debounce.py`.)*
 - [ ] **`OPTIMIZE FINAL` schedule** to complement the new TTL.
 - [ ] **Eval $/1k-traces surface** + a duplicate-call cache keyed on `(score_name, model, prompt_hash, content_hash)`; populate `execution_trace_id`.
 

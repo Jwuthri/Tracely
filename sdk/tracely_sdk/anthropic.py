@@ -56,10 +56,21 @@ def _capture(span: Any, resp: Any) -> None:
         pass
 
 
+def _input_with_system(kwargs: dict) -> Any:
+    """Anthropic carries the system prompt as a separate `system=` kwarg, not in `messages`. Fold it
+    in as a leading system message so the captured input reads as a full conversation (system + the
+    user/assistant turns) like the OpenAI shape — otherwise the system prompt is invisible in the UI."""
+    msgs = kwargs.get("messages")
+    system = kwargs.get("system")
+    if system and isinstance(msgs, list):
+        return [{"role": "system", "content": system}, *msgs]
+    return msgs
+
+
 def wrap_anthropic(client: Any) -> Any:
     """Trace an Anthropic/AsyncAnthropic client *instance* by wrapping its `messages.create` on the
     instance only (no global patching). Returns the same client. Idempotent."""
-    wrap_method(client.messages, "create", _capture)
+    wrap_method(client.messages, "create", _capture, input_extractor=_input_with_system)
     return client
 
 

@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type SVGProps } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { ConvNode, EvalScore, FullTurn, SpanOut, ThreadTurn } from "../lib/api";
 import { convUsage, fmtUsd, spanUsage, turnUsage, usageSummary } from "../lib/usage";
@@ -45,6 +45,35 @@ import {
   sortSpans,
   toMsg,
 } from "./trace-table/format";
+import {
+  type Col,
+  COLUMNS,
+  CTRL,
+  type Group,
+  HEAD_TH,
+  KNOWN_SPAN_TYPES,
+  LEVEL_BADGE,
+  METRIC_TINTS,
+  type MetricTint,
+  PREFS_KEY,
+  ROW_BG,
+} from "./trace-table/columns";
+import {
+  Bot,
+  ChatGlyph,
+  ChevronR,
+  ChevronsUpDown,
+  DotsIcon,
+  ExternalLink,
+  Eye,
+  FileIcon,
+  FilterIcon,
+  ImageIcon,
+  Play,
+  PlusIcon,
+  svg,
+  TextGlyph,
+} from "./trace-table/icons";
 import { normalizeType, TypeChip } from "./ui";
 
 // ── A TurnWise-style hierarchical spreadsheet over Tracely's real tree ─────────
@@ -55,144 +84,9 @@ import { normalizeType, TypeChip } from "./ui";
 //   • "detail" — full tree seeded (turnsData populated); everything pre-open.
 
 // ── lucide-style icons ─────────────────────────────────────────────────────────
-const svg = (p: SVGProps<SVGSVGElement>) => ({
-  xmlns: "http://www.w3.org/2000/svg",
-  viewBox: "0 0 24 24",
-  fill: "none",
-  stroke: "currentColor",
-  strokeWidth: 2,
-  strokeLinecap: "round" as const,
-  strokeLinejoin: "round" as const,
-  ...p,
-});
-const ChevronR = (p: SVGProps<SVGSVGElement>) => <svg {...svg(p)}><path d="m9 18 6-6-6-6" /></svg>;
-const Play = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...svg(p)}><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" /></svg>
-);
-const Bot = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...svg(p)}>
-    <path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" />
-    <path d="M2 14h2" /><path d="M20 14h2" /><path d="M15 13v2" /><path d="M9 13v2" />
-  </svg>
-);
-const ChevronsUpDown = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...svg(p)}><path d="m7 15 5 5 5-5" /><path d="m7 9 5-5 5 5" /></svg>
-);
-const Eye = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...svg(p)}>
-    <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
-    <circle cx="12" cy="12" r="3" />
-  </svg>
-);
-const ImageIcon = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...svg(p)}><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /></svg>
-);
-const FileIcon = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...svg(p)}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
-);
-const FilterIcon = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...svg(p)}><path d="M22 3H2l8 9.46V19l4 2v-8.54z" /></svg>
-);
-const PlusIcon = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...svg(p)}><path d="M5 12h14" /><path d="M12 5v14" /></svg>
-);
-const DotsIcon = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...svg(p)}><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>
-);
+// Icons + the shared `svg()` helper live in ./trace-table/icons.tsx (imported above).
 
-// ── columns ───────────────────────────────────────────────────────────────────
-type Group = "C" | "M" | "S";
-// `evaluator` marks a dynamic metric column (one per evaluator row, keyed by score_name);
-// `tint` is its full-column color wash (header + body) so adjacent metrics read as
-// distinct columns instead of one wide band.
-type MetricTint = { th: string; td: string };
-type Col = {
-  key: string;
-  label: string;
-  group: Group;
-  width: number;
-  evaluator?: EvaluatorDef;
-  tint?: MetricTint;
-};
-
-// Cycled per metric column, TurnWise-style. Literal class strings (Tailwind JIT needs to see
-// them in source); header gets the stronger wash, body cells a subtle one.
-const METRIC_TINTS: MetricTint[] = [
-  { th: "bg-emerald-500/15", td: "bg-emerald-500/[0.06]" },
-  { th: "bg-rose-500/15", td: "bg-rose-500/[0.06]" },
-  { th: "bg-sky-500/15", td: "bg-sky-500/[0.06]" },
-  { th: "bg-violet-500/15", td: "bg-violet-500/[0.06]" },
-  { th: "bg-amber-500/15", td: "bg-amber-500/[0.06]" },
-  { th: "bg-teal-500/15", td: "bg-teal-500/[0.06]" },
-  { th: "bg-fuchsia-500/15", td: "bg-fuchsia-500/[0.06]" },
-  { th: "bg-indigo-500/15", td: "bg-indigo-500/[0.06]" },
-];
-
-const COLUMNS: Col[] = [
-  { key: "conversation", label: "Conversation", group: "C", width: 260 },
-  { key: "ctime",        label: "Datetime",     group: "C", width: 160 },
-  { key: "cdur",         label: "Duration",     group: "C", width: 96 },
-  { key: "crsummary", label: "Rolling summary", group: "C", width: 280 },
-  { key: "cmeta", label: "Metadata", group: "C", width: 200 },
-  { key: "cusage", label: "Usage", group: "C", width: 180 },
-  { key: "role", label: "Role", group: "M", width: 110 },
-  { key: "mindex", label: "#", group: "M", width: 56 },
-  { key: "mtime", label: "Datetime", group: "M", width: 160 },
-  { key: "mdur",  label: "Duration", group: "M", width: 96 },
-  { key: "content", label: "Content", group: "M", width: 420 },
-  { key: "mrsummary", label: "Rolling summary", group: "M", width: 240 },
-  { key: "musage", label: "Usage", group: "M", width: 180 },
-  { key: "sindex", label: "#", group: "S", width: 56 },
-  { key: "type", label: "Type", group: "S", width: 120 },
-  { key: "stime", label: "Datetime", group: "S", width: 160 },
-  { key: "sdur", label: "Duration", group: "S", width: 96 },
-  { key: "agent", label: "Agent", group: "S", width: 120 },
-  { key: "model", label: "Model", group: "S", width: 120 },
-  { key: "name", label: "Name", group: "S", width: 170 },
-  { key: "input", label: "Input", group: "S", width: 240 },
-  { key: "output", label: "Output", group: "S", width: 240 },
-  { key: "srsummary", label: "Rolling summary", group: "S", width: 240 },
-  { key: "susage", label: "Usage", group: "S", width: 180 },
-];
-
-const LEVEL_BADGE: Record<Group, string> = {
-  C: "bg-blue-500/20 text-blue-400",
-  M: "bg-green-500/20 text-green-400",
-  S: "bg-purple-500/20 text-purple-400",
-};
-const ROW_BG: Record<number, string> = {
-  0: "bg-slate-800/50 border-l-blue-500",
-  1: "bg-slate-800/30 border-l-green-500",
-  2: "bg-slate-800/10 border-l-purple-500",
-};
-
-const CTRL = { width: 40, minWidth: 20 };
-const HEAD_TH =
-  "text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-2 sm:px-3 py-3 first:pl-2 sm:first:pl-4 whitespace-nowrap";
-
-// Persisted view preferences (hidden columns). The full-width toggle lives in ../lib/useWide so the
-// Timeline + Evaluations tabs share one Enlarge/Concise control with the table.
-const PREFS_KEY = "tracely.traceTable.prefs";
-
-// Canonical span types — mirrors backend/tracely/otel/mapping.py:_KNOWN_TYPES (+ SUBAGENT from the
-// TypeChip map). The Types filter menu always lists these so the preference is truly global —
-// otherwise the menu changes per trace and users can't pre-hide CHAIN/THINKING on traces that
-// haven't been opened yet. Ordered most-useful-to-filter first; unknown types found in data are
-// appended.
-const KNOWN_SPAN_TYPES = [
-  "AGENT",
-  "SUBAGENT",
-  "GENERATION",
-  "TOOL",
-  "THINKING",
-  "CHAIN",
-  "RETRIEVER",
-  "EMBEDDING",
-  "GUARDRAIL",
-  "EVALUATOR",
-  "EVENT",
-  "SPAN",
-] as const;
+// Column shape + constants + KNOWN_SPAN_TYPES live in ./trace-table/columns.ts (imported above).
 
 // ── format helpers ──────────────────────────────────────────────────────────────
 // usage / cost derivation (spanUsage / turnUsage / convUsage / usageSummary / fmtUsd) lives in
@@ -201,10 +95,6 @@ const KNOWN_SPAN_TYPES = [
 // ── JSON detail popover (portal — escapes the table's overflow) ──────────────────
 // Shared syntax highlighter (also used by the timeline span panel + attributes list).
 const HJson = HighlightedJson;
-
-const ChatGlyph = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...svg(p)}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-);
 
 // Formatted Tokens / Cost breakdown for the usage popover (nicer than raw JSON).
 function UsageBody({ usage }: { usage: Record<string, number> }) {
@@ -288,10 +178,6 @@ function classifyBlock(b: unknown): Part {
   }
   return { kind: "json", data: b };
 }
-
-const ExternalLink = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...svg(p)}><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>
-);
 
 // A compact attachment chip. Deliberately lightweight — it shows an icon + name and NEVER loads
 // the full image inline (a table can hold many of these). When the block carries a url/path the
@@ -519,11 +405,6 @@ function ChatPill({ msgs }: { msgs: ChatMsg[] }) {
     />
   );
 }
-
-// A small "lines of text" glyph for the plain-text pill.
-const TextGlyph = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...svg(p)}><path d="M4 6h16M4 12h16M4 18h10" /></svg>
-);
 
 // Plain step content that's neither chat nor structured JSON — e.g. an @observe THINKING step whose
 // I/O is a bare string or a {question}/{prompt} dict. Rendered as a compact pill (matching the chat

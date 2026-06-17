@@ -541,8 +541,9 @@ def trace(
 # ── @observe (L2) ────────────────────────────────────────────────────────────
 
 
-def _capture_args(span: Span, func: Callable, a: tuple, k: dict) -> None:
-    """Bind call args to parameter names → `tracely.input` (best effort; drops self/cls)."""
+def _capture_args(span: Span, func: Callable, a: tuple, k: dict) -> dict:
+    """Bind call args to parameter names → `tracely.input` (best effort; drops self/cls). Returns the
+    bound dict so the caller can reuse it (e.g. fixture arg-matching in hermetic replay)."""
     try:
         bound = inspect.signature(func).bind(*a, **k)
         bound.apply_defaults()
@@ -553,6 +554,29 @@ def _capture_args(span: Span, func: Callable, a: tuple, k: dict) -> None:
         args = {"args": list(a), **({"kwargs": k} if k else {})}
     if args:
         set_io(span, input=args)
+    return args
+
+
+def _replay_observed_tool(span: Span, name: str, args: Any) -> tuple[bool, Any]:
+    """The hermetic-replay bridge for `@observe(as_type="tool")` — the decorator twin of `call_tool`.
+
+    In a `with fixtures(bundle):` block, serve the next recorded entry for this tool instead of
+    running it: stamp `tracely.replay.fixture`, set the recorded output, and (if the production call
+    errored) mark the span ERROR + raise `ToolError` so the agent's own error handling runs. Returns
+    `(handled, output)` — `handled=False` means "no fixture active / none recorded for this tool",
+    so the caller runs the real function (this is a strict no-op in production, where `_fixtures` is
+    unset). This is what lets an auto-instrumented agent whose tools are merely `@observe`-decorated
+    replay deterministically in CI, with no `call_tool` rewrite."""
+    entry = _pop_fixture("tools", name, args)
+    if entry is None:
+        return False, None
+    span.set_attribute("tracely.replay.fixture", True)
+    if entry.get("output") is not None:
+        set_io(span, output=entry.get("output"))
+    if entry.get("error"):
+        error(span, str(entry["error"]))
+        raise ToolError(str(entry["error"]))
+    return True, entry.get("output")
 
 
 def observe(
@@ -576,8 +600,11 @@ def observe(
         def sync_wrapper(*a: Any, **k: Any) -> Any:
             with _t().start_as_current_span(span_name) as span:
                 span.set_attribute("tracely.observation.type", otype)
-                if capture_input:
-                    _capture_args(span, func, a, k)
+                bound = _capture_args(span, func, a, k) if capture_input else None
+                if otype == "TOOL":  # hermetic-replay bridge: serve a fixture instead of running
+                    handled, replayed = _replay_observed_tool(span, span_name, bound)
+                    if handled:
+                        return replayed
                 try:
                     out = func(*a, **k)
                 except Exception as e:
@@ -591,8 +618,11 @@ def observe(
         async def async_wrapper(*a: Any, **k: Any) -> Any:
             with _t().start_as_current_span(span_name) as span:
                 span.set_attribute("tracely.observation.type", otype)
-                if capture_input:
-                    _capture_args(span, func, a, k)
+                bound = _capture_args(span, func, a, k) if capture_input else None
+                if otype == "TOOL":  # hermetic-replay bridge: serve a fixture instead of running
+                    handled, replayed = _replay_observed_tool(span, span_name, bound)
+                    if handled:
+                        return replayed
                 try:
                     out = await func(*a, **k)
                 except Exception as e:

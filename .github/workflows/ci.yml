@@ -32,7 +32,7 @@ jobs:
       - name: Lint (ruff check)
         run: uv run ruff check .
       - name: Test (pytest)
-        run: uv run pytest -q backend/tests
+        run: uv run pytest -q backend/tests sdk/tests
 
   frontend:
     name: frontend · next build
