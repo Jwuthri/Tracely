@@ -35,6 +35,7 @@ import logging
 import re
 import threading
 from contextlib import contextmanager
+from types import SimpleNamespace
 from contextvars import ContextVar, copy_context
 from typing import Any, Callable, Iterator
 
@@ -919,8 +920,14 @@ def _normalize_bundle(bundle: dict | None) -> dict:
         section = bundle.get(kind)
         if isinstance(section, list):  # v2: ordered list of entries
             for e in section:
+                # LLM entries persist the call input under "input" (tool entries use "args");
+                # normalize both to "args" so _pop_fixture's arg-matching works for either kind.
                 store[kind].setdefault(e.get(key_field), []).append(
-                    {"args": e.get("args"), "output": e.get("output"), "error": e.get("error")}
+                    {
+                        "args": e.get("args") if kind == "tools" else e.get("input", e.get("args")),
+                        "output": e.get("output"),
+                        "error": e.get("error"),
+                    }
                 )
         elif isinstance(section, dict):  # v1: {name: output}
             for k, v in section.items():
@@ -930,10 +937,15 @@ def _normalize_bundle(bundle: dict | None) -> dict:
 
 @contextmanager
 def fixtures(bundle: dict | None) -> Iterator[None]:
-    """Serve recorded outputs to call_tool/call_llm for the duration of this block. Entries are
-    consumed in order (so N calls to a tool replay the N recorded outputs); pass None to leave
-    calls live."""
-    token = _fixtures.set(_normalize_bundle(bundle) if bundle else None)
+    """Serve recorded outputs for the duration of this block. Covers all three execution paths:
+    the manual seams (call_tool/call_llm), `@observe(as_type="tool")`, and — via provider-client
+    patching installed here — the auto-instrument / drop-in path (code that calls the provider SDK
+    directly). Entries are consumed in order (so N calls replay the N recorded outputs); pass None
+    to leave calls live."""
+    normalized = _normalize_bundle(bundle) if bundle else None
+    if normalized:
+        _install_replay_patches()  # idempotent; only patches importable providers
+    token = _fixtures.set(normalized)
     try:
         yield
     finally:
@@ -1019,3 +1031,215 @@ def call_llm(
             error(span, str(entry["error"]))
             raise ToolError(str(entry["error"]))
         return entry.get("output")
+
+
+# ── auto-instrument / drop-in hermetic replay (provider-client patching) ───────
+# call_tool/call_llm/@observe serve fixtures explicitly. But code that uses the auto-instrumentors
+# (instrument="auto") or the drop-in client wrappers calls the provider SDK directly, with no Tracely
+# seam to short-circuit — so to replay THAT hermetically we patch the provider's create-method at the
+# class level. Inside a fixtures() block the patch opens a GENERATION span, serves the recorded
+# completion (reconstructed into a provider-shaped object) and never touches the network; outside
+# replay it calls straight through (inert). Installed once on the first fixtures() enter; never torn
+# down (the patch is a no-op when not replaying). If the auto-instrumentor already wrapped the same
+# method, ours is the outer layer and short-circuits before its wrapper runs — so a served call makes
+# neither a real request nor a duplicate span.
+#
+# ponytail: covers OpenAI chat.completions + Anthropic messages (the two dominant paths). Other
+# providers slot into _REPLAY_PROVIDERS with a reconstruct fn — add one when a customer replays it.
+
+
+def _pop_fixture_any(kind: str) -> dict | None:
+    """Pop the next recorded entry of `kind` regardless of key — the order-matched fallback for when
+    the recorded span name doesn't equal the live model id (auto-instrumentor span names vary)."""
+    store = _fixtures.get()
+    if not store:
+        return None
+    for queue in store.get(kind, {}).values():
+        if queue:
+            return queue.pop(0)
+    return None
+
+
+def _assistant_message(output: Any) -> dict:
+    """Resolve a recorded GENERATION output to the assistant message dict, across the shapes the
+    record paths + backend normalization produce: a JSON string, a single message dict (optionally
+    nested under "message"), or a list of messages (last dict wins). Plain text → {"content": text}."""
+    data = output
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except (ValueError, TypeError):
+            return {"content": data}  # plain-text completion
+    if isinstance(data, list):
+        data = next((m for m in reversed(data) if isinstance(m, dict)), {}) or {}
+    if isinstance(data, dict):
+        return data["message"] if isinstance(data.get("message"), dict) else data
+    return {"content": data}
+
+
+def _extract_completion(output: Any) -> tuple[Any, list]:
+    """(content, tool_calls) for the OpenAI-canonical shape — content is a string, tool_calls the
+    `[{id,type,function:{name,arguments}}]` list the backend reassembles every provider into."""
+    msg = _assistant_message(output)
+    return msg.get("content"), (msg.get("tool_calls") or [])
+
+
+def _reconstruct_openai_chat(output: Any) -> Any:
+    """Rebuild a duck-typed ChatCompletion from a recorded completion — enough for the dominant
+    access pattern (`resp.choices[0].message.content` / `.tool_calls`). Not the real pydantic model;
+    fields agents rarely read on replay (id/created/usage/system_fingerprint) are omitted."""
+    content, raw_tcs = _extract_completion(output)
+    tool_calls = [
+        SimpleNamespace(
+            id=tc.get("id", ""),
+            type=tc.get("type", "function"),
+            function=SimpleNamespace(**(tc.get("function") or {})),
+        )
+        for tc in raw_tcs
+        if isinstance(tc, dict)
+    ] or None
+    message = SimpleNamespace(role="assistant", content=content, tool_calls=tool_calls)
+    choice = SimpleNamespace(index=0, message=message, finish_reason="stop")
+    return SimpleNamespace(choices=[choice], usage=None)
+
+
+def _maybe_json(v: Any) -> Any:
+    """Parse a JSON string to its value (tool args are a JSON string in the OpenAI-canonical shape
+    but a dict in Anthropic's native one); pass non-strings / non-JSON through unchanged."""
+    if isinstance(v, str):
+        try:
+            return json.loads(v)
+        except (ValueError, TypeError):
+            return v
+    return v
+
+
+def _reconstruct_anthropic(output: Any) -> Any:
+    """Rebuild a duck-typed Anthropic Message — enough for the dominant access pattern (iterate
+    `resp.content` blocks: `.type`/`.text` for text, `.id`/`.name`/`.input` for tool_use). Handles
+    both recorded shapes: native content blocks (the drop-in) and the canonical content-string +
+    tool_calls (auto-instrument, after backend normalization)."""
+    msg = _assistant_message(output)
+    content = msg.get("content")
+    blocks: list[Any] = []
+    if isinstance(content, list):  # native Anthropic blocks
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use":
+                blocks.append(
+                    SimpleNamespace(type="tool_use", id=b.get("id", ""), name=b.get("name", ""), input=b.get("input"))
+                )
+            else:
+                blocks.append(SimpleNamespace(type="text", text=b.get("text", "")))
+    else:  # canonical: a content string (+ OpenAI-style tool_calls → tool_use blocks)
+        if content:
+            blocks.append(SimpleNamespace(type="text", text=content))
+        for tc in msg.get("tool_calls") or []:
+            fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
+            blocks.append(
+                SimpleNamespace(
+                    type="tool_use",
+                    id=tc.get("id", "") if isinstance(tc, dict) else "",
+                    name=fn.get("name", ""),
+                    input=_maybe_json(fn.get("arguments")),
+                )
+            )
+    return SimpleNamespace(content=blocks, stop_reason=msg.get("stop_reason"), usage=None)
+
+
+def _patch_class_method(
+    cls: Any,
+    name: str,
+    *,
+    model_key: str,
+    input_extractor: Callable[[dict], Any],
+    reconstruct: Callable[[Any], Any],
+) -> None:
+    """Class-level wrap of a provider create-method: serve a fixture in replay, else call through.
+    Idempotent (sentinel-guarded); handles sync + async create methods."""
+    original = getattr(cls, name)
+    if getattr(original, "_tracely_replay", False):
+        return
+
+    def _serve(model: str, kwargs: dict) -> tuple[bool, Any]:
+        """(handled, result). handled=False → caller runs the real method (not replaying, or a
+        replay miss — better a loud live failure than a silent wrong-green)."""
+        store = _fixtures.get()
+        if not store:
+            return False, None
+        inp = input_extractor(kwargs)
+        entry = _pop_fixture("llm", model, inp) or _pop_fixture_any("llm")
+        if entry is None:
+            return False, None
+        with llm(model or "") as span:
+            if inp is not None:
+                set_io(span, input=inp)
+            span.set_attribute("tracely.replay.fixture", True)
+            if entry.get("error"):
+                error(span, str(entry["error"]))
+                raise ToolError(str(entry["error"]))
+            out = entry.get("output")
+            set_io(span, output=out)
+        return True, reconstruct(out)
+
+    # Async-detection sees through functools.wraps chains (OpenAI decorates create with
+    # @required_args + others — iscoroutinefunction on the outer layer returns False even when the
+    # underlying method is async). Without unwrap, the async branch installs the sync wrapper and an
+    # `await` on the SimpleNamespace blows up.
+    is_async = inspect.iscoroutinefunction(inspect.unwrap(original))
+    if is_async:
+
+        @functools.wraps(original)
+        async def traced(self: Any, *a: Any, **k: Any) -> Any:
+            handled, result = _serve(k.get(model_key, "") or "", k)
+            return result if handled else await original(self, *a, **k)
+    else:
+
+        @functools.wraps(original)
+        def traced(self: Any, *a: Any, **k: Any) -> Any:
+            handled, result = _serve(k.get(model_key, "") or "", k)
+            return result if handled else original(self, *a, **k)
+
+    traced._tracely_replay = True  # type: ignore[attr-defined]
+    setattr(cls, name, traced)
+
+
+def _patch_openai_replay() -> None:
+    from openai.resources.chat.completions import AsyncCompletions, Completions
+
+    for cls in (Completions, AsyncCompletions):
+        _patch_class_method(
+            cls,
+            "create",
+            model_key="model",
+            input_extractor=lambda kw: kw.get("messages"),
+            reconstruct=_reconstruct_openai_chat,
+        )
+
+
+def _patch_anthropic_replay() -> None:
+    from anthropic.resources.messages import AsyncMessages, Messages
+
+    def _inp(kw: dict) -> Any:  # fold the separate system= kwarg in, like the drop-in capture
+        msgs, system = kw.get("messages"), kw.get("system")
+        return [{"role": "system", "content": system}, *msgs] if system and isinstance(msgs, list) else msgs
+
+    for cls in (Messages, AsyncMessages):
+        _patch_class_method(
+            cls, "create", model_key="model", input_extractor=_inp, reconstruct=_reconstruct_anthropic
+        )
+
+
+_REPLAY_PROVIDERS: list[Callable[[], None]] = [_patch_openai_replay, _patch_anthropic_replay]
+
+
+def _install_replay_patches() -> None:
+    """Patch importable providers' create-methods for hermetic replay. Idempotent; called on every
+    fixtures() enter. A provider that isn't installed (or whose API moved) is skipped — it just
+    stays live in replay rather than breaking the others."""
+    for installer in _REPLAY_PROVIDERS:
+        try:
+            installer()
+        except Exception:  # noqa: BLE001 — provider absent / API drift; degrade to live for it
+            pass

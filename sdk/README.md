@@ -120,6 +120,8 @@ def run(user_input: str):
 - **Production (`--live` or no fixtures active):** `call_tool`/`call_llm` invoke your `fn`, record the output (and any error) on the span, and return it.
 - **CI replay:** `tracely replay` activates the case's recorded **fixture bundle** via `with tracely.fixtures(bundle): ...`; `call_tool`/`call_llm` then **serve the recorded outputs in order** (or by `args` match) and never call your `fn`. A call that errored in production is reproduced on the span **and raised as `tracely.ToolError`**, so the agent's own `try/except` runs exactly as it would live — and the gate sees the same failure condition.
 
+**Auto-instrument / drop-in code replays too** (no manual seam required): inside a `fixtures()` block Tracely class-patches the provider's create-method, so code that calls the SDK directly — `client.chat.completions.create(...)` under `instrument="auto"` or the `tracely_sdk.openai` drop-in — is served the recorded completion (reconstructed into a provider-shaped response) and never hits the network. Covered today: **OpenAI `chat.completions`** and **Anthropic `messages`**; other providers fall back to live in replay until added. The manual `call_llm` seam remains the way to get provider-agnostic hermetic replay everywhere.
+
 This is what makes replay deterministic, offline, and free (no API keys, no cost). See [regression-testing design](../design/part2-tracely/05-regression-testing.md).
 
 ---
