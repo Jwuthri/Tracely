@@ -1,7 +1,7 @@
 # Production Next.js build for Railway (the default frontend/Dockerfile runs `next dev` for local compose).
 # Build context = repo ROOT (so the root .dockerignore excludes frontend/node_modules + frontend/.next).
 # Point the Railway service's Dockerfile path at "frontend/Dockerfile.railway".
-FROM node:22-slim
+FROM node:26-slim
 
 RUN npm install -g pnpm@9
 WORKDIR /app/frontend

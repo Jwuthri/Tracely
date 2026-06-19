@@ -1,4 +1,4 @@
-FROM node:22-slim
+FROM node:26-slim
 
 # install pnpm directly (avoids corepack/node version mismatches)
 RUN npm install -g pnpm@9
