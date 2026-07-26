@@ -72,8 +72,10 @@ class IngestionService:
         """Attribute agent-less spans to a fallback agent so agent-scoped features (failure
         clusters, CI gates) still apply to plain LLM calls. Within a trace, an empty-agent span
         inherits the trace's agent (its app-root's, else any sibling's); only a trace with no
-        agent anywhere gets the configured default. `tracely.agent.id` is mirrored into
-        metadata so the UI shows the slug."""
+        agent anywhere gets the configured default. The slug is mirrored into metadata so the UI
+        shows it — under `tracely.agent.id.inherited`, NOT `tracely.agent.id`: an inherited slug
+        must stay distinguishable from one the span declared, or the Agent column can't tell a
+        real per-agent attribution from a trace-wide back-fill."""
         default_slug = settings.default_agent_slug
         if not default_slug:
             return
@@ -90,7 +92,7 @@ class IngestionService:
             for e in evs:
                 if not e.get("agent_slug"):
                     e["agent_slug"] = trace_agent
-                    e.setdefault("metadata", {})["tracely.agent.id"] = trace_agent
+                    e.setdefault("metadata", {})["tracely.agent.id.inherited"] = trace_agent
 
     @staticmethod
     def _extract_agent_definitions(project_id: str, events: list[dict]) -> None:

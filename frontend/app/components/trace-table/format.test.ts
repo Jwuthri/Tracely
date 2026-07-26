@@ -219,4 +219,26 @@ describe("nearestAgentLabel", () => {
     const a = span({ type: "AGENT", name: "billing-agent" });
     expect(nearestAgentLabel(a, [a])).toBe("billing-agent");
   });
+  it("prefers a declared slug over a framework hop name", () => {
+    // LangGraph names every handoff `agent_teams.delegate`; the specialist is in the slug.
+    const all = [
+      span({ span_id: "d", type: "AGENT", name: "agent_teams.delegate", metadata: { "tracely.agent.id": "collections" } }),
+      span({ span_id: "gen", parent_span_id: "d", type: "GENERATION" }),
+    ];
+    expect(nearestAgentLabel(all[0], all)).toBe("collections");
+    expect(nearestAgentLabel(all[1], all)).toBe("collections");
+  });
+  it("trusts a declared slug over the ancestor chain", () => {
+    // The instrumentor parents a sub-agent's spans by the framework run tree, so they can hang off
+    // the trace root while the delegate that entered them is a sibling. The slug is the truth.
+    const all = [
+      span({ span_id: "turn", type: "AGENT", name: "agent_teams.turn", metadata: { "tracely.agent.id": "support-team" } }),
+      span({ span_id: "gen", parent_span_id: "turn", type: "GENERATION", metadata: { "tracely.agent.id": "collections" } }),
+    ];
+    expect(nearestAgentLabel(all[1], all)).toBe("collections");
+  });
+  it("ignores an inherited slug — it describes the trace, not the span", () => {
+    const a = span({ type: "AGENT", name: "support-agent", metadata: { "tracely.agent.id.inherited": "default" } });
+    expect(nearestAgentLabel(a, [a])).toBe("support-agent");
+  });
 });

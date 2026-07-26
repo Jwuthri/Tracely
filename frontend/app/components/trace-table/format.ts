@@ -110,24 +110,42 @@ export function sortSpans(spans: SpanOut[]): SpanOut[] {
   return [...spans].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
 }
 
-// agent_id is a resolved registry UUID; the human slug is kept in metadata.
-export function agentLabel(span: SpanOut): string {
-  return span.metadata?.["tracely.agent.id"] || span.agent_id || "";
+// agent_id is a resolved registry UUID; the human slug is kept in metadata. `.inherited` is the
+// trace-wide slug ingest back-fills onto agent-less spans — fine to display, but it says nothing
+// about THIS span, so it never outranks a declared slug or the span's own name.
+function ownAgentSlug(span: SpanOut): string {
+  return span.metadata?.["tracely.agent.id"] || "";
 }
 
-// The Agent column should reflect the nearest enclosing AGENT — so under "Agent workflow" (the
-// OpenAI Agents SDK's outer wrapper) the column reads "Agent workflow", and only switches to
-// "support-agent" once we enter that sub-agent's subtree. Falls back to the trace's agent_id when
-// no AGENT ancestor exists.
+export function agentLabel(span: SpanOut): string {
+  return ownAgentSlug(span) || span.metadata?.["tracely.agent.id.inherited"] || span.agent_id || "";
+}
+
+// A declared slug is authoritative — it is the only signal that describes THIS span. The tree can't
+// be trusted for attribution: auto-instrumentors parent their spans by the framework's own run tree
+// rather than the active OTel context, so a sub-agent's model calls routinely hang off the trace
+// root while the handoff span that entered them sits on a sibling branch (LangGraph delegates do
+// exactly this). Walking ancestors first would relabel every one of those as the outer agent.
+//
+// Only when a span declares nothing do we walk: the nearest enclosing AGENT is the best guess, so
+// under "Agent workflow" (the OpenAI Agents SDK's outer wrapper) the column reads "Agent workflow"
+// and switches to "support-agent" inside that sub-agent's subtree. Falls back to the trace's
+// agent_id when no AGENT ancestor exists.
+function agentSpanLabel(span: SpanOut): string {
+  return ownAgentSlug(span) || span.name || agentLabel(span);
+}
+
 export function nearestAgentLabel(span: SpanOut, allSpans: SpanOut[]): string {
-  if (span.type === "AGENT") return span.name || agentLabel(span);
+  const own = ownAgentSlug(span);
+  if (own) return own;
+  if (span.type === "AGENT") return agentSpanLabel(span);
   const byId = new Map(allSpans.map((s) => [s.span_id, s]));
   let cur: SpanOut | undefined = span;
   // safety: cap the walk at the tree's depth
   for (let i = 0; i < 64 && cur; i++) {
     const parent: SpanOut | undefined = cur.parent_span_id ? byId.get(cur.parent_span_id) : undefined;
     if (!parent) break;
-    if (parent.type === "AGENT") return parent.name || agentLabel(parent);
+    if (parent.type === "AGENT") return agentSpanLabel(parent);
     cur = parent;
   }
   return agentLabel(span);

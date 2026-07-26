@@ -115,6 +115,8 @@ class TracelyContextSpanProcessor(SpanProcessor):
             span.set_attribute("session.id", str(ctx["conversation"]))
         if ctx.get("turn") is not None:
             span.set_attribute("tracely.turn.index", int(ctx["turn"]))
+        if ctx.get("turn_id"):
+            span.set_attribute("tracely.turn.id", str(ctx["turn_id"]))
         if ctx.get("user"):
             span.set_attribute("tracely.user.id", str(ctx["user"]))
         if ctx.get("trace_name"):
@@ -220,6 +222,21 @@ class _RedactingSpanExporter:
         return self._inner.force_flush(timeout_millis)
 
 
+class _ScopeFilteredBatchProcessor(BatchSpanProcessor):
+    """Export only spans whose instrumentation scope starts with one of `scopes` (plus the SDK's
+    own). For `init(tracer_provider=...)`: a host app's provider also carries its HTTP/DB/queue
+    instrumentation, which is noise in an agent trace — and volume you pay for."""
+
+    def __init__(self, exporter: Any, scopes: tuple[str, ...]):
+        super().__init__(exporter)
+        self._scopes = (*scopes, "tracely-sdk")
+
+    def on_end(self, span: Any) -> None:
+        scope = getattr(getattr(span, "instrumentation_scope", None), "name", "") or ""
+        if scope.startswith(self._scopes):
+            super().on_end(span)
+
+
 def init(
     endpoint: str = "http://localhost:8000",
     api_key: str = "tracely_dev_key",
@@ -227,6 +244,8 @@ def init(
     env: str = "prod",
     instrument: str | list[str] | bool = "auto",
     redact: bool | list[str] | Callable[[str, str], str] | None = None,
+    tracer_provider: TracerProvider | None = None,
+    export_scopes: tuple[str, ...] | list[str] | None = None,
 ) -> otel_trace.Tracer:
     """One-call setup (R1). Configures the OTel provider + OTLP exporter pointing at Tracely,
     registers the context-stamping processor, and activates the matching auto-instrumentors so your
@@ -246,15 +265,27 @@ def init(
       - callable `(attr_key, value) -> value` — full control; return the scrubbed string.
     Set it on the FIRST `init()` call (the exporter is built once).
 
+    `tracer_provider` — attach to a provider the host app already owns instead of building one.
+    Required when something else set the global provider first (a web framework's telemetry, an
+    OTel-instrumented service): OTel ignores a second `set_tracer_provider`, so the default path
+    would silently export nothing. Pair it with `export_scopes` to ship only your agent's spans.
+
+    `export_scopes` — instrumentation-scope name prefixes to export, e.g.
+    `("my_app.agents", "openinference.instrumentation.langchain")`. Only meaningful with
+    `tracer_provider`; the SDK's own scope is always included.
+
     Call once at startup; idempotent (provider built once; instrumentor activation de-duped, R7).
     Streaming token usage requires `stream_options={"include_usage": True}` on OpenAI calls (R3)."""
     global _tracer, _provider, _env, _initialized
     _env = env
     if not (_initialized and _provider is not None):
-        resource = Resource.create(
-            {"service.name": service_name, "telemetry.sdk.language": "python"}
-        )
-        provider = TracerProvider(resource=resource)
+        provider = tracer_provider
+        if provider is None:
+            provider = TracerProvider(
+                resource=Resource.create(
+                    {"service.name": service_name, "telemetry.sdk.language": "python"}
+                )
+            )
         provider.add_span_processor(TracelyContextSpanProcessor())  # stamps tracely.* on every span
         exporter: Any = OTLPSpanExporter(
             endpoint=f"{endpoint.rstrip('/')}/v1/traces",
@@ -265,10 +296,15 @@ def init(
             # Wrap the OTLP exporter so EVERY span (manual + auto-instrumentor) is scrubbed on the
             # way out — the one chokepoint all spans pass through.
             exporter = _RedactingSpanExporter(exporter, redactor)
-        provider.add_span_processor(BatchSpanProcessor(exporter))
-        otel_trace.set_tracer_provider(provider)
+        provider.add_span_processor(
+            _ScopeFilteredBatchProcessor(exporter, tuple(export_scopes))
+            if export_scopes
+            else BatchSpanProcessor(exporter)
+        )
+        if tracer_provider is None:  # someone else's provider stays theirs — never steal the global
+            otel_trace.set_tracer_provider(provider)
         _provider = provider
-        _tracer = otel_trace.get_tracer("tracely-sdk")
+        _tracer = provider.get_tracer("tracely-sdk")
         _initialized = True
     _activate_instrumentors(instrument)  # idempotent; re-runnable to add providers later
     return _tracer  # type: ignore[return-value]
@@ -510,16 +546,21 @@ def trace(
     *,
     conversation: str | None = None,
     turn: int | None = None,
+    turn_id: str | None = None,
     user: str | None = None,
     trace_name: str | None = None,
     env: str | None = None,
     agents: list[dict] | None = None,
     **metadata: Any,
 ) -> _Trace:
-    """Open a run context: set `agent`/`conversation`/`turn`/`user`/`trace_name`/`env` (+ arbitrary
-    `metadata`) once, and every span started inside — including zero-touch provider spans from the
-    auto-instrumentors — inherits them via the context processor (R9/R4). Use as a context manager
-    or a (sync/async) decorator. Nested `trace()`s merge over the enclosing one.
+    """Open a run context: set `agent`/`conversation`/`turn`/`turn_id`/`user`/`trace_name`/`env`
+    (+ arbitrary `metadata`) once, and every span started inside — including zero-touch provider
+    spans from the auto-instrumentors — inherits them via the context processor (R9/R4). Use as a
+    context manager or a (sync/async) decorator. Nested `trace()`s merge over the enclosing one.
+
+    `turn` is the ordinal (0, 1, 2…); `turn_id` is your own id for one exchange, and unlike the
+    `turn()` span helper it lands on EVERY span of the turn, which is what the `turn_id` column
+    groups on.
 
     `agents` declares the conversation's agent catalog — a list of
     `{name, description, tools: {tool_name: {name, description, parameters}}}` — surfaced in the
@@ -530,6 +571,7 @@ def trace(
             "agent": agent,
             "conversation": conversation,
             "turn": turn,
+            "turn_id": turn_id,
             "user": user,
             "trace_name": trace_name,
             "env": env,
@@ -894,7 +936,9 @@ def error(span: Span, message: str = "") -> None:
 
 
 def flush() -> None:
-    provider = otel_trace.get_tracer_provider()
+    # `_provider` first: with init(tracer_provider=...) the SDK's processors live on the host's
+    # provider, which may not be the global one.
+    provider = _provider or otel_trace.get_tracer_provider()
     if hasattr(provider, "force_flush"):
         provider.force_flush()
 
