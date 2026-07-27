@@ -35,7 +35,18 @@ export default function LoginPage() {
     <AuthShell
       title="Sign in to Tracely"
       subtitle="trace-native CI/CD for AI agents"
-      footer="Need an account? Ask your workspace owner for an invite."
+      footer={
+        // A fresh self-hosted instance has no owner to ask yet, and /register was unreachable
+        // without typing the URL. Linking it is safe: register 409s ("already set up") once the
+        // first owner exists, so this never becomes a second signup path.
+        <>
+          No workspace yet?{" "}
+          <a href="/register" className="text-signal hover:underline">
+            Create one
+          </a>{" "}
+          — otherwise ask your workspace owner for an invite.
+        </>
+      }
     >
       <form onSubmit={onSubmit} className="space-y-4">
         <FormError>{err}</FormError>
