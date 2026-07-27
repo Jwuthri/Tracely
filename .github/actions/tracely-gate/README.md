@@ -15,7 +15,7 @@ upserted PR comment.
 | `web-url` | | `""` | Tracely web base URL, for the "view gate run" link |
 | `env` | | `ci` | the `tracely.env` tag your CI traces were emitted with |
 | `github-token` | | `${{ github.token }}` | token used to post the status + comment |
-| `sdk-spec` | | `tracely-sdk` | pip spec for the SDK/CLI (override with a git URL until published) |
+| `sdk-spec` | | `tracely-ai` | pip spec for the SDK/CLI |
 
 There are two ways to use it. **Replay is the turnkey path:** one CLI step re-runs your agent
 on every promoted case and gates the PR. The composite action is for when your CI already
@@ -47,7 +47,7 @@ jobs:
           TRACELY_KEY: ${{ secrets.TRACELY_KEY }}
           TRACELY_WEB_URL: ${{ secrets.TRACELY_WEB_URL }}
         run: |
-          pip install tracely-sdk        # + your agent's deps
+          pip install tracely-ai        # + your agent's deps
           # your agent as module:function, called with each case input:
           tracely replay planner --entrypoint my_agent:run
           # ...or a non-Python agent (gets the input in $TRACELY_INPUT):

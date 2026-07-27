@@ -14,7 +14,7 @@ via `example=os.path.basename(__file__)`, so each span carries `tracely.metadata
 — filter on it in the Tracely UI to find the traces a given example produced.
 
 ```bash
-pip install "tracely-sdk[<extra>]"     # the extra named in each file's header
+pip install "tracely-ai[<extra>]"     # the extra named in each file's header
 export TRACELY_API=http://localhost:8000           # your Tracely API (default shown)
 export OPENAI_API_KEY=sk-...                        # (or the provider's key)
 uv run python sdk/examples/<file>.py

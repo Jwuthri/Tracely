@@ -66,7 +66,7 @@ replay:      ## re-run the example agent on the promoted suite, then gate (ENTRY
 sdk-example: ## emit the demo trace via the Tracely SDK
 	uv run python sdk/example.py
 
-auto-openai: ## automatic tracing of plain OpenAI calls (needs tracely-sdk[openai] + OPENAI_API_KEY)
+auto-openai: ## automatic tracing of plain OpenAI calls (needs tracely-ai[openai] + OPENAI_API_KEY)
 	TRACELY_API=$(TRACELY_API) uv run python sdk/examples/auto_openai.py
 
 auto-agent:  ## automatic tracing via @observe + trace() (agent -> gen/tool/gen tree)

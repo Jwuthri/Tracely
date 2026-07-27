@@ -148,7 +148,7 @@ export function MetaAnalysisPanel() {
           <button
             onClick={run}
             disabled={running}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3.5 py-1.5 text-[12.5px] font-medium text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-lg border border-signal/40 bg-signal/15 px-3.5 py-1.5 text-[12.5px] font-medium text-signal transition-all hover:bg-signal/25 hover:shadow-glow disabled:opacity-60"
           >
             {running && <Spinner />}
             {running ? "Analyzing…" : analysis ? "Re-run" : "Run analysis"}
@@ -362,7 +362,7 @@ function Skeleton() {
 }
 
 function Spinner() {
-  return <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white" />;
+  return <span className="h-3 w-3 animate-spin rounded-full border-2 border-signal/30 border-t-signal" />;
 }
 
 function Spark() {

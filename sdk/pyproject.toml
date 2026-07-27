@@ -1,12 +1,30 @@
 [project]
-name = "tracely-sdk"
+# ponytail: dist name is `tracely-ai` because `tracely` and `tracely-sdk` are both taken
+# on PyPI by unrelated projects. The import name stays `tracely_sdk`.
+name = "tracely-ai"
 version = "0.1.0"
 description = "Tracely Python SDK: automatic + manual agent tracing, exported to Tracely over OTLP."
+readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["llm", "agents", "observability", "tracing", "opentelemetry", "evals"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Topic :: System :: Monitoring",
+]
 dependencies = [
   "opentelemetry-sdk>=1.25",
   "opentelemetry-exporter-otlp-proto-http>=1.25",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Jwuthri/Tracely"
+Documentation = "https://github.com/Jwuthri/Tracely/blob/master/sdk/README.md"
+Source = "https://github.com/Jwuthri/Tracely"
+Issues = "https://github.com/Jwuthri/Tracely/issues"
 
 [project.optional-dependencies]
 # frontier providers
@@ -36,7 +54,7 @@ openllmetry = [
   "opentelemetry-instrumentation-openai-v2>=2.0b0",
   "opentelemetry-instrumentation-anthropic>=0.30b0",
 ]
-all = ["tracely-sdk[openai,anthropic,google,mistral,bedrock,groq,langchain,llama-index,crewai,litellm,openai-agents,google-adk,claude-agent-sdk,openrouter]"]
+all = ["tracely-ai[openai,anthropic,google,mistral,bedrock,groq,langchain,llama-index,crewai,litellm,openai-agents,google-adk,claude-agent-sdk,openrouter]"]
 
 [project.scripts]
 tracely = "tracely_sdk.cli:main"

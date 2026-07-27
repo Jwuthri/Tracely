@@ -1,4 +1,4 @@
-# `sdk/` — `tracely-sdk` (instrument agents + the CI gate CLI)
+# `tracely-ai` — instrument agents + the CI gate CLI
 
 Two things in one small package:
 
@@ -8,9 +8,9 @@ Two things in one small package:
 The core depends only on `opentelemetry-sdk` + the OTLP HTTP exporter (Python ≥ 3.10); a provider extra adds that provider's auto-instrumentor.
 
 ```bash
-pip install "./sdk[openai]"        # provider extras: [openai] [anthropic] [langchain] [litellm] [all]
-# or: uv pip install -e sdk        # core only (manual API + CLI)
-# CLI becomes available as `tracely` (entry point tracely_sdk.cli:main)
+pip install "tracely-ai[openai]"   # provider extras: [openai] [anthropic] [langchain] [litellm] [all]
+# or: pip install tracely-ai       # core only (manual API + CLI)
+# import name is `tracely_sdk`; the CLI is `tracely` (entry point tracely_sdk.cli:main)
 ```
 
 > Already using OpenTelemetry / OpenInference / LangGraph instrumentation? You don't need the instrumentation half — point your existing OTLP exporter at `POST {endpoint}/v1/traces` with `Authorization: Bearer <ingest-key>` and set the `tracely.*` attributes below. This SDK is just the ergonomic path. The **CLI**, however, is how you wire Tracely into CI.
@@ -47,7 +47,7 @@ needs `stream_options={"include_usage": True}`.
 (`instrument=["litellm"]` — 100+ providers via one callback), and a non-patching drop-in
 (`from tracely_sdk.openai import OpenAI` / `wrap_openai`). Under `"auto"`, when the LangChain
 instrumentor is present it owns LLM spans and the provider instrumentors are skipped to avoid
-duplicate spans (override with an explicit list). Full guide: the docs [Automatic instrumentation](../docs/pages/automatic.mdx) page.
+duplicate spans (override with an explicit list). Full guide: the docs [Automatic instrumentation](https://github.com/Jwuthri/Tracely/blob/master/docs/pages/automatic.mdx) page.
 
 ### Manual / custom spans (the escape hatch)
 
@@ -122,7 +122,7 @@ def run(user_input: str):
 
 **Auto-instrument / drop-in code replays too** (no manual seam required): inside a `fixtures()` block Tracely class-patches the provider's create-method, so code that calls the SDK directly — `client.chat.completions.create(...)` under `instrument="auto"` or the `tracely_sdk.openai` drop-in — is served the recorded completion (reconstructed into a provider-shaped response) and never hits the network. Covered today: **OpenAI `chat.completions`** and **Anthropic `messages`**; other providers fall back to live in replay until added. The manual `call_llm` seam remains the way to get provider-agnostic hermetic replay everywhere.
 
-This is what makes replay deterministic, offline, and free (no API keys, no cost). See [regression-testing design](../design/part2-tracely/05-regression-testing.md).
+This is what makes replay deterministic, offline, and free (no API keys, no cost). See [regression-testing design](https://github.com/Jwuthri/Tracely/blob/master/design/part2-tracely/05-regression-testing.md).
 
 ---
 

@@ -9,9 +9,9 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "tracely-ai",
     "tracely-backend",
     "tracely-monorepo",
-    "tracely-sdk",
     "tracely-workers",
 ]
 
@@ -5343,99 +5343,7 @@ wheels = [
 ]
 
 [[package]]
-name = "tracely-backend"
-version = "0.1.0"
-source = { editable = "backend" }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "alembic" },
-    { name = "argon2-cffi" },
-    { name = "asyncpg" },
-    { name = "boto3" },
-    { name = "celery", extra = ["redis"] },
-    { name = "clickhouse-connect" },
-    { name = "fastapi" },
-    { name = "greenlet" },
-    { name = "hdbscan" },
-    { name = "httpx" },
-    { name = "langchain" },
-    { name = "langchain-openai" },
-    { name = "langgraph" },
-    { name = "numpy" },
-    { name = "opentelemetry-proto" },
-    { name = "pgvector" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyjwt", extra = ["crypto"] },
-    { name = "scikit-learn" },
-    { name = "sqlalchemy" },
-    { name = "structlog" },
-    { name = "umap-learn" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiohttp", specifier = ">=3.9" },
-    { name = "alembic", specifier = ">=1.13" },
-    { name = "argon2-cffi", specifier = ">=23.1" },
-    { name = "asyncpg", specifier = ">=0.29" },
-    { name = "boto3", specifier = ">=1.34" },
-    { name = "celery", extras = ["redis"], specifier = ">=5.4" },
-    { name = "clickhouse-connect", specifier = ">=0.7.16" },
-    { name = "fastapi", specifier = ">=0.111" },
-    { name = "greenlet", specifier = ">=3.0" },
-    { name = "hdbscan", specifier = ">=0.8.38" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "langchain", specifier = ">=1.3" },
-    { name = "langchain-openai", specifier = ">=1.2" },
-    { name = "langgraph", specifier = ">=1.0" },
-    { name = "numpy", specifier = ">=1.26" },
-    { name = "opentelemetry-proto", specifier = ">=1.25" },
-    { name = "pgvector", specifier = ">=0.3" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
-    { name = "pydantic", specifier = ">=2.7" },
-    { name = "pydantic-settings", specifier = ">=2.3" },
-    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.8" },
-    { name = "scikit-learn", specifier = ">=1.4" },
-    { name = "sqlalchemy", specifier = ">=2.0.30" },
-    { name = "structlog", specifier = ">=24.1" },
-    { name = "umap-learn", specifier = ">=0.5.5" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
-]
-
-[[package]]
-name = "tracely-monorepo"
-version = "0.0.0"
-source = { virtual = "." }
-
-[package.dev-dependencies]
-dev = [
-    { name = "aiosqlite" },
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "python-dotenv" },
-    { name = "ruff" },
-    { name = "tracely-sdk", extra = ["all"] },
-]
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "aiosqlite", specifier = ">=0.20" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "pytest-asyncio", specifier = ">=0.23" },
-    { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "ruff", specifier = ">=0.6" },
-    { name = "tracely-sdk", extras = ["all"], editable = "sdk" },
-]
-
-[[package]]
-name = "tracely-sdk"
+name = "tracely-ai"
 version = "0.1.0"
 source = { editable = "sdk" }
 dependencies = [
@@ -5567,9 +5475,101 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-anthropic", marker = "extra == 'openllmetry'", specifier = ">=0.30b0" },
     { name = "opentelemetry-instrumentation-openai-v2", marker = "extra == 'openllmetry'", specifier = ">=2.0b0" },
     { name = "opentelemetry-sdk", specifier = ">=1.25" },
-    { name = "tracely-sdk", extras = ["openai", "anthropic", "google", "mistral", "bedrock", "groq", "langchain", "llama-index", "crewai", "litellm", "openai-agents", "google-adk", "claude-agent-sdk", "openrouter"], marker = "extra == 'all'", editable = "sdk" },
+    { name = "tracely-ai", extras = ["openai", "anthropic", "google", "mistral", "bedrock", "groq", "langchain", "llama-index", "crewai", "litellm", "openai-agents", "google-adk", "claude-agent-sdk", "openrouter"], marker = "extra == 'all'", editable = "sdk" },
 ]
 provides-extras = ["openai", "anthropic", "google", "mistral", "bedrock", "groq", "langchain", "llama-index", "crewai", "litellm", "openai-agents", "google-adk", "claude-agent-sdk", "openrouter", "xai", "openrouter-openai", "google-genai", "mistral-sdk", "openllmetry", "all"]
+
+[[package]]
+name = "tracely-backend"
+version = "0.1.0"
+source = { editable = "backend" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "alembic" },
+    { name = "argon2-cffi" },
+    { name = "asyncpg" },
+    { name = "boto3" },
+    { name = "celery", extra = ["redis"] },
+    { name = "clickhouse-connect" },
+    { name = "fastapi" },
+    { name = "greenlet" },
+    { name = "hdbscan" },
+    { name = "httpx" },
+    { name = "langchain" },
+    { name = "langchain-openai" },
+    { name = "langgraph" },
+    { name = "numpy" },
+    { name = "opentelemetry-proto" },
+    { name = "pgvector" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "scikit-learn" },
+    { name = "sqlalchemy" },
+    { name = "structlog" },
+    { name = "umap-learn" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.9" },
+    { name = "alembic", specifier = ">=1.13" },
+    { name = "argon2-cffi", specifier = ">=23.1" },
+    { name = "asyncpg", specifier = ">=0.29" },
+    { name = "boto3", specifier = ">=1.34" },
+    { name = "celery", extras = ["redis"], specifier = ">=5.4" },
+    { name = "clickhouse-connect", specifier = ">=0.7.16" },
+    { name = "fastapi", specifier = ">=0.111" },
+    { name = "greenlet", specifier = ">=3.0" },
+    { name = "hdbscan", specifier = ">=0.8.38" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "langchain", specifier = ">=1.3" },
+    { name = "langchain-openai", specifier = ">=1.2" },
+    { name = "langgraph", specifier = ">=1.0" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "opentelemetry-proto", specifier = ">=1.25" },
+    { name = "pgvector", specifier = ">=0.3" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "pydantic", specifier = ">=2.7" },
+    { name = "pydantic-settings", specifier = ">=2.3" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.8" },
+    { name = "scikit-learn", specifier = ">=1.4" },
+    { name = "sqlalchemy", specifier = ">=2.0.30" },
+    { name = "structlog", specifier = ">=24.1" },
+    { name = "umap-learn", specifier = ">=0.5.5" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+
+[[package]]
+name = "tracely-monorepo"
+version = "0.0.0"
+source = { virtual = "." }
+
+[package.dev-dependencies]
+dev = [
+    { name = "aiosqlite" },
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "python-dotenv" },
+    { name = "ruff" },
+    { name = "tracely-ai", extra = ["all"] },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "aiosqlite", specifier = ">=0.20" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "ruff", specifier = ">=0.6" },
+    { name = "tracely-ai", extras = ["all"], editable = "sdk" },
+]
 
 [[package]]
 name = "tracely-workers"

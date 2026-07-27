@@ -27,3 +27,6 @@ out/
 .DS_Store
 .idea/
 .vscode/
+
+# build artifacts
+dist/

@@ -79,6 +79,15 @@ ClickHouse DDL  →  alembic upgrade head  →  seed default project/key  →  e
 All four steps are idempotent. On the very first deploy the `worker` may restart a few times until the
 backend finishes creating the schema — that's expected and self-heals.
 
+A pre-deploy command **is never retried** — if it exits non-zero the deploy stops — and its container
+gets the private network only *after* a short initialization, so an instant connection can see
+`Failed to resolve 'clickhouse.railway.internal' ([Errno -2] Name or service not known)`. The first
+step therefore waits for ClickHouse (up to `WAIT_SECONDS` in
+`backend/tracely/infrastructure/clickhouse/migrations.py`, backing off 1→8s) before running DDL; once
+the mesh is up, alembic/seeding/S3 resolve too. If it still gives up after that, the message names the
+host it tried — check the ClickHouse service is actually running and that `CLICKHOUSE_HOST` resolves
+to its `RAILWAY_PRIVATE_DOMAIN` (HTTP port 8123, not the 9000 native port), then redeploy.
+
 ## 5. Post-deploy
 
 - **Self-host (`local`)**: open `https://<frontend-public-domain>` → **Create your workspace** → you're

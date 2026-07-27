@@ -29,7 +29,7 @@ The product maps onto it: **Observe** (trace explorer + trends + cross-metric me
 | Registry (OLTP) | **Postgres + pgvector** + SQLAlchemy 2.0 + Alembic | `backend/migrations` |
 | Queue / Blobs | **Redis** / **MinIO·S3** (blob-first, source of truth) | — |
 | Frontend | **Next.js 15** (App Router) + Tailwind | [`frontend/`](frontend/README.md) |
-| SDK + CI gate CLI | **`tracely-sdk`** (OTel wrapper + `tracely` CLI) | [`sdk/`](sdk/README.md) |
+| SDK + CI gate CLI | **`tracely-ai`** (OTel wrapper + `tracely` CLI) | [`sdk/`](sdk/README.md) |
 | Tooling | **uv** workspace (Python) · **pnpm** (web) | — |
 
 The write path deliberately mirrors Langfuse's proven design — **SDK/OTLP → S3 (durable) → Redis → worker → ClickHouse** — reimplemented in Python, with agent semantics promoted to **first-class indexed columns** (Langfuse keeps them as read-time strings). One adaptation: ClickHouse server-side `async_insert` instead of an in-process write buffer (Celery tasks don't share memory). [Why](design/part2-tracely/01-steal-and-do-not-copy.md)
@@ -87,7 +87,7 @@ A pre-defined deployment for the whole stack — the three app services plus Pos
 
 ## Ingest from your agent
 
-Point any OTLP/HTTP exporter at `POST {endpoint}/v1/traces` with `Authorization: Bearer tracely_dev_key`. Tracely reads standard `gen_ai.*` / OpenInference attributes plus first-class hints — `tracely.agent.id` (auto-registered), `tracely.agent.version`, `tracely.conversation.id` / `turn.*` / `step.*`, `tracely.observation.type`, and `tracely.env` (`prod|staging|ci|dev`, the gating axis). The [`tracely-sdk`](sdk/README.md) is the ergonomic path and also ships the `tracely gate` / `tracely replay` CI commands.
+Point any OTLP/HTTP exporter at `POST {endpoint}/v1/traces` with `Authorization: Bearer tracely_dev_key`. Tracely reads standard `gen_ai.*` / OpenInference attributes plus first-class hints — `tracely.agent.id` (auto-registered), `tracely.agent.version`, `tracely.conversation.id` / `turn.*` / `step.*`, `tracely.observation.type`, and `tracely.env` (`prod|staging|ci|dev`, the gating axis). The [`tracely-ai`](sdk/README.md) is the ergonomic path and also ships the `tracely gate` / `tracely replay` CI commands.
 
 ## Gate your PRs (CI/CD)
 
@@ -116,8 +116,6 @@ jobs:
           agent: planner                       # which agent's promoted suite to run
           api:   https://tracely.your-co.dev   # your Tracely backend (TRACELY_API)
           key:   ${{ secrets.TRACELY_KEY }}    # your ingest key = your workspace
-          # the SDK isn't on PyPI yet — install it from this repo until it is:
-          sdk-spec: "tracely-sdk @ git+https://github.com/Jwuthri/Tracely#subdirectory=sdk"
 ```
 
 ### Option B — replay the recorded cases against your code (hermetic)
@@ -125,7 +123,7 @@ jobs:
 This re-runs your agent on each promoted case's *recorded input*, serving the recorded tool/LLM outputs as fixtures — deterministic, offline, **no API keys, no cost** — then gates. It guarantees the exact failing inputs are tested. Run the CLI directly:
 
 ```yaml
-      - run: pip install "tracely-sdk @ git+https://github.com/Jwuthri/Tracely#subdirectory=sdk"
+      - run: pip install tracely-ai
       - run: tracely replay planner --entrypoint my_pkg.agent:run    # a Python agent
         # …or any language:  tracely replay planner --cmd "node run.js"  (your script reads $TRACELY_INPUT)
         env:

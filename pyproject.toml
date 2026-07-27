@@ -13,7 +13,7 @@ dev = [
   "pytest>=8",
   "pytest-asyncio>=0.23",
   "ruff>=0.6",
-  "tracely-sdk[all]",
+  "tracely-ai[all]",
   "python-dotenv>=1.0",   # sdk/examples/* load .env so provider keys work without a manual export
   "aiosqlite>=0.20",      # hermetic async DB for the auth test suite (no Postgres required)
   "httpx>=0.27",          # ASGITransport test client for FastAPI auth endpoints
@@ -24,7 +24,7 @@ members = ["backend", "workers", "sdk"]
 
 [tool.uv.sources]
 tracely-backend = { workspace = true }
-tracely-sdk = { workspace = true }
+tracely-ai = { workspace = true }
 
 [tool.ruff]
 line-length = 100

@@ -27,10 +27,9 @@ inputs:
     default: ${{ github.token }}
   sdk-spec:
     description: >
-      pip spec for the Tracely SDK (which provides the `tracely` CLI). Defaults to PyPI;
-      override with a VCS spec until published, e.g. 'tracely-sdk @ git+https://github.com/your-org/tracely#subdirectory=sdk'.
+      pip spec for the Tracely SDK (which provides the `tracely` CLI). Defaults to PyPI..
     required: false
-    default: "tracely-sdk"
+    default: "tracely-ai"
 
 runs:
   using: "composite"
