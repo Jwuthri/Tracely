@@ -22,3 +22,14 @@ export async function GET(req: NextRequest) {
   });
   return NextResponse.json(await r.json(), { status: r.status });
 }
+
+// Multi-select delete from the traces table: { threads: [...] } → the backend's DELETE /api/sessions.
+export async function DELETE(req: NextRequest) {
+  const r = await fetch(`${API}/api/sessions`, {
+    method: "DELETE",
+    headers: { ...(await authHeaders()), "Content-Type": "application/json" },
+    body: JSON.stringify(await req.json()),
+    cache: "no-store",
+  });
+  return NextResponse.json(await r.json(), { status: r.status });
+}

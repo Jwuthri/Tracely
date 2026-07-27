@@ -54,6 +54,10 @@ export const PlusIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...svg(p)}><path d="M5 12h14" /><path d="M12 5v14" /></svg>
 );
 
+export const Trash = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...svg(p)}><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M6 6l1 14h10l1-14" /></svg>
+);
+
 export const DotsIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...svg(p)}><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>
 );

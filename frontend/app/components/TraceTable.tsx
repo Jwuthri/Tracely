@@ -73,6 +73,7 @@ import {
   PlusIcon,
   svg,
   TextGlyph,
+  Trash,
 } from "./trace-table/icons";
 import { normalizeType, TypeChip } from "./ui";
 
@@ -532,6 +533,55 @@ function ModelBadge({ model }: { model: string }) {
   );
 }
 
+// ── conversation multi-select (its own leading column, like the chevron/run controls) ───────────
+type SelectView = {
+  enabled: boolean;
+  selected: Set<string>;
+  toggle: (thread: string) => void;
+  toggleAll: () => void;
+  allSelected: boolean;
+  someSelected: boolean;
+};
+const SelectContext = createContext<SelectView>({
+  enabled: false, selected: new Set(), toggle: () => {}, toggleAll: () => {}, allSelected: false, someSelected: false,
+});
+
+// Control cells the table always renders (chevron · run · agents) + the optional select column.
+// Every colSpan in the table derives from this, so adding the column can't desync the empty rows.
+function useCtrlCount(): number {
+  return 3 + (useContext(SelectContext).enabled ? 1 : 0);
+}
+
+// Themed checkbox: the native input is the a11y/interaction surface (sr-only), the visible box is
+// styled with the app's ink/line/signal tokens. The 24px label is the hit target and swallows the
+// click so the row's navigate-on-click never fires.
+function SelectBox({
+  checked, indeterminate = false, onChange, label,
+}: { checked: boolean; indeterminate?: boolean; onChange: () => void; label: string }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+  return (
+    <label
+      onClick={(e) => e.stopPropagation()}
+      title={label}
+      className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-lg transition-colors hover:bg-slate-700/70"
+    >
+      <input ref={ref} type="checkbox" checked={checked} onChange={onChange} aria-label={label} className="peer sr-only" />
+      <span className="flex h-[15px] w-[15px] items-center justify-center rounded-[4px] border border-line-bright bg-ink-900/80 transition-colors peer-hover:border-signal/60 peer-checked:border-signal peer-checked:bg-signal peer-focus-visible:ring-2 peer-focus-visible:ring-signal/40">
+        {indeterminate ? (
+          <span className="h-[2px] w-2 rounded-full bg-signal" />
+        ) : (
+          <svg viewBox="0 0 12 12" className={clsx("h-2.5 w-2.5 text-ink-900 transition-opacity", checked ? "opacity-100" : "opacity-0")} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2.5 6.4 4.8 8.7 9.5 3.6" />
+          </svg>
+        )}
+      </span>
+    </label>
+  );
+}
+
 function ConvTitleCell({ conv }: { conv: ConvNode }) {
   const href = conv.turns > 1 ? `/sessions/${conv.thread}` : `/traces/${conv.last_trace_id}`;
   return (
@@ -962,6 +1012,7 @@ function DataRow({
   agentCount?: number;
 }) {
   const router = useRouter();
+  const sel = useContext(SelectContext);
   // Whole-row click zooms in — but only at the conversation and message levels. Step (S) rows are
   // NOT row-clickable (too easy to mis-click while reading); their expandable objects/pills still
   // work on their own. Clicks on interactive elements (chevron, pills, links) are always left alone.
@@ -988,6 +1039,17 @@ function DataRow({
         ROW_BG[depth],
       )}
     >
+      {sel.enabled && (
+        <td style={CTRL} className="px-2 py-2 align-top first:pl-2 sm:px-3 sm:first:pl-4">
+          {ctx.level === "C" ? (
+            <SelectBox
+              checked={sel.selected.has(ctx.conv.thread)}
+              onChange={() => sel.toggle(ctx.conv.thread)}
+              label={`Select "${deriveTitle(ctx.conv.first_input)}"`}
+            />
+          ) : null}
+        </td>
+      )}
       <td style={CTRL} className="px-2 py-2 align-top first:pl-2 sm:px-3 sm:first:pl-4">
         {canExpand ? (
           <button onClick={onToggle} className="rounded p-1 transition-colors hover:bg-slate-700" aria-label={open ? "Collapse" : "Expand"}>
@@ -1126,7 +1188,7 @@ function ConvRows({
 function LoadingTr({ cols }: { cols: Col[] }) {
   return (
     <tr className="border-b border-slate-800 bg-slate-800/20">
-      <td colSpan={3 + cols.length} className="px-6 py-3 text-sm text-slate-500">
+      <td colSpan={useCtrlCount() + cols.length} className="px-6 py-3 text-sm text-slate-500">
         <span className="inline-flex items-center gap-2">
           <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-700 border-t-slate-400" />
           loading…
@@ -1139,7 +1201,7 @@ function LoadingTr({ cols }: { cols: Col[] }) {
 function EmptyTr({ cols, text }: { cols: Col[]; text: string }) {
   return (
     <tr className="border-b border-slate-800 bg-slate-800/20">
-      <td colSpan={3 + cols.length} className="px-6 py-3 text-sm text-slate-500">
+      <td colSpan={useCtrlCount() + cols.length} className="px-6 py-3 text-sm text-slate-500">
         {text}
       </td>
     </tr>
@@ -1272,8 +1334,19 @@ function HeaderEvalControls({ evaluator }: { evaluator: EvaluatorDef }) {
 }
 
 function HeaderRow({ cols }: { cols: Col[] }) {
+  const sel = useContext(SelectContext);
   return (
     <tr className="border-b border-slate-700 bg-slate-800">
+      {sel.enabled && (
+        <th style={CTRL} className={HEAD_TH}>
+          <SelectBox
+            checked={sel.allSelected}
+            indeterminate={sel.someSelected && !sel.allSelected}
+            onChange={sel.toggleAll}
+            label={sel.allSelected ? "Clear selection" : "Select all conversations"}
+          />
+        </th>
+      )}
       <th style={CTRL} className={HEAD_TH} />
       <th style={CTRL} className={HEAD_TH} />
       <th style={CTRL} className={HEAD_TH} />
@@ -1306,11 +1379,14 @@ type Cache<T> = Record<string, T | "loading" | undefined>;
 export function TraceTable({
   conversations,
   embedded = false,
+  onDeleted,
 }: {
   conversations: ConvNode[];
   // When embedded in a tabbed trace view, the parent owns the Enlarge/Concise control + the
   // full-width breakout (so it applies across Table/Timeline/Evaluations), so we suppress ours.
   embedded?: boolean;
+  // Passing this enables conversation multi-select + Delete; the parent drops the rows it gets back.
+  onDeleted?: (threads: string[]) => void;
 }) {
   const seed = useMemo(() => {
     const turns: Cache<FullTurn[]> = {};
@@ -1339,6 +1415,51 @@ export function TraceTable({
   const [colMenu, setColMenu] = useState(false);
   const [typeMenu, setTypeMenu] = useState(false);
   const [wide, setWide] = useWide();
+
+  // ── conversation multi-select + delete ────────────────────────────────────────
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const selectView = useMemo<SelectView>(
+    () => ({
+      enabled: !!onDeleted,
+      selected,
+      toggle: (thread) =>
+        setSelected((prev) => {
+          const next = new Set(prev);
+          if (!next.delete(thread)) next.add(thread);
+          return next;
+        }),
+      // Header box: select every visible conversation, or clear when they're all already picked.
+      toggleAll: () =>
+        setSelected((prev) =>
+          prev.size >= conversations.length ? new Set() : new Set(conversations.map((c) => c.thread)),
+        ),
+      allSelected: conversations.length > 0 && selected.size >= conversations.length,
+      someSelected: selected.size > 0,
+    }),
+    [onDeleted, selected, conversations],
+  );
+
+  async function deleteSelected() {
+    const threads = [...selected];
+    if (!threads.length) return;
+    if (!window.confirm(`Delete ${threads.length} conversation${threads.length === 1 ? "" : "s"}? Their traces, steps and scores are removed permanently.`)) return;
+    setDeleting(true);
+    try {
+      const r = await fetch("/api/sessions", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threads }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? "delete failed");
+      setSelected(new Set());
+      onDeleted?.(threads);
+    } catch (e) {
+      setRunError(e instanceof Error ? e.message : "delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   // ── evaluation columns: definitions + live run state ──────────────────────────
   const [evaluators, setEvaluators] = useState<EvaluatorDef[]>([]);
@@ -1624,6 +1745,7 @@ export function TraceTable({
     <EvalViewContext.Provider value={evalView}>
       <LiveScoreContext.Provider value={liveStore}>
       <RollingSummaryContext.Provider value={rsumView}>
+      <SelectContext.Provider value={selectView}>
       <div
         style={!embedded && wide ? WIDE_STYLE : undefined}
         className="overflow-hidden rounded-lg border border-slate-700 transition-[width,margin] duration-200"
@@ -1648,6 +1770,27 @@ export function TraceTable({
                 )}
                 <span>Run evals</span>
               </button>
+            )}
+            {selectView.enabled && selected.size > 0 && (
+              <>
+                <span className="ml-1 h-5 w-px bg-slate-700" aria-hidden />
+                <span className="px-1 font-mono text-[11px] text-slate-500">{selected.size} selected</span>
+                <button
+                  onClick={() => void deleteSelected()}
+                  disabled={deleting}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-fail/40 bg-fail/10 px-3 py-1.5 text-xs font-medium text-fail transition-colors hover:bg-fail/20 disabled:opacity-50"
+                  title="Delete the selected conversations"
+                >
+                  <Trash className="h-3.5 w-3.5" />
+                  <span>{deleting ? "Deleting…" : "Delete"}</span>
+                </button>
+                <button
+                  onClick={() => setSelected(new Set())}
+                  className="rounded-lg px-2 py-1.5 text-xs text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-300"
+                >
+                  Clear
+                </button>
+              </>
             )}
           </div>
           <div className="flex items-center gap-1">
@@ -1695,7 +1838,7 @@ export function TraceTable({
             <tbody>
               {conversations.length === 0 ? (
                 <tr>
-                  <td colSpan={3 + cols.length} className="px-6 py-14 text-center text-sm text-slate-500">
+                  <td colSpan={3 + (selectView.enabled ? 1 : 0) + cols.length} className="px-6 py-14 text-center text-sm text-slate-500">
                     No conversations.
                   </td>
                 </tr>
@@ -1727,6 +1870,7 @@ export function TraceTable({
         onClose={() => setColumnModal({ open: false, editing: null })}
         onSaved={() => void listEvaluators().then(setEvaluators)}
       />
+      </SelectContext.Provider>
       </RollingSummaryContext.Provider>
       </LiveScoreContext.Provider>
     </EvalViewContext.Provider>

@@ -5,14 +5,14 @@ Pure HTTP shaping — all ClickHouse access lives in `infrastructure.clickhouse.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from tracely.api.advisory import advisory_score_names
 from tracely.api.auth import get_project_id
 from tracely.domain.evaluation.verdict import rollup_verdict
-from tracely.infrastructure.clickhouse import async_reader
+from tracely.infrastructure.clickhouse import async_reader, deletes
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.services.rolling_summary_service import RollingSummaryService
@@ -45,6 +45,23 @@ async def list_sessions(
     for r in rows:
         r["scores"] = conv_scores.get(r["thread"], [])
     return rows
+
+
+class DeleteSessionsBody(BaseModel):
+    threads: list[str]
+
+
+@router.delete("/sessions")
+async def delete_sessions(
+    body: DeleteSessionsBody, project_id: str = Depends(get_project_id)
+) -> dict:
+    """Delete whole conversations (multi-select in the UI): every trace in each thread plus its
+    scores. Idempotent — threads that no longer exist just don't contribute to the count."""
+    threads = [t for t in dict.fromkeys(body.threads) if t]
+    if not threads:
+        raise HTTPException(status_code=400, detail="no threads given")
+    traces = await deletes.delete_threads(project_id, threads)
+    return {"threads": len(threads), "traces": traces}
 
 
 @router.get("/sessions/{thread_id}")

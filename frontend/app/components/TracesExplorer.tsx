@@ -49,21 +49,31 @@ export function TracesExplorer({
   }, [initial, initialHasMore]);
 
   const load = useCallback(
-    async (next: Range, offset: number, replace: boolean) => {
+    async (next: Range, offset: number, replace: boolean, limit = pageSize) => {
       setLoading(true);
       try {
-        const qs = new URLSearchParams({ limit: String(pageSize), offset: String(offset) });
+        const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
         if (next.from) qs.set("from", next.from);
         if (next.to) qs.set("to", next.to);
         const r = await fetch(`/api/sessions?${qs.toString()}`, { cache: "no-store" });
         const data: ConvNode[] = r.ok ? await r.json() : [];
         setRows((prev) => (replace ? data : [...prev, ...data]));
-        setHasMore(data.length === pageSize);
+        setHasMore(data.length === limit);
       } finally {
         setLoading(false);
       }
     },
     [pageSize],
+  );
+
+  // After a delete: drop the rows immediately (instant feedback), then re-read the same-sized
+  // window from the server so the freed slots refill with the threads that were below the fold.
+  const onDeleted = useCallback(
+    (threads: string[]) => {
+      setRows((prev) => prev.filter((r) => !threads.includes(r.thread)));
+      void load(range, 0, true, Math.max(pageSize, rows.length - threads.length));
+    },
+    [load, range, pageSize, rows.length],
   );
 
   function applyPreset(p: (typeof PRESETS)[number]) {
@@ -197,7 +207,7 @@ export function TracesExplorer({
       ) : (
         <div className="reveal space-y-3" style={{ animationDelay: "80ms" }}>
           {shown.length > 0 ? (
-            <TraceTable conversations={shown} />
+            <TraceTable conversations={shown} onDeleted={onDeleted} />
           ) : (
             <div className="card px-4 py-10 text-center text-[13px] text-fg-faint">
               No loaded threads match this filter{hasMore ? " — try Load more." : "."}
