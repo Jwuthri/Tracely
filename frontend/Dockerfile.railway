@@ -23,10 +23,16 @@ ARG NEXT_PUBLIC_AUTH_MODE=dev
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+# The BACKEND's public origin, shown in Settings · API keys as the SDK/OTLP endpoint. Not the
+# frontend's own URL and not the private TRACELY_API — this one is copy-pasted into user code that
+# runs outside the Railway network, so it has to be the API's public domain. Unset -> the page keeps
+# its "https://your-tracely-host" placeholder.
+ARG NEXT_PUBLIC_TRACELY_PUBLIC_API=
 ENV NEXT_PUBLIC_AUTH_MODE=$NEXT_PUBLIC_AUTH_MODE \
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
     NEXT_PUBLIC_CLERK_SIGN_IN_URL=$NEXT_PUBLIC_CLERK_SIGN_IN_URL \
     NEXT_PUBLIC_CLERK_SIGN_UP_URL=$NEXT_PUBLIC_CLERK_SIGN_UP_URL \
+    NEXT_PUBLIC_TRACELY_PUBLIC_API=$NEXT_PUBLIC_TRACELY_PUBLIC_API \
     NEXT_TELEMETRY_DISABLED=1
 
 RUN pnpm build

@@ -39,7 +39,7 @@ export default async function ApiKeysPage() {
       <section className="card p-5">
         <div className="mb-2 text-[13px] font-semibold text-fg">Send your first trace</div>
         <pre className="overflow-x-auto rounded-lg border border-line bg-ink-900 p-4 font-mono text-[12px] leading-relaxed text-fg-muted">
-{`import tracely
+{`import tracely_sdk as tracely
 
 tracely.init(
     endpoint="${process.env.NEXT_PUBLIC_TRACELY_PUBLIC_API ?? "https://your-tracely-host"}",
