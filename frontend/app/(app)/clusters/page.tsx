@@ -1,15 +1,7 @@
 import { getClusters } from "@/app/lib/api";
 import { Badge } from "@/app/components/ui";
-import { RowLink } from "@/app/components/RowLink";
+import { ClusterList } from "@/app/components/ClusterList";
 import { RebuildButton } from "@/app/components/RebuildButton";
-import { TimeAgo } from "@/app/components/TimeAgo";
-import { IconChevron } from "@/app/components/icons";
-
-function clusterVariant(s: string): "warn" | "ok" | "neutral" {
-  if (s === "OPEN") return "warn";
-  if (s === "PROMOTED") return "ok";
-  return "neutral";
-}
 
 export default async function ClustersPage() {
   const clusters = await getClusters();
@@ -30,43 +22,8 @@ export default async function ClustersPage() {
         </div>
       </header>
 
-      <div className="reveal card overflow-hidden" style={{ animationDelay: "80ms" }}>
-        <div className="grid grid-cols-[64px_1fr_120px_120px_28px] items-center gap-3 border-b border-line bg-ink-900/50 px-4 py-2.5 font-mono text-[10.5px] uppercase tracking-wider text-fg-faint">
-          <span className="text-right">Seen</span>
-          <span>Failure</span>
-          <span>Status</span>
-          <span className="text-right">Last</span>
-          <span />
-        </div>
-        {clusters.length === 0 ? (
-          <div className="px-4 py-14 text-center text-[13px] text-fg-faint">
-            No clusters yet — they form automatically as failures are detected.
-          </div>
-        ) : (
-          clusters.map((c) => (
-            <RowLink
-              key={c.id}
-              href={`/clusters/${c.id}`}
-              className="group grid grid-cols-[64px_1fr_120px_120px_28px] items-center gap-3 border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-white/[0.025]"
-            >
-              <span className="text-right font-display text-[20px] font-extrabold tabular-nums text-fail">
-                {c.count}
-              </span>
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="truncate text-[13.5px] text-fg">{c.label}</span>
-                <span className="font-mono text-[10.5px] text-fg-faint">{c.taxonomy}</span>
-              </span>
-              <span>
-                <Badge variant={clusterVariant(c.status)} dot>
-                  {c.status}
-                </Badge>
-              </span>
-              <TimeAgo ts={c.last_seen_at} className="text-right font-mono text-[11.5px] text-fg-faint" />
-              <IconChevron className="h-4 w-4 justify-self-end text-fg-faint transition-colors group-hover:text-signal" />
-            </RowLink>
-          ))
-        )}
-      </div>
+      {/* rows + multi-select delete (client) */}
+      <ClusterList clusters={clusters} />
     </div>
   );
 }

@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from uuid import uuid4
 
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import delete, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -272,6 +272,28 @@ def cluster_members(s: Session, cluster_id: str) -> list[ClusterMember]:
             .order_by(desc(ClusterMember.is_medoid), ClusterMember.added_at)
         ).scalars()
     )
+
+
+def clusters_delete(s: Session, project_id: str, cluster_ids: list[str]) -> int:
+    """Delete clusters (and their members) in this project. Returns how many were removed.
+
+    Clusters are derived data: as long as the failing traces are still there, the next Analyze
+    re-forms them. Deleting is for pruning noise and orphans (issues whose traces were deleted)."""
+    if not cluster_ids:
+        return 0
+    owned = list(
+        s.execute(
+            select(FailureCluster.id).where(
+                FailureCluster.project_id == project_id, FailureCluster.id.in_(cluster_ids)
+            )
+        ).scalars()
+    )
+    if not owned:
+        return 0
+    s.execute(delete(ClusterMember).where(ClusterMember.cluster_id.in_(owned)))
+    s.execute(delete(FailureCluster).where(FailureCluster.id.in_(owned)))
+    s.commit()
+    return len(owned)
 
 
 def cluster_medoid(s: Session, cluster_id: str) -> ClusterMember | None:

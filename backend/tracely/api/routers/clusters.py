@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from tracely.api.auth import get_project_id
@@ -145,6 +146,27 @@ async def promote_cluster(
     if status == "err":
         raise HTTPException(status_code=404, detail=payload)
     return payload
+
+
+class DeleteClustersBody(BaseModel):
+    cluster_ids: list[str]
+
+
+@router.delete("/clusters")
+async def delete_clusters(
+    body: DeleteClustersBody, project_id: str = Depends(get_project_id)
+) -> dict:
+    """Delete clusters (multi-select in the UI). Clusters are derived from the traces, so a later
+    Analyze re-forms any issue whose failing traces still exist — this prunes noise and orphans."""
+    ids = [c for c in dict.fromkeys(body.cluster_ids) if c]
+    if not ids:
+        raise HTTPException(status_code=400, detail="no clusters given")
+
+    def work():
+        with SyncSessionLocal() as s:
+            return repo.clusters_delete(s, project_id, ids)
+
+    return {"deleted": await run_in_threadpool(work)}
 
 
 @router.post("/clusters/{cluster_id}/ignore")
