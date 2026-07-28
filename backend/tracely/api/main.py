@@ -23,6 +23,7 @@ from tracely.api.routers import (
     otlp,
     search,
     sessions,
+    share,
     traces,
 )
 from sqlalchemy import select
@@ -136,6 +137,7 @@ app.include_router(evaluations.router)
 app.include_router(meta_analysis.router)
 app.include_router(calibration.router)
 app.include_router(monitors.router)
+app.include_router(share.router)
 
 # Auth: /auth/me + /auth/logout always; mode-specific endpoints gated by AUTH_MODE.
 app.include_router(auth_router.common_router)

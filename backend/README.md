@@ -215,6 +215,8 @@ Three Celery tasks, each a thin dispatch into a service class: `ingest_otlp_blob
 | `GET /api/clusters`, `/api/clusters/{id}` · `POST …/rebuild` | `clusters.py` | failure clusters list/detail; trigger `rebuild_clusters`. |
 | `POST /api/gate` · `GET /api/gate/suite` · `GET /api/gates`, `/api/gates/{id}` | `gate.py` | run a gate; fetch the replay suite (cases + inputs + fixtures); gate list/detail. |
 | `GET /api/trends` | `analytics.py` | daily traces/failures + gate pass-rate + summary (failure rate, MTTR proxy…). |
+| `GET /api/ops` | `analytics.py` | latency p50/p95/p99 + TTFT, throughput, error rate, tokens/cost — per day, per model, per span name (`async_reader.ops_metrics`). |
+| `POST /api/share` · `GET /api/share/{token}` | `share.py` | mint a public link for one conversation (authed) · read it anonymously. The GET has **no auth dependency** — it verifies the token itself and never reaches `resolve_principal`, so a share link can never act as a project key. Every failure is a 404. |
 | `GET /api/evaluators` · `POST /api/evaluators` · `PATCH /api/evaluators/{id}` · `DELETE /api/evaluators/{id}` | `evaluators.py` | evaluator CRUD (POST creates, PATCH partial-updates). |
 | `GET /api/evaluators/templates` · `/models` · `/cost` · `/template-variables/{level}` | `evaluators.py` | built-in catalog · selectable judge models · judge cost estimate · `@VARIABLE` catalog for a level. |
 | `POST /api/evaluators/resolve` | `evaluators.py` | resolve an advanced `@VARIABLE` prompt against a real trace/thread (live preview, no LLM). |

@@ -2,6 +2,7 @@ import { getSession, getTrace, type ConvNode, type FullTurn } from "@/app/lib/ap
 import { convUsage, fmtUsd } from "@/app/lib/usage";
 import { CopyId } from "@/app/components/CopyId";
 import { SessionView } from "@/app/components/SessionView";
+import { ShareButton } from "@/app/components/ShareButton";
 import { IconArrowLeft } from "@/app/components/icons";
 
 export default async function ThreadPage({ params }: { params: Promise<{ threadId: string }> }) {
@@ -37,16 +38,20 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
         <a href="/traces" className="inline-flex items-center gap-1.5 text-[13px] text-fg-muted transition-colors hover:text-signal">
           <IconArrowLeft className="h-4 w-4" /> Traces
         </a>
-        <div className="mt-4">
+        <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
+          <div>
           <h1 className="font-display text-[22px] font-extrabold tracking-tight">Conversation</h1>
           <div className="mt-2 flex flex-wrap items-center gap-3 font-mono text-[11.5px] text-fg-faint">
             <CopyId value={threadId} label="thread id" />
             <span>{turns.length} turns</span>
             {usage.input_tokens ? <span>{usage.input_tokens.toLocaleString("en-US")} in</span> : null}
+            {usage.cached_tokens ? <span>{usage.cached_tokens.toLocaleString("en-US")} cached</span> : null}
             {usage.output_tokens ? <span>{usage.output_tokens.toLocaleString("en-US")} out</span> : null}
             {usage.total_tokens ? <span>{usage.total_tokens.toLocaleString("en-US")} tokens</span> : null}
             {usage.cost ? <span className="text-amber-300/90">{fmtUsd(usage.cost)}</span> : null}
           </div>
+          </div>
+          {turns.length > 0 && <ShareButton threadId={threadId} />}
         </div>
       </header>
 

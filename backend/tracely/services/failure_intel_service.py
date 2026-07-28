@@ -2,7 +2,7 @@
 per-cluster agent (semantic description) -> meta-consolidation agent (Issues).
 
 Triggered on demand ("Analyze failures"). Replaces the cheap signature clusters with
-embedding+LLM Issues. Needs `OPENAI_API_KEY`. All heavy imports are lazy.
+embedding+LLM Issues. Needs `OPENROUTER_API_KEY`. All heavy imports are lazy.
 
 The orchestration is a class (`FailureIntelService`) because there's a lot of shared state per
 rebuild (the embedder, cluster engine, the per-trace summary and embed-text caches). Pure
@@ -21,7 +21,6 @@ import structlog
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from tracely.config import settings
 from tracely.domain.failure.clustering import ClusterEngine
 from tracely.domain.failure.text import embedding_text, summarize_failure
 from tracely.domain.traces.spans import root_span
@@ -33,7 +32,7 @@ from tracely.infrastructure.db.models import (
     FailureEmbedding,
 )
 from tracely.infrastructure.llm import analysis_agents as agents
-from tracely.infrastructure.llm.embeddings import Embedder
+from tracely.infrastructure.llm.embeddings import Embedder, embeddings_enabled
 
 log = structlog.get_logger()
 
@@ -53,8 +52,8 @@ class FailureIntelService:
 
     def rebuild_clusters(self, project_id: str) -> dict:
         """Recompute the per-agent embedding clusters for this project."""
-        if not settings.openai_api_key:
-            return {"error": "OPENAI_API_KEY not configured"}
+        if not embeddings_enabled():
+            return {"error": "OPENROUTER_API_KEY not configured"}
 
         reasons_by_tid = self.trace_reader.failing_trace_reasons(project_id)
         by_agent = self._group_by_agent(project_id, reasons_by_tid)
@@ -88,11 +87,13 @@ class FailureIntelService:
             agent_id = root_span(spans).get("agent_id")
             if not agent_id:
                 continue
-            by_agent[agent_id].append((
-                tid,
-                summarize_failure(spans, reasons),
-                embedding_text(spans),
-            ))
+            by_agent[agent_id].append(
+                (
+                    tid,
+                    summarize_failure(spans, reasons),
+                    embedding_text(spans),
+                )
+            )
         return by_agent
 
     @staticmethod
@@ -101,9 +102,7 @@ class FailureIntelService:
         owns the transaction). Returns the number of clusters removed."""
         if not cluster_ids:
             return 0
-        session.execute(
-            delete(ClusterMember).where(ClusterMember.cluster_id.in_(cluster_ids))
-        )
+        session.execute(delete(ClusterMember).where(ClusterMember.cluster_id.in_(cluster_ids)))
         session.execute(delete(FailureCluster).where(FailureCluster.id.in_(cluster_ids)))
         return len(cluster_ids)
 
@@ -136,7 +135,9 @@ class FailureIntelService:
         embed_by_tid = {tid: emb for tid, _, emb in items}
 
         # 1. embed (cache hits via `failure_embeddings`; the vector is keyed to the mechanism text)
-        vec_by_tid = self._embed_with_cache(session, project_id, agent_id, items, summary_by_tid, embed_by_tid)
+        vec_by_tid = self._embed_with_cache(
+            session, project_id, agent_id, items, summary_by_tid, embed_by_tid
+        )
 
         # 2. cluster
         tids = [tid for tid, _, _ in items]
@@ -147,12 +148,16 @@ class FailureIntelService:
                 raw[lab].append(tid)
         if not raw:
             # every failing trace was HDBSCAN noise -> no clusters this run; clear stale ones.
-            stale = list(session.execute(
-                select(FailureCluster.id).where(
-                    FailureCluster.project_id == project_id,
-                    FailureCluster.agent_id == agent_id,
+            stale = list(
+                session.execute(
+                    select(FailureCluster.id).where(
+                        FailureCluster.project_id == project_id,
+                        FailureCluster.agent_id == agent_id,
+                    )
                 )
-            ).scalars().all())
+                .scalars()
+                .all()
+            )
             if self._delete_clusters(session, stale):
                 session.commit()
             return 0
@@ -172,9 +177,13 @@ class FailureIntelService:
             groups = agents.consolidate(briefs).issues
         else:
             a0 = analyses[0][0]
-            groups = [agents.IssueGroup(
-                title=a0.title, description=a0.description, member_cluster_indices=[0],
-            )]
+            groups = [
+                agents.IssueGroup(
+                    title=a0.title,
+                    description=a0.description,
+                    member_cluster_indices=[0],
+                )
+            ]
 
         # 5. replace ALL of this agent's clusters with the consolidated Issues, carrying over
         #    promotion / ignore state (and linked case + first-seen time) from any old cluster
@@ -204,10 +213,16 @@ class FailureIntelService:
             vecs = self.embedder.embed([embed_by_tid[t] for t in to_embed])
             now = datetime.now(timezone.utc)
             for tid, vec in zip(to_embed, vecs):
-                session.merge(FailureEmbedding(
-                    trace_id=tid, project_id=project_id, agent_id=agent_id,
-                    summary=summary_by_tid[tid][:4000], embedding=vec, created_at=now,
-                ))
+                session.merge(
+                    FailureEmbedding(
+                        trace_id=tid,
+                        project_id=project_id,
+                        agent_id=agent_id,
+                        summary=summary_by_tid[tid][:4000],
+                        embedding=vec,
+                        created_at=now,
+                    )
+                )
                 vec_by_tid[tid] = vec
             session.commit()
         return vec_by_tid
@@ -220,18 +235,26 @@ class FailureIntelService:
         analyses: list[tuple],
         groups,
     ) -> int:
-        existing = session.execute(
-            select(FailureCluster).where(
-                FailureCluster.project_id == project_id,
-                FailureCluster.agent_id == agent_id,
+        existing = (
+            session.execute(
+                select(FailureCluster).where(
+                    FailureCluster.project_id == project_id,
+                    FailureCluster.agent_id == agent_id,
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         # (id, status, candidate_case_id, first_seen_at, {trace_ids}) — only carried-over fields
         old_state: list[tuple[str, str, str | None, datetime | None, set[str]]] = []
         for ec in existing:
-            mtids = set(session.execute(
-                select(ClusterMember.trace_id).where(ClusterMember.cluster_id == ec.id)
-            ).scalars().all())
+            mtids = set(
+                session.execute(
+                    select(ClusterMember.trace_id).where(ClusterMember.cluster_id == ec.id)
+                )
+                .scalars()
+                .all()
+            )
             old_state.append((ec.id, ec.status, ec.candidate_case_id, ec.first_seen_at, mtids))
         old_ids = [ec.id for ec in existing]
         if old_ids:
@@ -278,20 +301,34 @@ class FailureIntelService:
             case_id = match[2] if match else None
             seen = match[3] if (match and match[3]) else now
             cl = FailureCluster(
-                id=str(uuid.uuid4()), project_id=project_id, agent_id=agent_id,
+                id=str(uuid.uuid4()),
+                project_id=project_id,
+                agent_id=agent_id,
                 cluster_key=hashlib.sha256(g.title.encode()).hexdigest()[:16],
-                label=g.title, taxonomy=first.taxonomy, signature="",
-                description=g.description, proposed_fix=first.proposed_fix, severity=first.severity,
-                method="embedding", count=len(member_tids), status=status,
-                candidate_case_id=case_id, first_seen_at=seen, last_seen_at=now,
+                label=g.title,
+                taxonomy=first.taxonomy,
+                signature="",
+                description=g.description,
+                proposed_fix=first.proposed_fix,
+                severity=first.severity,
+                method="embedding",
+                count=len(member_tids),
+                status=status,
+                candidate_case_id=case_id,
+                first_seen_at=seen,
+                last_seen_at=now,
             )
             session.add(cl)
             session.flush()
             for j, tid in enumerate(sorted(member_tids)):
-                session.add(ClusterMember(
-                    cluster_id=cl.id, trace_id=tid, is_medoid=(j == 0),
-                    summary=per_trace.get(tid, ""),
-                ))
+                session.add(
+                    ClusterMember(
+                        cluster_id=cl.id,
+                        trace_id=tid,
+                        is_medoid=(j == 0),
+                        summary=per_trace.get(tid, ""),
+                    )
+                )
             written += 1
         session.commit()
         return written

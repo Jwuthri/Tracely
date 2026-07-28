@@ -17,13 +17,13 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from tracely.api.auth import get_project_id
-from tracely.config import settings
 from tracely.domain.evaluation.evaluator_suggestion import suggest_evaluator
 from tracely.domain.failure.histogram import histogram
 from tracely.infrastructure.clickhouse.trace_reader import TraceReader
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.db.models import Agent, FailureCluster
+from tracely.infrastructure.llm.embeddings import embeddings_enabled
 from tracely.infrastructure.llm.provider import llm_enabled
 from tracely.infrastructure.text import message_text
 from tracely.services.regression_service import NotFound, RegressionService
@@ -59,12 +59,12 @@ def _cluster_dict(
 
 @router.post("/clusters/rebuild")
 async def rebuild(project_id: str = Depends(get_project_id)) -> dict:
-    # Embeddings stay on OpenAI (OpenRouter has no embeddings API); the analysis agents run
-    # via the OpenRouter provider.
-    if not settings.openai_api_key or not llm_enabled():
+    # Embeddings and the analysis agents both go through OpenRouter (OPENAI_API_KEY is only a
+    # fallback for embeddings on older deployments).
+    if not embeddings_enabled() or not llm_enabled():
         raise HTTPException(
             status_code=400,
-            detail="Set OPENAI_API_KEY (embeddings) and OPENROUTER_API_KEY (agent analysis) to enable cluster rebuild",
+            detail="Set OPENROUTER_API_KEY (embeddings + agent analysis) to enable cluster rebuild",
         )
     rebuild_clusters_task.delay(project_id)
     return {"status": "started"}
@@ -75,8 +75,7 @@ async def list_clusters(project_id: str = Depends(get_project_id)) -> list[dict]
     def work():
         with SyncSessionLocal() as s:
             return [
-                _cluster_dict(cl, slug)
-                for cl, slug in repo.clusters_list_with_agent(s, project_id)
+                _cluster_dict(cl, slug) for cl, slug in repo.clusters_list_with_agent(s, project_id)
             ]
 
     return await run_in_threadpool(work)
@@ -107,9 +106,7 @@ async def get_cluster(cluster_id: str, project_id: str = Depends(get_project_id)
             ]
             agent = s.get(Agent, cl.agent_id)
             d = _cluster_dict(cl, agent.slug if agent else None, members)
-            d["histogram"] = histogram(
-                [meta[m.trace_id]["ts"] for m in mem if m.trace_id in meta]
-            )
+            d["histogram"] = histogram([meta[m.trace_id]["ts"] for m in mem if m.trace_id in meta])
             d["suggested_evaluator"] = suggest_evaluator(cl.label, cl.taxonomy)
             return d
 
@@ -120,9 +117,7 @@ async def get_cluster(cluster_id: str, project_id: str = Depends(get_project_id)
 
 
 @router.post("/clusters/{cluster_id}/promote")
-async def promote_cluster(
-    cluster_id: str, project_id: str = Depends(get_project_id)
-) -> dict:
+async def promote_cluster(cluster_id: str, project_id: str = Depends(get_project_id)) -> dict:
     def work():
         with SyncSessionLocal() as s:
             cl = repo.cluster_get(s, project_id, cluster_id)
@@ -132,9 +127,7 @@ async def promote_cluster(
             if not med:
                 return ("err", "cluster has no members")
             try:
-                case = RegressionService(s).promote_trace(
-                    project_id, med.trace_id, title=cl.label
-                )
+                case = RegressionService(s).promote_trace(project_id, med.trace_id, title=cl.label)
             except NotFound as e:
                 return ("err", str(e))
             cl.status = "PROMOTED"
@@ -170,9 +163,7 @@ async def delete_clusters(
 
 
 @router.post("/clusters/{cluster_id}/ignore")
-async def ignore_cluster(
-    cluster_id: str, project_id: str = Depends(get_project_id)
-) -> dict:
+async def ignore_cluster(cluster_id: str, project_id: str = Depends(get_project_id)) -> dict:
     def work():
         with SyncSessionLocal() as s:
             cl = repo.cluster_get(s, project_id, cluster_id)

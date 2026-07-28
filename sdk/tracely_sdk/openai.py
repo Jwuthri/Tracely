@@ -51,7 +51,14 @@ def _capture(span: Any, resp: Any) -> None:
         set_io(span, output=out)
         usage = getattr(resp, "usage", None)
         if usage:
-            set_usage(span, input_tokens=usage.prompt_tokens, output_tokens=usage.completion_tokens)
+            set_usage(
+                span,
+                input_tokens=usage.prompt_tokens,
+                output_tokens=usage.completion_tokens,
+                cached_tokens=getattr(
+                    getattr(usage, "prompt_tokens_details", None), "cached_tokens", None
+                ),
+            )
     except Exception:  # never let trace capture break the caller's call
         pass
 

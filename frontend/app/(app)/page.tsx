@@ -1,6 +1,8 @@
-import { getCases, getStats, getTraces } from "@/app/lib/api";
+import { getCases, getClusters, getStats, getTraces, getTrends, type FailureCluster } from "@/app/lib/api";
 import { Badge, StatCard, statusVariant, verdictVariant } from "@/app/components/ui";
 import { IconChevron } from "@/app/components/icons";
+import { OpsStrip } from "@/app/components/OpsPanel";
+import { Spark } from "@/app/components/Bars";
 
 function SectionHead({ title, href }: { title: string; href: string }) {
   return (
@@ -17,8 +19,61 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div className="px-4 py-10 text-center text-[13px] text-fg-faint">{children}</div>;
 }
 
+/** Top open clusters as count-proportional bars — the dashboard's "what should I work on next".
+ *  A cluster is already a ranked pile of identical failures, so the bar length IS the priority. */
+function TopClusters({ clusters }: { clusters: FailureCluster[] }) {
+  // "OPEN" is the only untriaged state — a cluster becomes "PROMOTED" once it has a regression
+  // case, at which point it's handled and no longer work to pick up (see repositories.py).
+  const top = clusters
+    .filter((c) => c.status === "OPEN")
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+  if (top.length === 0) return null;
+
+  const max = Math.max(1, ...top.map((c) => c.count));
+  return (
+    <section className="reveal card overflow-hidden" style={{ animationDelay: "200ms" }}>
+      <SectionHead title="Biggest failure clusters" href="/clusters" />
+      <div className="space-y-3 px-4 py-4">
+        {top.map((c) => (
+          <a key={c.id} href={`/clusters/${c.id}`} className="group block">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="truncate text-[13px] text-fg transition-colors group-hover:text-signal">
+                {c.label || c.signature}
+              </span>
+              <span className="shrink-0 font-mono text-[11px] text-fg-faint">
+                {c.taxonomy ? `${c.taxonomy} · ` : ""}
+                {c.count} {c.count === 1 ? "trace" : "traces"}
+              </span>
+            </div>
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-ink-900">
+              <div className="h-full rounded-full bg-fail/60" style={{ width: `${(c.count / max) * 100}%` }} />
+            </div>
+          </a>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default async function Dashboard() {
-  const [stats, traces, cases] = await Promise.all([getStats(), getTraces(), getCases()]);
+  const [stats, traces, cases, trends, clusters] = await Promise.all([
+    getStats(),
+    getTraces(),
+    getCases(),
+    getTrends(14),
+    getClusters(),
+  ]);
+  // 14-day shape behind the headline counts — a count with no direction can't tell you if it's
+  // getting worse, which is the only question a dashboard number is really asked. Under three
+  // days there is no shape to show, and a one-point spark just renders as a solid block.
+  const spark = (values: number[], stroke: string, fill: string) =>
+    values.length < 3 ? undefined : (
+      <Spark series={[{ values, stroke, fill, label: "" }]} height={30} grid={false} />
+    );
+  const volume = trends.daily.map((d) => d.traces);
+  const failures = trends.daily.map((d) => d.failures);
+
   return (
     <div className="space-y-8">
       <header className="reveal">
@@ -29,7 +84,13 @@ export default async function Dashboard() {
       </header>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Traces" value={stats.traces} sub={`${stats.spans} spans`} delay={0} />
+        <StatCard
+          label="Traces"
+          value={stats.traces}
+          sub={`${stats.spans} spans`}
+          chart={spark(volume, "stroke-signal", "fill-signal/10")}
+          delay={0}
+        />
         <StatCard
           label="Failure clusters"
           value={stats.open_clusters}
@@ -42,10 +103,15 @@ export default async function Dashboard() {
           value={stats.auto_failures}
           accent={stats.auto_failures ? "text-fail" : "text-fg"}
           sub="auto-detected, incl. silent"
+          chart={spark(failures, "stroke-fail", "fill-fail/10")}
           delay={120}
         />
         <StatCard label="Regression cases" value={stats.cases} accent="text-signal" sub="forever-running" delay={180} />
       </div>
+
+      <OpsStrip />
+
+      <TopClusters clusters={clusters} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <section className="reveal card overflow-hidden" style={{ animationDelay: "220ms" }}>

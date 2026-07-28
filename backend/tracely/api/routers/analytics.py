@@ -18,6 +18,12 @@ from tracely.infrastructure.db.engine import SyncSessionLocal
 router = APIRouter(prefix="/api")
 
 
+@router.get("/ops")
+async def ops(days: int = 14, project_id: str = Depends(get_project_id)) -> dict:
+    """Latency / throughput / cost roll-up (the observability panel on Trends)."""
+    return await async_reader.ops_metrics(project_id, max(1, min(days, 90)))
+
+
 @router.get("/trends")
 async def trends(days: int = 14, project_id: str = Depends(get_project_id)) -> dict:
     days = max(1, min(days, 90))

@@ -100,7 +100,7 @@ const HJson = HighlightedJson;
 
 // Formatted Tokens / Cost breakdown for the usage popover (nicer than raw JSON).
 function UsageBody({ usage }: { usage: Record<string, number> }) {
-  const tokenRows = ([["Input", "input_tokens"], ["Output", "output_tokens"], ["Thinking", "thinking_tokens"], ["Total", "total_tokens"]] as Array<[string, string]>).filter(([, k]) => usage[k] != null);
+  const tokenRows = ([["Input", "input_tokens"], ["Cached", "cached_tokens"], ["Cache write", "cache_write_tokens"], ["Output", "output_tokens"], ["Thinking", "thinking_tokens"], ["Total", "total_tokens"]] as Array<[string, string]>).filter(([, k]) => usage[k] != null);
   const costRows = ([["Input", "input_price"], ["Output", "output_price"], ["Total", "cost"]] as Array<[string, string]>).filter(([, k]) => usage[k] != null);
   const row = (label: string, k: string, fmt: (n: number) => string, cls: string) => (
     <div key={k} className={clsx("flex items-center justify-between gap-4", k === "total_tokens" || k === "cost" ? "mt-0.5 border-t border-slate-700/60 pt-1 font-medium" : "")}>
@@ -1350,12 +1350,17 @@ type Cache<T> = Record<string, T | "loading" | undefined>;
 export function TraceTable({
   conversations,
   embedded = false,
+  shared = false,
   onDeleted,
 }: {
   conversations: ConvNode[];
   // When embedded in a tabbed trace view, the parent owns the Enlarge/Concise control + the
   // full-width breakout (so it applies across Table/Timeline/Evaluations), so we suppress ours.
   embedded?: boolean;
+  // Public share page: hide every control that mutates project state (the visitor has no session,
+  // so those calls would 401 anyway). Read-only controls — expand, filter, column visibility —
+  // stay, because they are what makes a shared trace worth reading.
+  shared?: boolean;
   // Passing this enables conversation multi-select + Delete; the parent drops the rows it gets back.
   onDeleted?: (threads: string[]) => void;
 }) {
@@ -1727,7 +1732,7 @@ export function TraceTable({
               <ChevronsUpDown className="h-3.5 w-3.5" />
               <span>{allOpen ? "Collapse All" : "Expand All"}</span>
             </button>
-            {evaluators.length > 0 && conversations.length > 0 && (
+            {!shared && evaluators.length > 0 && conversations.length > 0 && (
               <button
                 onClick={runAllEvals}
                 disabled={anyRunning}
@@ -1765,14 +1770,16 @@ export function TraceTable({
             )}
           </div>
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => setColumnModal({ open: true, editing: null })}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-signal/40 bg-signal/15 px-3 py-1.5 text-xs font-medium text-signal transition-all hover:bg-signal/25 hover:shadow-glow"
-              title="Add an evaluation column"
-            >
-              <PlusIcon className="h-3.5 w-3.5" />
-              <span>Add Column</span>
-            </button>
+            {!shared && (
+              <button
+                onClick={() => setColumnModal({ open: true, editing: null })}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-signal/40 bg-signal/15 px-3 py-1.5 text-xs font-medium text-signal transition-all hover:bg-signal/25 hover:shadow-glow"
+                title="Add an evaluation column"
+              >
+                <PlusIcon className="h-3.5 w-3.5" />
+                <span>Add Column</span>
+              </button>
+            )}
             {!embedded && <WideToggle wide={wide} onToggle={() => setWide(!wide)} />}
             <div className="relative">
               <button onClick={() => setTypeMenu((o) => !o)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-white" title="Filter step types">
@@ -1835,7 +1842,7 @@ export function TraceTable({
       </div>
 
       <AddColumnModal
-        open={columnModal.open}
+        open={!shared && columnModal.open}
         editing={columnModal.editing}
         previewThread={[...openConv][0] ?? conversations[0]?.thread}
         onClose={() => setColumnModal({ open: false, editing: null })}

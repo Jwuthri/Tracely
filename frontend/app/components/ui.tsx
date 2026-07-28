@@ -106,12 +106,14 @@ export function StatCard({
   value,
   sub,
   accent,
+  chart,
   delay = 0,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
   accent?: string;
+  chart?: ReactNode; // optional sparkline under the number — a count alone never shows direction
   delay?: number;
 }) {
   return (
@@ -125,6 +127,7 @@ export function StatCard({
       >
         {value}
       </div>
+      {chart != null && <div className="mt-3">{chart}</div>}
       {sub != null && <div className="mt-2.5 text-[12.5px] text-fg-muted">{sub}</div>}
     </div>
   );

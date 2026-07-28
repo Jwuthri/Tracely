@@ -51,7 +51,13 @@ def _capture(span: Any, resp: Any) -> None:
             span.set_attribute("tracely.tool_calls", tool_names)
         usage = getattr(resp, "usage", None)
         if usage:
-            set_usage(span, input_tokens=usage.input_tokens, output_tokens=usage.output_tokens)
+            set_usage(
+                span,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cached_tokens=getattr(usage, "cache_read_input_tokens", None),
+                cache_write_tokens=getattr(usage, "cache_creation_input_tokens", None),
+            )
     except Exception:  # never let trace capture break the caller's call
         pass
 

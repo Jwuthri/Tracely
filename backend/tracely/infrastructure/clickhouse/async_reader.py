@@ -645,6 +645,133 @@ async def stats_counts(project_id: str, advisory: Sequence[str] = ()) -> dict:
     return {"traces": traces, "spans": spans, "failing_traces": failing, "auto_failures": auto_failures}
 
 
+_MS = "dateDiff('millisecond', start_time, coalesce(end_time, start_time))"
+
+
+async def ops_metrics(project_id: str, days: int) -> dict:
+    """Operational roll-up over the last `days` — the latency/throughput/cost view every
+    observability tool shows: end-to-end trace latency p50/p95/p99, error rate, tokens and
+    spend, broken out per day, per model, and by slowest span name.
+
+    `GROUP BY … WITH ROLLUP` appends the grand-total row in the same scan (`d` = 1970-01-01,
+    `model_id` = ''), so the headline numbers are real percentiles over the whole window and
+    not an average of per-day percentiles — one query instead of two."""
+    client = await get_async_client()
+
+    daily_rows = (
+        await client.query(
+            """
+            SELECT toDate(t0)                    AS d,
+                   count()                       AS traces,
+                   toUInt32(quantile(0.5)(ms))   AS p50,
+                   toUInt32(quantile(0.95)(ms))  AS p95,
+                   toUInt32(quantile(0.99)(ms))  AS p99,
+                   countIf(errs > 0)             AS errors,
+                   toUInt64(sum(tokens))         AS tokens,
+                   toFloat64(sum(cost))          AS cost
+            FROM (
+                SELECT min(start_time) AS t0,
+                       dateDiff('millisecond', min(start_time),
+                                max(coalesce(end_time, start_time)))  AS ms,
+                       countIf(level = 'ERROR')                       AS errs,
+                       sum(arraySum(mapValues(usage_details)))        AS tokens,
+                       sum(arraySum(mapValues(cost_details)))         AS cost
+                FROM events FINAL
+                WHERE project_id = {p:String} AND start_time >= subtractDays(now(), {d:UInt32})
+                GROUP BY trace_id
+            )
+            GROUP BY d WITH ROLLUP ORDER BY d
+            """,
+            parameters={"p": project_id, "d": days},
+        )
+    ).result_rows
+
+    model_rows = (
+        await client.query(
+            f"""
+            SELECT model_id,
+                   count()                                                   AS calls,
+                   toUInt32(quantile(0.5)(ms))                               AS p50,
+                   toUInt32(quantile(0.95)(ms))                              AS p95,
+                   toUInt32(ifNotFinite(quantileIf(0.5)(ttft, ttft > 0), 0)) AS ttft_p50,
+                   countIf(level = 'ERROR')                                  AS errors,
+                   toUInt64(sum(tokens))                                     AS tokens,
+                   toUInt64(sum(in_tokens))                                  AS in_tokens,
+                   toUInt64(sum(out_tokens))                                 AS out_tokens,
+                   toFloat64(sum(cost))                                      AS cost
+            FROM (
+                SELECT model_id, level,
+                       {_MS}                                                             AS ms,
+                       dateDiff('millisecond', start_time, completion_start_time)        AS ttft,
+                       arraySum(mapValues(usage_details))                                AS tokens,
+                       usage_details['input']                                            AS in_tokens,
+                       usage_details['output']                                           AS out_tokens,
+                       arraySum(mapValues(cost_details))                                 AS cost
+                FROM events FINAL
+                WHERE project_id = {{p:String}} AND model_id != ''
+                  AND start_time >= subtractDays(now(), {{d:UInt32}})
+            )
+            GROUP BY model_id WITH ROLLUP ORDER BY calls DESC
+            """,
+            parameters={"p": project_id, "d": days},
+        )
+    ).result_rows
+
+    slow_rows = (
+        await client.query(
+            f"""
+            SELECT name, type,
+                   count()                       AS calls,
+                   toUInt32(quantile(0.5)(ms))   AS p50,
+                   toUInt32(quantile(0.95)(ms))  AS p95,
+                   toUInt32(max(ms))             AS p_max,
+                   countIf(level = 'ERROR')      AS errors
+            FROM (SELECT name, type, level, {_MS} AS ms FROM events FINAL
+                  WHERE project_id = {{p:String}}
+                    AND start_time >= subtractDays(now(), {{d:UInt32}}))
+            GROUP BY name, type ORDER BY p95 DESC LIMIT 8
+            """,
+            parameters={"p": project_id, "d": days},
+        )
+    ).result_rows
+
+    def _lat(r: Sequence) -> dict:
+        return {"traces": int(r[1]), "p50": int(r[2]), "p95": int(r[3]), "p99": int(r[4]),
+                "errors": int(r[5]), "tokens": int(r[6]), "cost": float(r[7])}
+
+    total = next((_lat(r) for r in daily_rows if str(r[0]) == "1970-01-01"), _lat([0] * 8))
+    daily = [{"date": str(r[0]), **_lat(r)} for r in daily_rows if str(r[0]) != "1970-01-01"]
+
+    def _model(r: Sequence) -> dict:
+        return {"model": r[0], "calls": int(r[1]), "p50": int(r[2]), "p95": int(r[3]),
+                "ttft_p50": int(r[4]), "errors": int(r[5]), "tokens": int(r[6]),
+                "input_tokens": int(r[7]), "output_tokens": int(r[8]), "cost": float(r[9])}
+
+    models = [_model(r) for r in model_rows if r[0]]
+    gen_total = next((_model(r) for r in model_rows if not r[0]), _model([""] + [0] * 9))
+
+    return {
+        "days": days,
+        "summary": {
+            **total,
+            "error_rate": round(total["errors"] / total["traces"], 4) if total["traces"] else 0.0,
+            "traces_per_day": round(total["traces"] / days, 1),
+            "ttft_p50": gen_total["ttft_p50"],
+            "llm_calls": gen_total["calls"],
+            "cost_per_1k_traces": round(total["cost"] / total["traces"] * 1000, 2)
+            if total["traces"]
+            else 0.0,
+        },
+        "daily": daily,
+        "models": models[:8],
+        "slowest": [
+            {"name": r[0], "type": r[1], "calls": int(r[2]), "p50": int(r[3]),
+             "p95": int(r[4]), "max": int(r[5]), "errors": int(r[6])}
+            for r in slow_rows
+        ],
+    }
+
+
 async def daily_trace_failures(
     project_id: str, days: int, advisory: Sequence[str] = ()
 ) -> list[dict]:

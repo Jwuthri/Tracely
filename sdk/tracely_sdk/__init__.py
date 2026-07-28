@@ -921,6 +921,8 @@ def set_usage(
     input_tokens: int | None = None,
     output_tokens: int | None = None,
     thinking_tokens: int | None = None,
+    cached_tokens: int | None = None,
+    cache_write_tokens: int | None = None,
 ) -> None:
     if input_tokens is not None:
         span.set_attribute("gen_ai.usage.input_tokens", int(input_tokens))
@@ -928,6 +930,13 @@ def set_usage(
         span.set_attribute("gen_ai.usage.output_tokens", int(output_tokens))
     if thinking_tokens is not None:
         span.set_attribute("gen_ai.usage.reasoning_tokens", int(thinking_tokens))
+    # Prompt-cache breakdown, informational only: whether it overlaps input_tokens is
+    # provider-dependent, so the backend keeps it out of the additive usage map and the UI shows it
+    # as its own row. Names match OpenLLMetry's, so auto-instrumented spans land on the same keys.
+    if cached_tokens is not None:
+        span.set_attribute("gen_ai.usage.cache_read_input_tokens", int(cached_tokens))
+    if cache_write_tokens is not None:
+        span.set_attribute("gen_ai.usage.cache_creation_input_tokens", int(cache_write_tokens))
 
 
 def error(span: Span, message: str = "") -> None:

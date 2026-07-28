@@ -69,7 +69,8 @@ class Settings(BaseSettings):
     llm_judge_api_key: str = ""
     llm_judge_base_url: str = "https://api.openai.com/v1"
 
-    # failure intelligence (embeddings + LangGraph agents) — needs an OpenAI key
+    # failure intelligence (embeddings + agents) — embeddings ride the OpenRouter key too
+    # (OpenAI-compatible /embeddings); this key is only the direct-OpenAI fallback.
     openai_api_key: str = ""
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1024

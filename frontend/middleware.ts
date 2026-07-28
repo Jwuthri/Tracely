@@ -13,6 +13,7 @@ const PUBLIC = [
   /^\/accept-invite/,
   /^\/sign-in/,
   /^\/sign-up/,
+  /^\/share\//, // public conversation links — the token in the path is the credential
   /^\/api\/health/,
   /^\/api\/auth\//,
 ];
@@ -21,9 +22,12 @@ const isPublic = (p: string) => PUBLIC.some((re) => re.test(p));
 export default async function middleware(req: NextRequest, ev: NextFetchEvent) {
   if (MODE === "clerk") {
     const { clerkMiddleware, createRouteMatcher } = await import("@clerk/nextjs/server");
+    // Keep in sync with PUBLIC above — Clerk mode has its own matcher, so a route added to only
+    // one of the two lists is public in local mode and a redirect loop in Clerk mode.
     const isPublicClerk = createRouteMatcher([
       "/sign-in(.*)",
       "/sign-up(.*)",
+      "/share/(.*)",
       "/api/health",
       "/api/auth/(.*)",
     ]);

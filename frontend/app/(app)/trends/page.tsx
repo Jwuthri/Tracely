@@ -3,6 +3,7 @@ import { StatCard } from "@/app/components/ui";
 import { Bars, Legend } from "@/app/components/Bars";
 import { MetaAnalysisPanel } from "@/app/components/MetaAnalysisPanel";
 import { EvalCostPanel } from "@/app/components/EvalCostPanel";
+import { OpsPanel } from "@/app/components/OpsPanel";
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const mmdd = (d: string) => d.slice(5); // YYYY-MM-DD -> MM-DD
@@ -34,6 +35,8 @@ export default async function TrendsPage() {
         <StatCard label="Regression tests" value={s.cases} accent="text-signal"
           sub={s.mttr_hours != null ? `~${s.mttr_hours}h failure → test` : "forever-running"} delay={130} />
       </div>
+
+      <OpsPanel days={t.days} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="reveal card p-5" style={{ animationDelay: "150ms" }}>

@@ -89,6 +89,7 @@ export default async function TracePage({ params }: { params: Promise<{ traceId:
               <span>{spans.length} spans</span>
               <span>{totalMs < 1000 ? `${Math.round(totalMs)}ms` : `${(totalMs / 1000).toFixed(2)}s`}</span>
               {usage.input_tokens ? <span>{usage.input_tokens.toLocaleString("en-US")} in</span> : null}
+              {usage.cached_tokens ? <span>{usage.cached_tokens.toLocaleString("en-US")} cached</span> : null}
               {usage.output_tokens ? <span>{usage.output_tokens.toLocaleString("en-US")} out</span> : null}
               {usage.total_tokens ? <span>{usage.total_tokens.toLocaleString("en-US")} tokens</span> : null}
               {usage.cost ? <span className="text-amber-300/90">{fmtUsd(usage.cost)}</span> : null}

@@ -85,6 +85,7 @@ def _capture(span: Any, resp: Any) -> None:
                 input_tokens=getattr(usage, "prompt_token_count", None),
                 output_tokens=getattr(usage, "candidates_token_count", None),
                 thinking_tokens=getattr(usage, "thoughts_token_count", None),
+                cached_tokens=getattr(usage, "cached_content_token_count", None),
             )
     except Exception:  # never let trace capture break the caller's call
         pass

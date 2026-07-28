@@ -63,6 +63,14 @@ export function spanUsage(span: SpanOut): Record<string, number> {
   if (it != null) u.input_tokens = it;
   if (ot != null) u.output_tokens = ot;
   if (tt != null) u.thinking_tokens = tt;
+  // Prompt-cache breakdown. A subset of the input count on some providers (OpenAI folds cached
+  // reads into prompt_tokens) but *not* others (Anthropic reports them beside input_tokens), so
+  // like thinking_tokens it's surfaced on its own and kept out of the total. Only shown when > 0 —
+  // a cache-enabled call that misses reports 0 on every span.
+  const cr = pickNum(md, ["gen_ai.usage.cache_read_input_tokens", "gen_ai.usage.cached_input_tokens", "cache_read_input_tokens", "cached_tokens", "llm.token_count.prompt_details.cache_read"]);
+  const cw = pickNum(md, ["gen_ai.usage.cache_creation_input_tokens", "cache_creation_input_tokens", "llm.token_count.prompt_details.cache_write"]);
+  if (cr) u.cached_tokens = cr;
+  if (cw) u.cache_write_tokens = cw;
   // total = input + output (matches the backend token total, which excludes reasoning tokens);
   // thinking_tokens is surfaced separately.
   // Trust the input+output breakdown over any stored aggregate: a producer that reports total AND

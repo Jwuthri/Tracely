@@ -40,3 +40,46 @@ def verify_session(token: str) -> dict:
         )
     except jwt.PyJWTError as e:  # expired, bad sig, wrong issuer, missing claim, alg mismatch …
         raise TokenError(str(e)) from e
+
+
+# ── public share links ────────────────────────────────────────────────────────
+
+# A share token is a read-only capability for exactly ONE conversation — not a login. It carries
+# its own issuer and deliberately NO `sub`, so it can never satisfy `verify_session` (which requires
+# both), and it must never be handed to `resolve_principal`: doing so would promote a share link
+# into a full project read key. `api/routers/share.py` verifies it directly for that reason.
+SHARE_ISSUER = "tracely-share"
+SHARE_TTL_SECONDS = 30 * 24 * 3600
+
+# ponytail: stateless, so a link dies only when it expires — there is no revoke. To add one, either
+# a `share_revocations` table checked in `verify_share`, or a per-project salt mixed into the
+# signing key (bumping it kills every link for that project at once).
+
+
+def issue_share(
+    project_id: str, thread_id: str, *, ttl_seconds: int = SHARE_TTL_SECONDS
+) -> str:
+    now = int(time.time())
+    payload = {
+        "pid": project_id,
+        "tid": thread_id,
+        "iss": SHARE_ISSUER,
+        "iat": now,
+        "exp": now + ttl_seconds,
+    }
+    return jwt.encode(payload, settings.session_secret, algorithm="HS256")
+
+
+def verify_share(token: str) -> tuple[str, str]:
+    """`(project_id, thread_id)` for a valid share token; `TokenError` for anything else."""
+    try:
+        claims = jwt.decode(
+            token,
+            settings.session_secret,
+            algorithms=["HS256"],
+            issuer=SHARE_ISSUER,
+            options={"require": ["exp", "iss", "pid", "tid"]},
+        )
+    except jwt.PyJWTError as e:
+        raise TokenError(str(e)) from e
+    return claims["pid"], claims["tid"]

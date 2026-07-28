@@ -14,7 +14,18 @@ import { Badge, verdictVariant } from "./ui";
 //                evaluation results as metric columns (run buttons per row/column)
 //   • Timeline — a waterfall across every span of every turn, with idle think-time between
 //                turns collapsed (so an hour-later reply doesn't render an hour of empty track)
-export function SessionView({ conv, turns }: { conv: ConvNode; turns: FullTurn[] }) {
+export function SessionView({
+  conv,
+  turns,
+  shared = false,
+}: {
+  conv: ConvNode;
+  turns: FullTurn[];
+  // Public share page: the visitor has no session, so hide the Agents panel (it fetches an authed
+  // proxy). Everything else here renders from props; the table's optional fetches already
+  // degrade to empty on a 401 rather than erroring.
+  shared?: boolean;
+}) {
   const [tab, setTab] = useState<"table" | "timeline">("table");
 
   // Every span across all turns; the Waterfall compresses the idle gaps between turns.
@@ -47,6 +58,7 @@ export function SessionView({ conv, turns }: { conv: ConvNode; turns: FullTurn[]
               evals {overallVerdict}
             </Badge>
           )}
+          {!shared && (
           <button
             onClick={() => setShowAgents(true)}
             title="Agents & tools in this conversation"
@@ -59,6 +71,7 @@ export function SessionView({ conv, turns }: { conv: ConvNode; turns: FullTurn[]
             </svg>
             Agents
           </button>
+          )}
           <WideToggle wide={wide} onToggle={() => setWide(!wide)} />
         </div>
       </div>
@@ -68,7 +81,7 @@ export function SessionView({ conv, turns }: { conv: ConvNode; turns: FullTurn[]
       )}
 
       <div style={wide ? WIDE_STYLE : undefined} className="transition-[width,margin] duration-200">
-        {tab === "table" && <TraceTable conversations={[conv]} embedded />}
+        {tab === "table" && <TraceTable conversations={[conv]} embedded shared={shared} />}
         {tab === "timeline" && <Waterfall spans={allSpans} />}
       </div>
     </div>

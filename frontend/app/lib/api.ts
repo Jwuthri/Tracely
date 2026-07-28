@@ -331,3 +331,45 @@ export type Trends = {
 export async function getTrends(days = 14): Promise<Trends> {
   return getJson<Trends>(`/api/trends?days=${days}`);
 }
+
+/** Latency / throughput / cost roll-up. Durations are milliseconds; `cost` comes from OTLP
+ *  `cost_details` and is 0 for SDKs that don't report price (the panel derives it from tokens). */
+export type Ops = {
+  days: number;
+  summary: {
+    traces: number;
+    p50: number;
+    p95: number;
+    p99: number;
+    errors: number;
+    error_rate: number;
+    traces_per_day: number;
+    tokens: number;
+    cost: number;
+    cost_per_1k_traces: number;
+    ttft_p50: number;
+    llm_calls: number;
+  };
+  daily: { date: string; traces: number; p50: number; p95: number; p99: number; errors: number; tokens: number; cost: number }[];
+  models: {
+    model: string; calls: number; p50: number; p95: number; ttft_p50: number;
+    errors: number; tokens: number; input_tokens: number; output_tokens: number; cost: number;
+  }[];
+  slowest: { name: string; type: string; calls: number; p50: number; p95: number; max: number; errors: number }[];
+};
+
+export async function getOps(days = 14): Promise<Ops> {
+  return getJson<Ops>(`/api/ops?days=${days}`);
+}
+
+export type SharedSession = { thread_id: string; turns: FullTurn[]; scores: EvalScore[] };
+
+/** Read a publicly shared conversation. Deliberately NOT authenticated — the token in the path is
+ *  the whole credential, and the visitor has no session to send. `null` on 404 (which the backend
+ *  also returns for expired/forged tokens, so a bad link and a private one look identical). */
+export async function getSharedSession(token: string): Promise<SharedSession | null> {
+  const res = await fetch(`${API}/api/share/${encodeURIComponent(token)}`, { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new ApiError(res.status, "/api/share");
+  return res.json() as Promise<SharedSession>;
+}

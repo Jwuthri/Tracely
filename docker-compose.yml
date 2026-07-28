@@ -24,9 +24,9 @@ x-app-env: &app-env
   S3_BUCKET: tracely-events
   S3_EVENT_PREFIX: events/
   # LLM access: every chat call (judge, metric generation, failure-intel agents) goes through
-  # LangChain `create_agent` on OpenRouter. OPENAI_API_KEY stays for embeddings only
-  # (OpenRouter has no embeddings API); LLM_JUDGE_API_KEY is the legacy direct-endpoint
-  # fallback used when no OpenRouter key is set.
+  # LangChain `create_agent` on OpenRouter, and embeddings go through its OpenAI-compatible
+  # /embeddings endpoint — OPENROUTER_API_KEY alone is enough. OPENAI_API_KEY / LLM_JUDGE_API_KEY
+  # are the legacy direct-endpoint fallbacks used when no OpenRouter key is set.
   OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   LLM_JUDGE_API_KEY: ${OPENAI_API_KEY:-}
@@ -223,6 +223,7 @@ services:
     command: ["pnpm", "exec", "next", "dev", "-H", "0.0.0.0"]
     volumes:
       - ./frontend/app:/app/app           # live source -> next dev hot-reload (node_modules/.next stay baked)
+      - ./frontend/middleware.ts:/app/middleware.ts   # the auth guard lives outside app/ — without this, edits to it silently never reach the container
     environment:
       TRACELY_API: http://backend:8000     # server-side fetch uses the compose network
       TRACELY_KEY: tracely_dev_key         # dev-mode fallback only (AUTH_MODE=dev)
