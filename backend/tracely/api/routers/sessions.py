@@ -82,9 +82,13 @@ async def get_session(
 
 
 def _shape_declared_agent(ag: dict, obs_counts: dict[str, int]) -> dict:
-    """Normalize a user-declared agent ({name, description, tools}) into the panel shape, annotating
-    each tool with how many times it was actually executed in the conversation (from observed spans).
-    `tools` may be a dict-of-tools (the documented shape) or a list."""
+    """Normalize a user-declared agent into the panel shape: `name`/`description`/`tools` are
+    guaranteed present, each tool annotated with how many times it actually ran (observed spans).
+    `tools` may be a dict-of-tools (the documented shape) or a list.
+
+    Every OTHER key the caller declared (`system_prompt`, `model`, `guardrails`, `config`, …) is
+    passed through untouched — the catalog is free-form JSON on the way in, so narrowing it here
+    would silently drop config the user deliberately sent. Same for per-tool extras."""
     raw = ag.get("tools")
     entries = raw.items() if isinstance(raw, dict) else (
         [(t.get("name", ""), t) for t in raw if isinstance(t, dict)] if isinstance(raw, list) else []
@@ -95,6 +99,7 @@ def _shape_declared_agent(ag: dict, obs_counts: dict[str, int]) -> dict:
         name = tdef.get("name") or key
         tools.append(
             {
+                **tdef,
                 "name": name,
                 "description": tdef.get("description") or "",
                 "parameters": tdef.get("parameters") or {},
@@ -102,6 +107,7 @@ def _shape_declared_agent(ag: dict, obs_counts: dict[str, int]) -> dict:
             }
         )
     return {
+        **ag,
         "name": ag.get("name") or "agent",
         "description": ag.get("description") or "",
         "tools": tools,
@@ -143,6 +149,34 @@ async def get_session_agents(
     declared = [_shape_declared_agent(ag, obs_counts) for ag in declared_raw if isinstance(ag, dict)]
 
     return {"thread_id": thread_id, "declared": declared, "observed": observed}
+
+
+class SessionConfigBody(BaseModel):
+    agents: list[dict]  # free-form; only `name`/`description`/`tools` carry panel meaning
+    meta: dict | None = None
+
+
+@router.post("/sessions/{thread_id}/config")
+async def put_session_config(
+    thread_id: str, body: SessionConfigBody, project_id: str = Depends(get_project_id)
+) -> dict:
+    """Declare a conversation's agent config without the SDK — the HTTP twin of
+    `tracely.trace(..., agents=[...])`. Same store, same latest-wins-per-thread semantics; read it
+    back (merged with observed agents) from `GET /sessions/{thread_id}/agents`.
+
+    Each agent is free-form JSON. `name`/`description`/`tools` drive the panel; anything else
+    (`system_prompt`, `model`, `guardrails`, `config`, …) is stored and returned verbatim."""
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="thread_id required")
+
+    def work() -> None:
+        with SyncSessionLocal() as s:
+            repo.conversation_agents_upsert(
+                s, project_id, thread_id=thread_id, agents=body.agents, meta=body.meta
+            )
+
+    await run_in_threadpool(work)
+    return {"thread_id": thread_id, "agents": len(body.agents)}
 
 
 class GenerateSummaryBody(BaseModel):

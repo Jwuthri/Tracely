@@ -37,6 +37,44 @@ def input_digest(spans: list[dict]) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
 
+def system_prompt(spans: list[dict]) -> str:
+    """The system prompt these spans ran under — the first `role == "system"` message in any span's
+    `input`. Providers differ wildly in what config they emit, but the system prompt is always in
+    the messages, so this recovers it for agents that declared nothing (`otel/messages.py` has
+    already normalized `system`/`developer`/`SystemMessage` to `role: "system"` at ingest).
+
+    Returns "" when no span carries one — plenty of traces never send a system message."""
+    for s in spans:
+        raw = s.get("input")
+        if not raw or '"system"' not in str(raw):
+            continue  # cheap reject before paying for the JSON parse
+        try:
+            msgs = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            continue
+        for m in msgs if isinstance(msgs, list) else []:
+            if not isinstance(m, dict) or m.get("role") != "system":
+                continue
+            text = _content_text(m.get("content"))
+            if text:
+                return text
+    return ""
+
+
+def _content_text(content: object) -> str:
+    """A normalized message body -> plain text. Content is a string or a list of blocks; join the
+    text blocks and ignore images/tool parts."""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = [
+            b["text"] for b in content
+            if isinstance(b, dict) and isinstance(b.get("text"), str)
+        ]
+        return "\n".join(parts).strip()
+    return ""
+
+
 @dataclass(frozen=True, slots=True)
 class FailureFacts:
     """The failure-relevant slice of a trace, extracted once.

@@ -565,7 +565,24 @@ def trace(
     `agents` declares the conversation's agent catalog — a list of
     `{name, description, tools: {tool_name: {name, description, parameters}}}` — surfaced in the
     Conversation Agents panel and usable in evaluation (`@LIST_AGENT`). Set it once on the first
-    turn (or every turn; the backend keeps the latest per conversation)."""
+    turn (or every turn; the backend keeps the latest per conversation).
+
+    Each agent is free-form JSON: only `name`/`description`/`tools` are interpreted, and every
+    other key is stored and returned verbatim. Declare whatever the trace can't show you —
+    `system_prompt`, `model`, `guardrails`, or a whole `config` blob:
+
+        tracely.trace(conversation="c1", agents=[{
+            "name": "router",
+            "description": "picks the specialist",
+            "system_prompt": ROUTER_PROMPT,
+            "model": {"name": "claude-opus-4", "temperature": 0.2},
+            "guardrails": [{"name": "pii_filter", "on": "output", "action": "redact"}],
+            "tools": {"search": {"description": "web search", "parameters": {...}}},
+        }])
+
+    Guardrails in particular are invisible to tracing — one that passes emits no span — so
+    declaring them is the only way they show up. Non-Python callers can POST the same list to
+    `/api/sessions/{conversation}/config`."""
     return _Trace(
         {
             "agent": agent,
@@ -907,8 +924,9 @@ def set_metadata(span: Span, **kv: Any) -> None:
 
 def set_agents(span: Span, agents: list[dict]) -> None:
     """Declare the conversation's agent catalog on a span: a list of
-    `{name, description, tools: {tool_name: {name, description, parameters}}}`. Surfaced in the
-    Conversation Agents panel and usable in evaluation (`@LIST_AGENT`). Prefer
+    `{name, description, tools: {tool_name: {name, description, parameters}}}`, plus any extra
+    keys you want kept verbatim (`system_prompt`, `model`, `guardrails`, `config`, …). Surfaced in
+    the Conversation Agents panel and usable in evaluation (`@LIST_AGENT`). Prefer
     `tracely.trace(..., agents=[...])`, which flows it onto every span; use this to set it on one
     specific (e.g. the root) span."""
     if agents:

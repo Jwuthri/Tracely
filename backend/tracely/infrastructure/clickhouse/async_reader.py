@@ -13,6 +13,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 
 from tracely.domain.traces.metadata import parse_thread_meta
+from tracely.domain.traces.spans import system_prompt
 from tracely.infrastructure.clickhouse.client import get_async_client
 from tracely.infrastructure.clickhouse.trace_reader import _SPAN_COLS
 
@@ -382,16 +383,23 @@ async def sessions_overview(
 async def thread_agents(project_id: str, thread_id: str) -> list[dict]:
     """The agents that participated in a thread and the tools each used, DERIVED from the thread's
     spans (Tracely ingests OTLP — there is no richer agent catalog than the trace itself). Each:
-    `{agent_id, tools: [{name, count}], span_count, tool_call_count}` where `count` is the number
-    of executed TOOL spans for that tool (a tool only *requested* — seen in `tool_call_names` —
-    shows count 0). Sorted by tool activity then span volume. The router resolves friendly names."""
+    `{agent_id, tools: [{name, count}], span_count, tool_call_count, system_prompt, models}` where
+    `count` is the number of executed TOOL spans for that tool (a tool only *requested* — seen in
+    `tool_call_names` — shows count 0). `system_prompt` is recovered from the agent's own messages
+    and is "" when its traces never sent one; `models` are the distinct `model_id`s it ran on.
+    Sorted by tool activity then span volume. The router resolves friendly names."""
     spans = await thread_spans_full(project_id, thread_id)
     spans_by_agent: dict[str, int] = defaultdict(int)
     tools_touched: dict[str, set[str]] = defaultdict(set)
     tool_execs: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    by_agent: dict[str, list[dict]] = defaultdict(list)
+    models: dict[str, set[str]] = defaultdict(set)
     for s in spans:
         aid = s.get("agent_id") or ""
         spans_by_agent[aid] += 1
+        by_agent[aid].append(s)
+        if s.get("model_id"):
+            models[aid].add(str(s["model_id"]))
         name = s.get("name")
         if s.get("type") == "TOOL" and name:
             tool_execs[aid][str(name)] += 1
@@ -412,6 +420,8 @@ async def thread_agents(project_id: str, thread_id: str) -> list[dict]:
                 "tools": tools,
                 "span_count": span_count,
                 "tool_call_count": sum(t["count"] for t in tools),
+                "system_prompt": system_prompt(by_agent[aid]),
+                "models": sorted(models[aid]),
             }
         )
     out.sort(key=lambda a: (a["tool_call_count"], a["span_count"]), reverse=True)
