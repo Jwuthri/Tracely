@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Hanken Grotesk";
+  --font-mono: "JetBrains Mono";
+  --font-display: "Bricolage Grotesque";
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
+  }
+  body {
+    background-color: #05070c;
+    background-image:
+      radial-gradient(1100px 620px at 12% -12%, rgba(34, 211, 238, 0.08), transparent 60%),
+      radial-gradient(900px 560px at 100% -8%, rgba(122, 162, 255, 0.06), transparent 55%);
+    background-attachment: fixed;
+  }
+  ::selection {
+    background: rgba(34, 211, 238, 0.25);
+    color: #d6fbff;
+  }
+  ::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1d2434;
+    border-radius: 9px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #2b3448;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer utilities {
+  /* blueprint grid, masked so it dissolves at the edges */
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, rgba(186, 215, 247, 0.035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(186, 215, 247, 0.035) 1px, transparent 1px);
+    background-size: 64px 64px;
+    background-position: -1px -1px;
+    mask-image: radial-gradient(ellipse 90% 80% at 50% 30%, black 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 30%, black 30%, transparent 75%);
+  }
+  /* frosted glass plate — the system's only card surface */
+  .glass {
+    @apply rounded-2xl border border-line/80 bg-ink-800/55 backdrop-blur-md shadow-frame;
+  }
+  /* ice → cyan headline fill (the app's signal accent doing the AuthKit skywash job) */
+  .text-gradient {
+    background: linear-gradient(180deg, #f2f6ff 25%, #8fe8fa 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .text-gradient-cyan {
+    background: linear-gradient(180deg, #7df0ff 0%, #22d3ee 55%, #0e7490 130%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* mono eyebrow, tracked wide — section marker */
+  .eyebrow {
+    @apply font-mono text-[11px] font-medium uppercase tracking-[0.28em] text-signal/80;
+  }
+  /* fading hairline used to flank eyebrows */
+  .hairline-x {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(186, 215, 247, 0.16), transparent);
+  }
+  .nav-blur {
+    @apply border-b border-line/60 bg-ink-950/70 backdrop-blur-md;
+  }
+}

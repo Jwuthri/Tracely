@@ -10,14 +10,24 @@ LangChain / LiteLLM code is traced into Tracely with **no span code**: model, me
 ## Install with a provider extra
 
 ```bash
-pip install "tracely-ai[openai]"            # or [anthropic], [langchain], [litellm], [all]
+pip install "tracely-ai[openai]"            # or [anthropic], [langchain], [crewai], [all]
 ```
 
-Each extra pulls the matching auto-instrumentor. Tracely adopts the OpenTelemetry ecosystem rather
-than reinventing it: the extras install [OpenInference](https://github.com/Arize-ai/openinference)
-(Arize) packages by default; [OpenLLMetry](https://github.com/traceloop/openllmetry) (Traceloop) is
-an equivalent alternative that `init("auto")` also detects (`pip install "tracely-ai[openllmetry]"`).
-The backend ingests both conventions (`gen_ai.*` and `llm.*`) independently, so either works.
+Each extra pulls the matching auto-instrumentor:
+
+| Group | Extras |
+|---|---|
+| Providers | `openai` · `anthropic` · `google` · `mistral` · `bedrock` · `groq` |
+| Harnesses | `langchain` (covers LangGraph) · `llama-index` · `crewai` · `litellm` |
+| Agent SDKs | `openai-agents` · `google-adk` · `claude-agent-sdk` · `openrouter` |
+| Drop-ins (no instrumentor) | `xai` · `openrouter-openai` · `google-genai` · `mistral-sdk` |
+| Everything | `all` — every provider, harness, and agent SDK above |
+
+Tracely adopts the OpenTelemetry ecosystem rather than reinventing it: the extras install
+[OpenInference](https://github.com/Arize-ai/openinference) (Arize) packages by default;
+[OpenLLMetry](https://github.com/traceloop/openllmetry) (Traceloop) is an equivalent alternative that
+`init("auto")` also detects (`pip install "tracely-ai[openllmetry]"`). The backend ingests both
+conventions (`gen_ai.*` and `llm.*`) independently, so either works.
 
 ## One-call setup
 
@@ -110,7 +120,7 @@ This yields a 4-span tree — `weather-agent` (AGENT) → `decide` (GENERATION) 
 
 `as_type` ∈ `span` · `generation` · `agent` · `tool` · `chain` · `retriever` · `embedding` ·
 `guardrail` · … (`capture_input` / `capture_output` default `True`). See
-[`sdk/examples/auto_agent.py`](https://github.com/julien-heysam/Tracely/blob/master/sdk/examples/auto_agent.py).
+[`sdk/examples/auto_agent.py`](https://github.com/Jwuthri/Tracely/blob/master/sdk/examples/auto_agent.py).
 
 ## The layers compose
 
@@ -168,10 +178,20 @@ client = wrap_openai(OpenAI())
 openai.OpenAI().chat.completions.create(...)
 ```
 
-Anthropic has the same drop-in — `from tracely_sdk.anthropic import Anthropic, wrap_anthropic`. Both
-emit the same attributes as the manual `llm()` helper, so they inherit `tracely.trace(...)` and map
-identically. Non-streaming sync + async calls capture model · messages · output · usage · tool calls;
-for full streaming capture, prefer the instrumentor path above.
+Six providers ship a drop-in — `openai`, `anthropic`, `google`, `mistral`, plus the OpenAI-compatible
+`openrouter` and `xai` presets:
+
+```python
+from tracely_sdk.anthropic import Anthropic, wrap_anthropic
+from tracely_sdk.google import Client as Gemini          # google-genai
+from tracely_sdk.mistral import Mistral
+from tracely_sdk.xai import Grok                         # base_url preset to api.x.ai
+```
+
+All of them emit the same attributes as the manual `llm()` helper, so they inherit
+`tracely.trace(...)` and map identically. Non-streaming sync + async calls capture model · messages ·
+output · usage · tool calls; for full streaming capture, prefer the instrumentor path above. The
+full surface is in the [API reference](/api-reference#tracely_sdkprovider--non-patching-drop-ins).
 
 ## OpenRouter & other OpenAI-compatible gateways
 
@@ -231,6 +251,33 @@ tracely.init(instrument=["litellm"])     # wires litellm.callbacks = ["otel"]
   LiteLLM for this reason. If you run both deliberately, disable the overlap with
   `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS`.
 </Callout>
+
+## Other harnesses — CrewAI & LlamaIndex
+
+Both have OpenInference instrumentors that `"auto"` picks up once installed:
+
+```bash
+pip install "tracely-ai[crewai]"        # or [llama-index]
+```
+
+CrewAI crews trace as AGENT + TOOL spans per crew member; LlamaIndex query engines trace their
+retrieval and synthesis steps. The same de-dup rule as LangChain applies — if the harness owns the
+LLM call, don't also enable the provider instrumentor.
+
+## Redacting sensitive data
+
+For regulated data this is the adoption gate, so it's built in. Redaction happens **at export** —
+the one point every span passes through — which means it covers your own `set_io` payloads *and* the
+prompts and completions the auto-instrumentors captured without you writing any span code.
+
+```python
+tracely.init(redact=True)                        # built-in PII patterns
+tracely.init(redact=[r"ORD-\d+", r"acct_\w+"])   # your own regexes → [REDACTED]
+tracely.init(redact=lambda key, value: scrub(value))
+```
+
+`True` covers email, phone, SSN, and credit-card-shaped digit runs. Off by default, and it has to be
+set on the **first** `init()` call — the exporter is built once and reused.
 
 ## Threads
 

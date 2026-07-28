@@ -8,23 +8,67 @@ annotators take a `span`.
 
 ```python
 tracely.init(endpoint="http://localhost:8000", api_key="tracely_dev_key",
-             service_name="agent", env="prod", instrument="auto") -> Tracer
+             service_name="agent", env="prod", instrument="auto",
+             redact=None, tracer_provider=None, export_scopes=None) -> Tracer
 ```
 
 Configure the OTLP/HTTP exporter pointing at Tracely, register the context-stamping span processor,
-and activate auto-instrumentors. Call once at startup; idempotent. `env` (`prod | staging | ci |
-dev`) is stamped on every span — the gating axis. `instrument` ∈ `"auto"` (activate every importable
-provider instrumentor) · a list like `["openai", "anthropic", "litellm"]` · `False` (export only).
-If you skip `init`, the first span call initializes with defaults.
+and activate auto-instrumentors. Call once at startup; idempotent. If you skip `init`, the first span
+call initializes with defaults.
+
+| Argument | Meaning |
+|---|---|
+| `endpoint` | Your Tracely API origin. Spans go to `{endpoint}/v1/traces`. |
+| `api_key` | An ingest key, sent as `Authorization: Bearer …`. |
+| `service_name` | `service.name` on the OTel resource. |
+| `env` | `prod \| staging \| ci \| dev`, stamped on every span — the gating axis. |
+| `instrument` | `"auto"` (every importable provider instrumentor) · a list like `["openai", "langchain"]` · `False` (export only). |
+| `redact` | Scrub payloads before they leave the process — see below. |
+| `tracer_provider` | Attach to a provider the host app already owns instead of building one. |
+| `export_scopes` | Instrumentation-scope prefixes to export, e.g. `("my_app.agents",)`. |
+
+### `redact` — scrub sensitive content at the exporter
+
+Redaction runs at **export**, the one chokepoint every span passes through, so it covers manual
+`set_io` / metadata **and** the zero-touch prompts and completions the auto-instrumentors capture.
+Off by default. Set it on the first `init()` call — the exporter is built once.
+
+```python
+tracely.init(redact=True)                       # built-in PII patterns
+tracely.init(redact=[r"ORD-\d+", r"acct_\w+"])  # your own regexes → [REDACTED]
+tracely.init(redact=lambda key, value: value.replace(secret, "***"))   # full control
+```
+
+`True` applies the built-in patterns (email, phone, SSN, credit-card-shaped digit runs). A list
+replaces every match with `[REDACTED]`. A callable `(attr_key, value) -> value` gets the last word.
+
+### `tracer_provider` / `export_scopes` — living with an existing OTel setup
+
+If something else already called `set_tracer_provider` (a web framework's telemetry, an
+OTel-instrumented service), OpenTelemetry ignores a second call — so the default path would silently
+export nothing. Hand Tracely the provider instead, and narrow what ships:
+
+```python
+tracely.init(
+    tracer_provider=existing_provider,
+    export_scopes=("my_app.agents", "openinference.instrumentation.langchain"),
+)
+```
+
+`export_scopes` only matters alongside `tracer_provider`; the SDK's own scope is always included.
 
 ## Automatic instrumentation
 
-### `trace(agent=None, *, conversation=None, turn=None, user=None, trace_name=None, env=None, **metadata)`
+### `trace(agent=None, *, conversation=None, turn=None, turn_id=None, user=None, trace_name=None, env=None, agents=None, **metadata)`
 
 A run context — a context manager **or** (sync/async) decorator. Sets `tracely.*` run hints once; a
 span processor stamps them onto **every** span started inside (auto-instrumentor spans included), so
-`agent`/`conversation`/`turn`/`user`/`trace_name`/`env` + `metadata` flow down with no per-span code.
-Sets context only (opens no span); nested `trace()`s merge over the enclosing one.
+the run's identity flows down with no per-span code. Sets context only (opens no span); nested
+`trace()`s merge over the enclosing one.
+
+`turn` is the ordinal (`0, 1, 2…`); `turn_id` is your own id for one exchange and — unlike the
+`turn()` span helper — lands on **every** span of the turn, which is what the `turn_id` column groups
+on. `agents` declares the conversation's agent catalog (see `set_agents` below).
 
 ### `observe(fn=None, *, name=None, as_type="span", capture_input=True, capture_output=True)`
 
@@ -39,14 +83,43 @@ Run `fn` on a new thread that inherits the current span + `trace()` context (aut
 in-process), so spans it creates nest correctly. Returns the started thread; `join()` it and read
 `.result` (or `.exc`).
 
-### `tracely_sdk.openai` / `tracely_sdk.anthropic` — non-patching drop-ins (R13)
+### `tracely_sdk.<provider>` — non-patching drop-ins
 
-`from tracely_sdk.openai import OpenAI, AsyncOpenAI, wrap_openai, openai` (and the identical
-`tracely_sdk.anthropic` surface: `Anthropic, AsyncAnthropic, wrap_anthropic, anthropic`).
-`wrap_openai(client)` / `wrap_anthropic(client)` trace a client **instance** (no global patching);
-`OpenAI(...)`/`Anthropic(...)` are pre-wrapped constructors; the `openai`/`anthropic` proxies mirror
-the module with traced constructors. Captures model · messages · output · usage · tool calls for
-non-streaming sync/async calls.
+Trace a client **instance** instead of monkey-patching the world. Each module exposes a pre-wrapped
+constructor, an async variant where the SDK has one, and a `wrap_*` function for a client you already
+built. Nothing global changes, and the spans carry the same attributes as the manual `llm()` helper —
+so they inherit `tracely.trace(...)` and map identically.
+
+| Module | Constructors | Wrap an instance | Needs |
+|---|---|---|---|
+| `tracely_sdk.openai` | `OpenAI`, `AsyncOpenAI` | `wrap_openai(client)` | `openai` |
+| `tracely_sdk.anthropic` | `Anthropic`, `AsyncAnthropic` | `wrap_anthropic(client)` | `anthropic` |
+| `tracely_sdk.google` | `Client` | `wrap_google(client)` | `google-genai` |
+| `tracely_sdk.mistral` | `Mistral` | `wrap_mistral(client)` | `mistralai` |
+| `tracely_sdk.openrouter` | `OpenRouter`, `AsyncOpenRouter` | `wrap_openai` | `openai` |
+| `tracely_sdk.xai` | `Grok`, `AsyncGrok` (aliases `XAI`, `AsyncXAI`) | `wrap_openai` | `openai` |
+
+```python
+from tracely_sdk.openai import OpenAI, wrap_openai, openai
+
+client = OpenAI()                       # pre-wrapped
+client = wrap_openai(existing_client)   # wrap one you already have
+openai.OpenAI()                         # module proxy — traced constructors
+```
+
+`openrouter` and `xai` are OpenAI-wire-compatible presets: same traced OpenAI client, with `base_url`
+defaulted to `https://openrouter.ai/api/v1` / `https://api.x.ai/v1`. Pass `api_key=` yourself.
+
+```python
+from tracely_sdk.openrouter import OpenRouter
+client = OpenRouter(api_key=os.environ["OPENROUTER_API_KEY"])
+client.chat.completions.create(model="anthropic/claude-4.6-sonnet", messages=[...])
+```
+
+The routed `model` is recorded verbatim (`vendor/model`), so cost attributes to the underlying
+provider for free. All six drop-ins capture model · messages · output · usage · tool calls for
+non-streaming sync and async calls; for full **streaming** capture use the instrumentor path
+(`instrument="auto"`) instead.
 
 ## Span context managers
 
@@ -98,10 +171,29 @@ A turn marker (`tracely.turn.id`/`.index`) and a generic step (`tracely.step.nam
 | Call | Effect |
 |---|---|
 | `set_io(span, *, input=None, output=None)` | `tracely.input` / `tracely.output` (objects JSON-encoded). |
-| `set_usage(span, *, input_tokens=None, output_tokens=None, thinking_tokens=None)` | `gen_ai.usage.input_tokens` / `output_tokens` / `reasoning_tokens`. |
+| `set_usage(span, *, input_tokens=None, output_tokens=None, thinking_tokens=None, cached_tokens=None, cache_write_tokens=None)` | `gen_ai.usage.*` — `input_tokens` / `output_tokens` / `reasoning_tokens`, plus prompt-cache reads and writes. |
 | `set_metadata(span, **kv)` | `tracely.metadata.<key>` — arbitrary tags (scalars kept; others JSON-encoded). |
+| `set_agents(span, agents)` | `tracely.agents` — the conversation's agent catalog (below). |
 | `error(span, message="")` | Marks the span `StatusCode.ERROR` → `level=ERROR`. The failure signal. |
 | `flush()` | Force-flush the OTLP exporter — call before the process exits. |
+
+### `set_agents(span, agents)` — the agent catalog
+
+Declare which agents and tools *exist* in this conversation, not just which ones fired. It powers the
+Conversation Agents panel and is addressable from evaluator prompts as `@LIST_AGENT`.
+
+```python
+agents = [
+    {"name": "billing", "description": "refunds and charges",
+     "tools": {"get_charges": {"name": "get_charges", "description": "…", "parameters": {…}}}},
+]
+
+with tracely.trace(agent="router", conversation="c1", agents=agents):   # flows onto every span
+    ...
+```
+
+Prefer the `trace(agents=…)` form, which stamps it across the run. `set_agents(span, …)` is for
+pinning the catalog to one specific span (usually the root).
 
 ## Hermetic replay
 

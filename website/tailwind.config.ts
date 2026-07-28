@@ -1,0 +1,60 @@
+import type { Config } from "tailwindcss";
+
+// Same token system as ../frontend/tailwind.config.ts — the marketing site wears the app's skin.
+const config: Config = {
+  content: ["./app/**/*.{ts,tsx}"],
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono)", "ui-monospace", "monospace"],
+        display: ["var(--font-display)", "var(--font-sans)", "sans-serif"],
+      },
+      colors: {
+        ink: {
+          DEFAULT: "#090b10",
+          950: "#05070c",
+          900: "#0b0e14",
+          800: "#0f131b",
+          700: "#141925",
+          600: "#1a2030",
+        },
+        line: { DEFAULT: "#1b2230", soft: "#141a26", bright: "#28324a" },
+        fg: { DEFAULT: "#e8ebf2", muted: "#9aa3b6", faint: "#5c6679" },
+        signal: { DEFAULT: "#22d3ee", soft: "#7df0ff", dim: "#0e7490", deep: "#0a3a45" },
+        ok: { DEFAULT: "#34d399", dim: "#0f3d33" },
+        fail: { DEFAULT: "#fb7185", dim: "#451f2b" },
+        warn: { DEFAULT: "#fbbf24", dim: "#3d2f12" },
+        info: { DEFAULT: "#60a5fa", dim: "#16294a" },
+        t_agent: "#7aa2ff",
+        t_llm: "#34d399",
+        t_tool: "#fb923c",
+        t_retriever: "#c084fc",
+        t_step: "#8b94a7",
+      },
+      boxShadow: {
+        glow: "0 0 0 1px rgba(34,211,238,0.25), 0 8px 30px -8px rgba(34,211,238,0.35)",
+        panel: "0 1px 0 0 rgba(255,255,255,0.03) inset, 0 20px 40px -24px rgba(0,0,0,0.8)",
+        frame:
+          "0 1px 1px 0 rgba(216,236,248,0.14) inset, 0 24px 48px 0 rgba(34,211,238,0.04) inset, 0 32px 64px -24px rgba(0,0,0,0.85)",
+      },
+      keyframes: {
+        pulse2: {
+          "0%,100%": { opacity: "1" },
+          "50%": { opacity: "0.35" },
+        },
+        marquee: {
+          "0%": { transform: "translateX(0)" },
+          "100%": { transform: "translateX(-50%)" },
+        },
+      },
+      animation: {
+        pulse2: "pulse2 2s ease-in-out infinite",
+        marquee: "marquee 36s linear infinite",
+      },
+    },
+  },
+  plugins: [],
+};
+
+export default config;

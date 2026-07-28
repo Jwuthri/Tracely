@@ -1,0 +1,493 @@
+/* Tracely docs skin.
+ *
+ * Nextra ships its own Tailwind build; this file re-skins it with the dashboard app's tokens so the
+ * docs and the product look like one thing. The token values below are copied from
+ * frontend/tailwind.config.ts + frontend/app/globals.css — keep them in sync when the app's palette
+ * moves. Selectors lean on Nextra's stable `.nextra-*` structural classes; the few places that have
+ * to fight a Tailwind utility use [class*=…] substring matches on Nextra's prefixed classes.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+
+:root {
+  /* app palette */
+  --ink: #090b10;
+  --ink-900: #0b0e14;
+  --ink-800: #0f131b;
+  --ink-700: #141925;
+  --ink-600: #1a2030;
+  --line: #1b2230;
+  --line-soft: #141a26;
+  --line-bright: #28324a;
+  --fg: #e8ebf2;
+  --fg-muted: #9aa3b6;
+  --fg-faint: #5c6679;
+  --signal: #22d3ee;
+  --signal-soft: #7df0ff;
+  --signal-dim: #0e7490;
+  --ok: #34d399;
+  --fail: #fb7185;
+  --warn: #fbbf24;
+  --info: #60a5fa;
+
+  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-display: "Bricolage Grotesque", var(--font-sans);
+
+  /* Nextra's own knobs: cyan #22d3ee === hsl(187 85% 53%) */
+  --nextra-primary-hue: 187deg;
+  --nextra-primary-saturation: 85%;
+  --nextra-primary-lightness: 53%;
+  --nextra-bg: 9 11 16;
+  /* px only — Nextra feeds this straight into an IntersectionObserver rootMargin, which rejects rem. */
+  --nextra-navbar-height: 64px;
+}
+
+/* ─── page shell ─────────────────────────────────────────────────────────── */
+
+html,
+body {
+  background-color: var(--ink);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* the app's two corner auroras + hairline grid, as one fixed backdrop */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1000px 560px at 8% -10%, rgba(34, 211, 238, 0.07), transparent 60%),
+    radial-gradient(820px 520px at 102% -6%, rgba(122, 162, 255, 0.05), transparent 55%),
+    linear-gradient(to right, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: auto, auto, 46px 46px, 46px 46px;
+  background-position:
+    0 0,
+    0 0,
+    -1px -1px,
+    -1px -1px;
+}
+
+::selection {
+  background: rgba(34, 211, 238, 0.25);
+  color: #d6fbff;
+}
+
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-thumb {
+  background: #1d2434;
+  border-radius: 9px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2b3448;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner,
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ─── navbar ─────────────────────────────────────────────────────────────── */
+
+.nextra-nav-container {
+  border-bottom: 1px solid var(--line);
+  background: rgba(11, 14, 20, 0.8);
+  backdrop-filter: blur(12px);
+}
+.nextra-nav-container .nextra-nav-container-blur {
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+.nextra-nav-container nav a {
+  color: var(--fg-muted);
+  transition: color 0.15s;
+}
+.nextra-nav-container nav a:hover {
+  color: var(--fg);
+}
+
+/* the wordmark block, mirroring the app sidebar's Mark + lockup */
+.tracely-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.tracely-logo .mark {
+  display: grid;
+  place-items: center;
+  height: 30px;
+  width: 30px;
+  border-radius: 9px;
+  border: 1px solid rgba(34, 211, 238, 0.3);
+  background: rgba(34, 211, 238, 0.1);
+  box-shadow: 0 0 22px -6px rgba(34, 211, 238, 0.7);
+}
+.tracely-logo .name {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  line-height: 1;
+}
+.tracely-logo .kicker {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--fg-faint);
+  line-height: 1;
+}
+
+/* ─── sidebar ────────────────────────────────────────────────────────────── */
+
+.nextra-sidebar-container {
+  border-right: 1px solid var(--line);
+  background: rgba(11, 14, 20, 0.55);
+  backdrop-filter: blur(8px);
+}
+.nextra-sidebar-container .nextra-scrollbar {
+  padding-top: 0.75rem;
+}
+
+/* nav links: quiet by default, cyan wash when active — same as the app's Sidebar.tsx */
+.nextra-sidebar-container a[class*="_flex"] {
+  border-radius: 8px !important;
+  font-size: 13.5px;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+.nextra-sidebar-container li:not(.active) > a {
+  color: var(--fg-muted) !important;
+  background: transparent !important;
+}
+.nextra-sidebar-container li:not(.active) > a:hover {
+  color: var(--fg) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+.nextra-sidebar-container li.active > a {
+  color: var(--fg) !important;
+  background: rgba(34, 211, 238, 0.1) !important;
+  box-shadow: inset 2px 0 0 0 var(--signal);
+  font-weight: 600;
+}
+
+/* Folder headings get the app's mono/uppercase/tracked treatment. Scoped to the collapse <button>
+ * so it can't leak onto the active page link, which also carries _font-semibold. */
+.nextra-sidebar-container .nextra-menu-desktop > li > button {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--fg-faint) !important;
+}
+
+.nextra-sidebar-footer {
+  border-top: 1px solid var(--line);
+  background: rgba(11, 14, 20, 0.6);
+}
+
+/* ─── content typography ─────────────────────────────────────────────────── */
+
+.nextra-content {
+  color: var(--fg-muted);
+}
+.nextra-content h1 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--fg);
+  font-size: 2.4rem;
+}
+.nextra-content h2,
+.nextra-content h3,
+.nextra-content h4 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+}
+.nextra-content h2 {
+  border-top: 1px solid var(--line);
+  padding-top: 1.6rem;
+  border-bottom: none !important;
+}
+.nextra-content p,
+.nextra-content li {
+  color: var(--fg-muted);
+}
+.nextra-content strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+.nextra-content a {
+  color: var(--signal);
+  text-decoration-color: rgba(34, 211, 238, 0.35);
+  text-underline-offset: 3px;
+}
+.nextra-content a:hover {
+  color: var(--signal-soft);
+  text-decoration-color: var(--signal-soft);
+}
+.nextra-content hr {
+  border-color: var(--line);
+}
+.nextra-content blockquote {
+  border-left-color: var(--signal-dim);
+  color: var(--fg-muted);
+}
+
+/* ─── code ───────────────────────────────────────────────────────────────── */
+
+.nextra-content code,
+.nextra-code code {
+  font-family: var(--font-mono) !important;
+  font-size: 0.86em;
+}
+
+/* inline code reads as a cyan-tinted chip, like the app's mono badges */
+.nextra-content :not(pre) > code {
+  background: rgba(34, 211, 238, 0.07) !important;
+  border: 1px solid rgba(34, 211, 238, 0.16) !important;
+  border-radius: 6px !important;
+  color: var(--signal-soft) !important;
+  padding: 0.15em 0.4em !important;
+}
+.nextra-content a > code {
+  color: var(--signal) !important;
+}
+
+/* …but a heading that IS a code span (`## init(...)`) would become a giant button, and the TOC
+ * mirrors those headings — so there, code is just the mono face in the heading's own colour. */
+.nextra-content :is(h1, h2, h3, h4, h5, h6) code,
+.nextra-toc code {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  color: inherit !important;
+  font-size: 0.94em;
+}
+.nextra-toc code {
+  font-size: 0.92em;
+}
+
+/* block code sits on the app's card surface */
+.nextra-content pre,
+.nextra-code pre {
+  background: rgba(15, 19, 27, 0.85) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 12px !important;
+  backdrop-filter: blur(2px);
+}
+.nextra-content pre code {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  color: inherit !important;
+}
+.nextra-code > div:first-child,
+div[class*="nextra-code"] .\_bg-primary-700\/5 {
+  background: transparent !important;
+}
+/* copy / language chrome */
+.nextra-content pre + div button,
+.nextra-code button {
+  background: var(--ink-700) !important;
+  border: 1px solid var(--line-bright) !important;
+  color: var(--fg-muted) !important;
+}
+.nextra-code button:hover {
+  color: var(--fg) !important;
+  border-color: var(--signal-dim) !important;
+}
+
+/* ─── tables ─────────────────────────────────────────────────────────────── */
+
+.nextra-content table {
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 0.92em;
+}
+.nextra-content th {
+  background: rgba(20, 25, 37, 0.7) !important;
+  border-color: var(--line) !important;
+  color: var(--fg-faint) !important;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  text-align: left;
+}
+.nextra-content td {
+  background: rgba(15, 19, 27, 0.4) !important;
+  border-color: var(--line-soft) !important;
+  color: var(--fg-muted);
+}
+.nextra-content tr:last-child td {
+  border-bottom: none !important;
+}
+
+/* ─── callouts ───────────────────────────────────────────────────────────── */
+
+.nextra-callout {
+  border-radius: 12px !important;
+  border-width: 1px !important;
+  padding-top: 0.7rem !important;
+  padding-bottom: 0.7rem !important;
+  backdrop-filter: blur(4px);
+}
+.nextra-callout a {
+  color: inherit !important;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* Nextra encodes the callout type only in its color utilities — match on those. */
+.nextra-callout[class*="_bg-blue-900"] {
+  background: rgba(34, 211, 238, 0.07) !important;
+  border-color: rgba(34, 211, 238, 0.25) !important;
+  color: #bfefff !important;
+}
+.nextra-callout[class*="_bg-orange-400"] {
+  background: rgba(122, 162, 255, 0.07) !important;
+  border-color: rgba(122, 162, 255, 0.25) !important;
+  color: #cddcff !important;
+}
+.nextra-callout[class*="_bg-yellow-700"] {
+  background: rgba(251, 191, 36, 0.07) !important;
+  border-color: rgba(251, 191, 36, 0.25) !important;
+  color: #fde7ad !important;
+}
+.nextra-callout[class*="_bg-red-900"] {
+  background: rgba(251, 113, 133, 0.07) !important;
+  border-color: rgba(251, 113, 133, 0.25) !important;
+  color: #ffd0d8 !important;
+}
+
+/* ─── steps ──────────────────────────────────────────────────────────────── */
+
+.nextra-content .nextra-steps {
+  border-left-color: var(--line) !important;
+}
+.nextra-content .nextra-steps h3::before {
+  background: var(--ink-700) !important;
+  border: 1px solid var(--line-bright);
+  color: var(--fg-muted) !important;
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+}
+
+/* ─── TOC / breadcrumb / pagination ──────────────────────────────────────── */
+
+.nextra-toc {
+  font-size: 13px;
+}
+/* Only the "On this page" label — direct <p> child. The heading links live in a <ul> and share the
+ * same _font-semibold utility, so a class-based selector would catch them too. */
+.nextra-toc > p {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--fg-faint) !important;
+}
+.nextra-toc a {
+  color: var(--fg-faint) !important;
+  font-weight: 400 !important;
+  transition: color 0.15s;
+}
+.nextra-toc a:hover {
+  color: var(--fg) !important;
+}
+.nextra-toc a[class*="_text-primary"] {
+  color: var(--signal) !important;
+}
+.nextra-toc-footer {
+  border-top: 1px solid var(--line) !important;
+}
+
+.nextra-breadcrumb {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--fg-faint);
+}
+
+/* prev / next */
+.nextra-content > div:last-child a[class*="_text-gray-600"],
+a[class*="_flex"][class*="_gap-1"][class*="_py-8"] {
+  color: var(--fg-muted) !important;
+}
+
+/* ─── search ─────────────────────────────────────────────────────────────── */
+
+.nextra-nav-container input {
+  background: rgba(15, 19, 27, 0.8) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 9px !important;
+  color: var(--fg) !important;
+  font-size: 13px;
+}
+.nextra-nav-container input::placeholder {
+  color: var(--fg-faint) !important;
+}
+.nextra-nav-container input:focus {
+  border-color: var(--signal-dim) !important;
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.25);
+  outline: none;
+}
+.nextra-nav-container kbd {
+  background: var(--ink-700) !important;
+  border-color: var(--line-bright) !important;
+  color: var(--fg-faint) !important;
+  font-family: var(--font-mono);
+}
+.nextra-search-results {
+  background: rgba(15, 19, 27, 0.97) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 12px !important;
+  backdrop-filter: blur(12px);
+}
+.nextra-search-results a[class*="_bg-primary"],
+.nextra-search-results li.active > a {
+  background: rgba(34, 211, 238, 0.1) !important;
+  color: var(--fg) !important;
+}
+
+/* ─── footer ─────────────────────────────────────────────────────────────── */
+
+.nextra-content footer,
+footer.nextra-\_footer,
+body > div > footer {
+  border-top: 1px solid var(--line);
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+
+/* focus ring, app-style */
+.nextra-focusable:focus-visible,
+a:focus-visible,
+button:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.5),
+    0 0 18px -4px rgba(34, 211, 238, 0.6);
+  border-radius: 8px;
+}

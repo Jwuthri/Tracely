@@ -7,6 +7,19 @@
       "runtimeArgs": ["run", "dev"],
       "port": 4026,
       "autoPort": true
+    },
+    {
+      "name": "website",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["-C", "website", "dev"],
+      "port": 3003
+    },
+    {
+      "name": "docs",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["-C", "docs", "dev"],
+      "port": 3002,
+      "autoPort": true
     }
   ]
 }

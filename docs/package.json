@@ -4,9 +4,9 @@
   "private": true,
   "description": "Documentation site for the Tracely SDK (Nextra + Next.js).",
   "scripts": {
-    "dev": "next dev -p 3002",
+    "dev": "next dev -p ${PORT:-3002}",
     "build": "next build",
-    "start": "next start -p 3002"
+    "start": "next start -H :: -p ${PORT:-3002}"
   },
   "dependencies": {
     "next": "^14.2.15",
