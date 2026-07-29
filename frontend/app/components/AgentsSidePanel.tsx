@@ -123,9 +123,10 @@ export function AgentsSidePanel({ threadId, onClose }: { threadId: string; onClo
                 </section>
               )}
 
-              {data.observed.length > 0 && (
+              {/* ponytail: declared wins outright — the observed view duplicates it and reads badly */}
+              {data.declared.length === 0 && data.observed.length > 0 && (
                 <section>
-                  <SectionLabel>{data.declared.length > 0 ? "Observed in traces" : "Agents"}</SectionLabel>
+                  <SectionLabel>Agents</SectionLabel>
                   <div className="space-y-3">
                     {data.observed.map((a) => (
                       <div key={a.agent_id || a.name} className="rounded-lg border border-line bg-white/[0.02] p-4">
