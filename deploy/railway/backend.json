@@ -6,7 +6,7 @@
   },
   "deploy": {
     "preDeployCommand": "python -m tracely.infrastructure.clickhouse.migrations && (cd backend && alembic upgrade head) && python -m tracely.services.seeding_service && python -c 'import tracely.infrastructure.blob.s3 as s; s.ensure_bucket()'",
-    "startCommand": "uvicorn tracely.api.main:app --host :: --port $PORT",
+    "startCommand": "uvicorn tracely.api.main:app --host 0.0.0.0 --port $PORT",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",

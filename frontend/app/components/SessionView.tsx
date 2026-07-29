@@ -5,7 +5,7 @@ import type { ConvNode, FullTurn } from "../lib/api";
 import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
 import { AgentsSidePanel } from "./AgentsSidePanel";
 import { StateIcon, StatePanel } from "./StatePanel";
-import { spanStateWrites } from "./state-fold";
+import { spanHasState } from "./state-fold";
 import { TabButton } from "./SingleTraceView";
 import { TraceTable } from "./TraceTable";
 import { Waterfall } from "./Waterfall";
@@ -36,7 +36,7 @@ export function SessionView({
     [turns],
   );
   // Only offer the State drawer when there's state to show — an empty drawer is worse than no button.
-  const hasState = useMemo(() => allSpans.some((s) => spanStateWrites(s) !== null), [allSpans]);
+  const hasState = useMemo(() => allSpans.some(spanHasState), [allSpans]);
   const totalScores = turns.reduce((a, t) => a + t.scores.length, 0) + (conv.scores?.length ?? 0);
   const anyFail =
     turns.some((t) => t.verdict === "FAIL" || t.failing === 1) ||

@@ -6,7 +6,7 @@ import type { ConvNode, SpanOut } from "../lib/api";
 import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
 import { AgentsSidePanel } from "./AgentsSidePanel";
 import { StateIcon, StatePanel } from "./StatePanel";
-import { spanStateWrites } from "./state-fold";
+import { spanHasState } from "./state-fold";
 import { TraceTable } from "./TraceTable";
 import { Waterfall } from "./Waterfall";
 import { Badge, verdictVariant } from "./ui";
@@ -27,7 +27,7 @@ export function SingleTraceView({
   const [wide, setWide] = useWide();
   const [showAgents, setShowAgents] = useState(false);
   const [showState, setShowState] = useState(false);
-  const hasState = useMemo(() => spans.some((s) => spanStateWrites(s) !== null), [spans]);
+  const hasState = useMemo(() => spans.some(spanHasState), [spans]);
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-1 border-b border-line">

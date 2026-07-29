@@ -104,9 +104,16 @@ to its `RAILWAY_PRIVATE_DOMAIN` (HTTP port 8123, not the 9000 native port), then
 
 ## Notes & gotchas
 
-- **IPv6 binding.** Railway's private network is IPv6 (IPv4 too on environments created after Oct 2025).
-  Our start commands bind `::` (`uvicorn --host ::`, `next start -H ::`) so both public edge and private
-  service-to-service traffic reach them. The ClickHouse/MinIO templates already bind IPv6.
+- **IPv6 binding — the two runtimes differ, do not "fix" the backend to `::`.** `*.railway.internal` is
+  dual-stack (A **and** AAAA records) on environments created after Oct 2025. Node/libuv leaves dual-stack
+  on, so `next start -H ::` serves both families — that's why the frontend binds `::`. Python does the
+  opposite: `asyncio.create_server` explicitly sets `IPV6_V6ONLY` ("Disable IPv4/IPv6 dual stack support",
+  `base_events.py`), so `uvicorn --host ::` is IPv6-**only** — Railway's healthcheck and public edge come
+  in over IPv4 and the deploy dies with `1/1 replicas never became healthy`. So the backend binds
+  `0.0.0.0`, and the frontend pins `NODE_OPTIONS=--dns-result-order=ipv4first` so a server-side fetch
+  never picks the AAAA record and hangs for undici's 10s `UND_ERR_CONNECT_TIMEOUT`. Symptom of getting
+  this wrong: SSR pages fail *intermittently* (per-connection coin flip) while the client-side proxy
+  routes look fine. The ClickHouse/MinIO templates already bind both.
 - **PORT.** Railway injects `$PORT`; the start commands honor it. We pin `PORT=8000` on backend so the
   frontend can reach it privately at a known port (`TRACELY_API=http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:${{backend.PORT}}`).
 - **Private vs public.** Service-to-service uses `http://<svc>.railway.internal` (already encrypted —

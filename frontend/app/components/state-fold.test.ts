@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SpanOut } from "../lib/api";
-import { foldState, spanStateWrites } from "./state-fold";
+import { foldState, spanHasState, spanStateWrites } from "./state-fold";
 
 function span(p: Partial<SpanOut> & { span_id: string; start_time: string }): SpanOut {
   return {
@@ -48,6 +48,16 @@ describe("spanStateWrites", () => {
       metadata: { "tracely.state.delta": '{"a":1}' },
     });
     expect(spanStateWrites(s)).toEqual({ delta: { a: 1 } });
+  });
+});
+
+describe("spanHasState", () => {
+  it("gates on either source without parsing — an all-empty column must never ship", () => {
+    const base = { span_id: "a", start_time: "2026-01-01T00:00:00Z" };
+    expect(spanHasState(span({ ...base, metadata: { "tracely.state.plan": "[]" } }))).toBe(true);
+    expect(spanHasState(span({ ...base, metadata: { "tracely.state_source": "output" } }))).toBe(true);
+    expect(spanHasState(span({ ...base, metadata: { other: "x" }, output: '{"a":1}' }))).toBe(false);
+    expect(spanHasState(span(base))).toBe(false);
   });
 });
 

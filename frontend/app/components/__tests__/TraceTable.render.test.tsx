@@ -13,7 +13,7 @@ vi.mock("@/app/lib/evaluators", async (orig) => ({
   getEvaluatorCost: vi.fn(() => Promise.resolve({})),
 }));
 
-import type { ConvNode } from "@/app/lib/api";
+import type { ConvNode, FullTurn, SpanOut } from "@/app/lib/api";
 import { TraceTable } from "@/app/components/TraceTable";
 
 function conv(over: Partial<ConvNode> = {}): ConvNode {
@@ -84,5 +84,43 @@ describe("TraceTable (render safety net)", () => {
     render(<TraceTable conversations={[conv()]} />);
     await screen.findByText("Conversation");
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+});
+
+// ── State Δ columns (M + S) ──────────────────────────────────────────────────
+// Seeding `turnsData` puts the table in detail mode: spans are pre-loaded and every row is open,
+// which is what the State Δ columns need to have anything to show.
+
+function stateSpan(over: Partial<SpanOut> = {}): SpanOut {
+  return {
+    span_id: "sp-1", parent_span_id: "", name: "planner", type: "CHAIN", level: "DEFAULT",
+    status_message: "", start_time: "2026-06-14T10:00:01Z", end_time: null, latency_ms: null,
+    agent_id: "support", agent_run_id: "", turn_id: "", step_name: "planner", model_id: "",
+    tokens: 0, cost: 0, metadata: { "tracely.state.plan": '["step-a"]' }, input: null, output: null,
+    ...over,
+  };
+}
+
+function turnWith(spans: SpanOut[]): FullTurn {
+  return {
+    trace_id: "trace-1", input: "hi", output: "done", tokens: 0, cost: 0, latency_ms: 10,
+    ts: "2026-06-14T10:00:00Z", failing: 0, scores: [], verdict: null, spans,
+  };
+}
+
+describe("TraceTable State Δ columns", () => {
+  it("shows the written channel at step and message level", async () => {
+    render(<TraceTable conversations={[conv({ turnsData: [turnWith([stateSpan()])] })]} />);
+    // both the M and S columns carry the same header label
+    expect(await screen.findAllByText("State Δ")).toHaveLength(2);
+    // `plan` chip: once on the step row, once on the assistant message row (the union)
+    expect(screen.getAllByText("plan")).toHaveLength(2);
+  });
+
+  it("hides both columns entirely when nothing loaded carries state", async () => {
+    const plain = stateSpan({ metadata: {}, output: "just an answer" });
+    render(<TraceTable conversations={[conv({ turnsData: [turnWith([plain])] })]} />);
+    expect(await screen.findByText("Conversation")).toBeInTheDocument();
+    expect(screen.queryByText("State Δ")).not.toBeInTheDocument();
   });
 });

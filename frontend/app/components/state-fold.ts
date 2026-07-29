@@ -42,6 +42,14 @@ export function spanStateWrites(span: SpanOut): Record<string, unknown> | null {
   return null;
 }
 
+/** Does this span carry state at all? Parse-free, for gating UI that would otherwise render empty
+ * on every project that sends none — cheap enough to run over every loaded span on each render. */
+export function spanHasState(span: SpanOut): boolean {
+  const meta = span.metadata ?? {};
+  if (meta[SOURCE] === "output") return true;
+  return Object.keys(meta).some((k) => k.startsWith(PREFIX));
+}
+
 export type StateChange = {
   key: string;
   value: unknown;

@@ -21,6 +21,7 @@ import { useHiddenTypes } from "../lib/typePrefs";
 import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
 import { AddColumnModal } from "./AddColumnModal";
 import { SelectBox } from "./SelectBox";
+import { spanHasState, spanStateWrites } from "./state-fold";
 import { ExpandableText, FloatingPanel, HighlightedJson, IconBox, JsonPill, Pill, Plain, prettyJson } from "./JsonView";
 import {
   agentLabel,
@@ -526,6 +527,39 @@ function AgentBadge({ agent }: { agent: string }) {
   );
 }
 
+// The channels a row wrote to the shared state object. Names only — the value rides in the tooltip
+// and the full before/after story is the State drawer's job; a cell that inlines a `messages` array
+// is a cell nobody can scan past. At M level this is the union across the turn's steps, which is
+// how you spot "turn 3 is where `plan` changed" without expanding anything.
+function StateCell({ writes }: { writes: Array<{ key: string; preview: string }> }) {
+  if (writes.length === 0) return <span className="text-slate-500">—</span>;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {writes.map((w) => (
+        <span
+          key={w.key}
+          title={w.preview}
+          className="inline-flex max-w-full items-center truncate rounded border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[10.5px] text-cyan-300"
+        >
+          {w.key}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+// One row's writes, newest-wins within the row, as {key, preview} for the cell above.
+function stateWritesOf(spans: SpanOut[]): Array<{ key: string; preview: string }> {
+  const seen = new Map<string, string>();
+  for (const s of spans) {
+    for (const [k, v] of Object.entries(spanStateWrites(s) ?? {})) {
+      const enc = typeof v === "string" ? v : (JSON.stringify(v) ?? "");
+      seen.set(k, enc.length > 300 ? `${enc.slice(0, 300)}…` : enc);
+    }
+  }
+  return [...seen].map(([key, preview]) => ({ key, preview }));
+}
+
 function ModelBadge({ model }: { model: string }) {
   return (
     <span className={clsx("inline-flex max-w-full items-center truncate rounded border px-2 py-0.5 text-[11px] font-medium", modelColor(model))} title={model}>
@@ -870,6 +904,12 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
         : null;
     case "content":
       return ctx.level === "M" ? <TurnMessage raw={ctx.role === "user" ? ctx.turn.input : ctx.turn.output} role={ctx.role} /> : null;
+    // Assistant-side only: a turn renders a user row and an assistant row, and the state writes
+    // belong to the work the agent did — showing them twice reads as two separate changes.
+    case "mstate":
+      return ctx.level === "M" && ctx.role === "assistant"
+        ? <StateCell writes={stateWritesOf(ctx.turn.spans ?? [])} />
+        : null;
     case "mrsummary":
       return ctx.level === "M" ? <RollingSummaryCell thread={ctx.conv.thread} kind="trace" id={ctx.turn.trace_id} /> : null;
     case "musage":
@@ -922,6 +962,8 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
         ? <MessageContent raw={asRoleMessage("assistant", raw)} />
         : <MessageContent raw={raw} />;
     }
+    case "sstate":
+      return ctx.level === "S" ? <StateCell writes={stateWritesOf([ctx.span])} /> : null;
     case "srsummary":
       return ctx.level === "S" ? <RollingSummaryCell kind="span" id={ctx.span.span_id} /> : null;
     case "susage":
@@ -1515,6 +1557,11 @@ export function TraceTable({
     [rsum, ensureRsum, generateRsum, rsumGenerating],
   );
 
+  const anyState = useMemo(
+    () => Object.values(spans).some((list) => Array.isArray(list) && list.some(spanHasState)),
+    [spans],
+  );
+
   // Fixed columns first, then EVERY metric column at the right end of the table (ordered
   // C-metrics → M-metrics → S-metrics, creation order within a level), each with its own
   // cycled column tint — the TurnWise layout.
@@ -1531,8 +1578,12 @@ export function TraceTable({
         evaluator: ev,
         tint: METRIC_TINTS[i % METRIC_TINTS.length],
       }));
-    return [...COLUMNS, ...metric];
-  }, [evaluators]);
+    // Drop the State Δ columns entirely when nothing loaded carries state — a project that sends
+    // none would otherwise get two permanently-empty columns it never asked for. They appear as
+    // soon as a conversation with state is expanded.
+    const fixed = anyState ? COLUMNS : COLUMNS.filter((c) => c.key !== "mstate" && c.key !== "sstate");
+    return [...fixed, ...metric];
+  }, [evaluators, anyState]);
   const cols = useMemo(() => allColumns.filter((c) => !hidden.has(c.key)), [allColumns, hidden]);
 
   async function runScope(scope: RunScope, busy: { cols?: string[]; rows?: string[] }) {
