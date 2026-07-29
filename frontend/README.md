@@ -66,11 +66,12 @@ All are **Server Components** unless noted; each lists the `lib/api.ts` calls it
 | `/clusters/[clusterId]` | `getCluster` | Issue detail — histogram, description, proposed fix, suggested evaluator (`CodeBlock`), member traces, `ClusterActions`. |
 | `/cases` | `getCases` | Regression cases — title, status, fail→pass contract, last verdict, source trace. |
 | `/cases/[caseId]` | `getCase` | Case detail — assertions, reference trajectory, `ReplayControls` + replay history. |
-| `/gates` | `getGates` | Gate runs — result, agent/env/ref, passed/failed/skipped, `RunGateButton`. |
+| `/gates` | `getGates`, `getAgents`, `getCases` | Gate runs — result, agent/env/ref, passed/failed/skipped, plus `RunGateButton` (agent picker, ranked by promoted-case count — no hardcoded slug). |
 | `/gates/[gateId]` | `getGate` | Gate detail — status banner, soft warnings, per-case verdicts. |
 | `/trends` | `getTrends` | Insights — stat cards + `Bars` charts (daily traces/failures, gate pass/fail) + `MetaAnalysisPanel` (per-agent cross-metric analysis). |
 | `/settings/api-keys` | — | API key management (create/revoke ingest keys). |
 | `/settings/team` | — | Team members list + `InviteManager` (send/revoke invitations). |
+| `/settings/data` | `getStats` | What the project holds (traces/spans/agents/cases) + the `WipeDataPanel` danger zone (delete all project data, typed confirmation). |
 | `/settings/account` | — | Account settings + `ChangePasswordForm` (local auth mode). |
 
 ## Data layer
@@ -114,6 +115,8 @@ All are **Server Components** unless noted; each lists the `lib/api.ts` calls it
 | `icons.tsx` | Inline stroke SVG icon set. |
 | `Bars.tsx` | Hand-rolled stacked bar charts for `/trends`. |
 | `CopyId.tsx` · `TimeAgo.tsx` · `CodeBlock.tsx` · `RowLink.tsx` | Copy-to-clipboard id chip · relative time (SSR-safe) · syntax-highlighted code w/ copy · clickable row wrapper. |
+| `DeleteCaseButton.tsx` | Delete one regression case from its detail page (`confirm()` → `DELETE /api/cases/{id}` → back to `/cases`). |
+| `WipeDataPanel.tsx` | Settings → Data danger zone: type `DELETE` to arm, then `DELETE /api/project/data`; renders the per-table counts that came back. |
 | `PromoteButton` · `RebuildButton` · `RunGateButton` · `ReplayControls` · `ClusterActions` | The write actions (promote a trace, rebuild clusters, run a gate, replay a case, ignore/promote a cluster) — each POSTs an `app/api/*` proxy. |
 
 ## Key decisions (and why)

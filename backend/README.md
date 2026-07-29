@@ -211,7 +211,7 @@ Three Celery tasks, each a thin dispatch into a service class: `ingest_otlp_blob
 | `GET /api/sessions/{thread}/agents` | `sessions.py` | the conversation's agents — declared (SDK catalog) or derived from spans. |
 | `GET …/{thread}/rolling-summary` · `…/by-level` · `POST …/generate` | `sessions.py` | the accumulated conversation summary (whole / per-level) + on-demand rebuild. |
 | `GET /api/search` | `search.py` | ⌘K search over conversations/issues/cases/gates. |
-| `GET /api/stats` · `POST /api/promote` · `GET /api/cases` · `GET /api/cases/{id}` · `POST /api/cases/{id}/replay` | `cases.py` | dashboard stats; promote a trace → case; case list/detail; manual replay. |
+| `GET /api/stats` · `POST /api/promote` · `GET /api/cases` · `GET /api/cases/{id}` · `DELETE /api/cases/{id}` · `POST /api/cases/{id}/replay` | `cases.py` | dashboard stats; promote a trace → case; case list/detail; delete a case (+ its replays and per-gate verdicts); manual replay. |
 | `GET /api/clusters`, `/api/clusters/{id}` · `POST …/rebuild` | `clusters.py` | failure clusters list/detail; trigger `rebuild_clusters`. |
 | `POST /api/gate` · `GET /api/gate/suite` · `GET /api/gates`, `/api/gates/{id}` | `gate.py` | run a gate; fetch the replay suite (cases + inputs + fixtures); gate list/detail. |
 | `GET /api/trends` | `analytics.py` | daily traces/failures + gate pass-rate + summary (failure rate, MTTR proxy…). |
@@ -226,6 +226,7 @@ Three Celery tasks, each a thin dispatch into a service class: `ingest_otlp_blob
 | `GET /auth/me` · `POST /auth/logout` · `POST /auth/projects` | `auth.py` | current user + logout + project switch (all modes). |
 | `POST /auth/register` · `/login` · `/change-password` · `POST/GET /auth/invitations` · `DELETE /auth/invitations/{id}` · `POST /auth/invitations/accept` | `auth.py` | local-mode auth + invitations. |
 | `POST /auth/sync` | `auth.py` | Clerk-mode user sync. |
+| `DELETE /api/project/data` | `admin.py` | wipe the project: every trace/score in ClickHouse + all derived registry rows (agents, cases, gates, clusters, meta-analyses, summaries, annotations). Keeps configuration — keys, users, evaluators, monitors. Requires `{"confirm": "DELETE"}`. |
 | `GET /api/health` | `health.py` | readiness — `200` healthy / `503` when ClickHouse or Postgres is unreachable. |
 
 Every read/write is scoped by `project_id`, resolved from the `Authorization: Bearer <ingest-key>` header (`auth.get_project_id`).
