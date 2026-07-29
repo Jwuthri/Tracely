@@ -445,3 +445,40 @@ def test_openai_instrumentor_through_backend_mapping(exporter: InMemorySpanExpor
     assert ev["agent_slug"] == "weather-agent" and ev["conversation_id"] == "conv-42"
     assert ev["tool_call_names"] == ["get_weather"]
     assert ev["input"] and "Paris" in ev["input"]
+
+
+# ── set_state (shared graph state / conversation-scoped store) ───────────────
+
+
+def test_set_state_writes_one_attribute_per_channel(exporter: InMemorySpanExporter) -> None:
+    """Per-key, not one blob — so ClickHouse can read a single channel without parsing the rest."""
+    with tracely.step("planner"):
+        tracely.set_state({"plan": ["a", "b"], "retries": 0, "note": "verbatim"})
+    a = _attrs(exporter, "planner")
+    assert a["tracely.state.plan"] == '["a", "b"]'
+    assert a["tracely.state.retries"] == "0"
+    assert a["tracely.state.note"] == "verbatim"  # strings ride through unquoted
+
+
+def test_set_state_truncates_per_key(exporter: InMemorySpanExporter) -> None:
+    """One fat channel (a message history) must not crowd out the small ones that matter."""
+    with tracely.step("big") as s:
+        tracely.set_state({"huge": "x" * 5000, "small": 1}, s, max_bytes=100)
+    a = _attrs(exporter, "big")
+    assert a["tracely.state.huge"].endswith("…[truncated]") and len(a["tracely.state.huge"]) < 200
+    assert a["tracely.state.small"] == "1"
+
+
+def test_set_state_without_a_recording_span_warns_instead_of_dropping(caplog) -> None:
+    """`tracely.trace()` is a context marker, not an active span, and auto-instrumented framework
+    callbacks (LangGraph nodes) run with no span in context — a silent no-op there would lose the
+    write with no signal."""
+    with caplog.at_level("WARNING", logger="tracely"):
+        tracely.set_state({"orphan": 1})
+    assert "no recording span" in caplog.text
+
+
+def test_set_state_ignores_an_empty_delta(exporter: InMemorySpanExporter) -> None:
+    with tracely.step("noop"):
+        tracely.set_state({})
+    assert not any(k.startswith("tracely.state.") for k in _attrs(exporter, "noop"))

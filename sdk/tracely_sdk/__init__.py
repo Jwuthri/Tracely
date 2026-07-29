@@ -64,6 +64,7 @@ __all__ = [
     "set_usage",
     "set_metadata",
     "set_agents",
+    "set_state",
     "error",
     "flush",
     "run_in_thread",
@@ -920,6 +921,51 @@ def set_metadata(span: Span, **kv: Any) -> None:
             f"tracely.metadata.{k}",
             v if isinstance(v, (str, int, float, bool)) else json.dumps(v, default=str),
         )
+
+
+def set_state(delta: dict, span: Span | None = None, *, max_bytes: int = 4096) -> None:
+    """Record a shared-state delta — the LangGraph `State` channels a step wrote, a scratchpad the
+    graph threads between nodes, a conversation-scoped store. One `tracely.state.<key>` attribute
+    per key (not one blob), so ClickHouse can read a single channel without parsing everything.
+
+    The SCOPE is whichever span you attach it to, because the span already carries the level:
+    the `tracely.trace(...)` root span → conversation-wide · a `turn()` span → this message ·
+    a `step()` span → this step. Defaults to the current span, which is usually what you want.
+
+        with tracely.step("planner") as s:
+            plan = make_plan()
+            tracely.set_state({"plan": plan, "retries": 0})
+
+    Record the DELTA (what this step changed), not a full snapshot: the State panel folds deltas
+    back into the whole object, and re-stamping the entire state on every span bloats the trace
+    for no gain. Values over `max_bytes` are truncated per key, so one fat channel (a message
+    history, a blob of retrieved docs) can't crowd out the small ones that matter.
+
+    LangGraph users on the auto instrumentor need none of this — a node's return value is already
+    captured as the span's output and read as a delta. Use this for state your harness manages
+    itself, or to promote something the instrumentor can't see.
+
+    The implicit span is the *OTel* current span, which exists inside `step()`/`tool()`/`llm()`/…
+    but NOT inside an auto-instrumented framework callback: `tracely.trace()` is a context marker
+    rather than an active span, and LangGraph runs node functions with no span in context. So a
+    bare `set_state()` inside a LangGraph node has nothing to attach to — it warns rather than
+    dropping the write silently. Pass an explicit `span` there, or rely on the automatic capture.
+    """
+    if not delta:
+        return
+    target = span if span is not None else otel_trace.get_current_span()
+    if target is None or not target.is_recording():
+        log.warning(
+            "tracely.set_state(%s): no recording span to attach to — pass span=... explicitly "
+            "(inside an auto-instrumented framework callback there is no current span)",
+            ",".join(map(str, delta)),
+        )
+        return
+    for k, v in delta.items():
+        s = v if isinstance(v, str) else json.dumps(v, default=str)
+        if len(s) > max_bytes:
+            s = s[:max_bytes] + "…[truncated]"
+        target.set_attribute(f"tracely.state.{k}", s)
 
 
 def set_agents(span: Span, agents: list[dict]) -> None:

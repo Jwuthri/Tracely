@@ -93,6 +93,7 @@ tracely.flush()   # force-flush the exporter (call before the process exits)
 - `set_io(span, *, input=None, output=None)` → `tracely.input` / `tracely.output` (objects are JSON-encoded; message content is a `{role, content:[blocks]}` object or a content-block list).
 - `set_usage(span, *, input_tokens=None, output_tokens=None, thinking_tokens=None)` → `gen_ai.usage.input_tokens` / `output_tokens` / `reasoning_tokens`.
 - `set_metadata(span, **kv)` → `tracely.metadata.<key>` — arbitrary tags (e.g. prompt version, tenant), surfaced in the span's Metadata and searchable.
+- `set_state(delta, span=None, *, max_bytes=4096)` → `tracely.state.<channel>` — see [Shared state](#shared-state-langgraph-state-scratchpads-stores) below.
 - `error(span, message="")` → marks the span `StatusCode.ERROR` (→ `level=ERROR` in Tracely) — this is *the* failure-detection signal.
 - `flush()` → force-flush the OTLP exporter.
 
@@ -101,6 +102,23 @@ Standard `gen_ai.*` / OpenInference attributes, plus first-class hints that beco
 
 ### Declaring a conversation's agent catalog
 Pass `agents=[{name, description, tools:[...]}]` to `tracely.trace(...)` (or call `set_agents([...])`) to declare the agents/tools a conversation uses — emitted once as `tracely.agents`. The backend stores this per conversation; the UI's **Conversation Agents** panel renders it (with per-tool run counts) and the LLM judge can read it as `@LIST_AGENT`. Without it, Tracely still derives the agent view from the spans.
+
+### Shared state (LangGraph `State`, scratchpads, stores)
+
+Harnesses thread one mutable object through the graph. Tracely records the **delta** — the channels a step wrote — never a snapshot: what you debug is *"`plan` was emptied at step 4, in `replan`"*, and re-stamping the whole state on every span bloats the trace for no gain. The **State** drawer on a conversation folds the deltas back into the full object and shows the per-step diff.
+
+**LangGraph needs no code.** A node's return value *is* its channel update, and the LangChain instrumentor already captures it as the span's output; ingest marks those spans `tracely.state_source=output` so the UI reads them as deltas. Just `init(instrument=["langchain"])`.
+
+For state your harness manages itself, call `set_state`. **Scope is the span you attach it to** — the level is already on the span, so there's nothing extra to declare:
+
+```python
+with tracely.step("planner") as s:
+    tracely.set_state({"plan": plan, "retries": 0})   # this step
+```
+
+Each channel becomes its own `tracely.state.<channel>` attribute (not one blob), so a query can read a single channel; values over `max_bytes` are truncated per key so one fat channel can't crowd out the small ones. Within a conversation a "store" is just state that outlives a turn — attach it to the trace's root span instead of a step span.
+
+> The implicit span is the OTel *current* span, which exists inside `step()`/`tool()`/`llm()` but **not** inside an auto-instrumented framework callback — `tracely.trace()` is a context marker rather than an active span, and LangGraph runs node functions with no span in context. A bare `set_state()` inside a LangGraph node warns rather than dropping the write; pass `span=` explicitly there, or just rely on the automatic capture.
 
 ---
 

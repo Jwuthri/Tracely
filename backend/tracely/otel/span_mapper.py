@@ -118,12 +118,8 @@ def _map_span(
         "model_parameters": _model_parameters(a),
         "usage_details": _usage(a),
         "tool_call_names": _tool_call_names(a, otype),
-        # io — single-value escape hatches + reassembled structured/flattened messages (R5)
         "input": _io_field(a, "input"),
         "output": _io_field(a, "output"),
-        # metadata: keep everything (lossless), stringified — except the I/O + message attrs,
-        # which have their own columns (and would otherwise duplicate large message bodies into
-        # every row); plus convention-version provenance (R14).
         "metadata": {
             **{
                 k: _to_str(v) or ""
@@ -133,8 +129,8 @@ def _map_span(
             "tracely.otel.gen_ai_convention": _convention(a),
             **({"tracely.otel.schema_url": schema_url} if schema_url else {}),
             **({"tracely.otel.scope_version": scope_version} if scope_version else {}),
+            **({"tracely.state_source": "output"} if lc_meta.get("langgraph_node") else {}),
         },
-        # instrumentation provenance
         "source": "otel",
         "service_name": str(resource_attrs.get("service.name", "")),
         "scope_name": scope_name,

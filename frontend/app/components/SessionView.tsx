@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import type { ConvNode, FullTurn } from "../lib/api";
 import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
 import { AgentsSidePanel } from "./AgentsSidePanel";
+import { StateIcon, StatePanel } from "./StatePanel";
+import { spanStateWrites } from "./state-fold";
 import { TabButton } from "./SingleTraceView";
 import { TraceTable } from "./TraceTable";
 import { Waterfall } from "./Waterfall";
@@ -33,6 +35,8 @@ export function SessionView({
     () => turns.flatMap((t) => t.spans).sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()),
     [turns],
   );
+  // Only offer the State drawer when there's state to show — an empty drawer is worse than no button.
+  const hasState = useMemo(() => allSpans.some((s) => spanStateWrites(s) !== null), [allSpans]);
   const totalScores = turns.reduce((a, t) => a + t.scores.length, 0) + (conv.scores?.length ?? 0);
   const anyFail =
     turns.some((t) => t.verdict === "FAIL" || t.failing === 1) ||
@@ -41,6 +45,7 @@ export function SessionView({
 
   const [wide, setWide] = useWide();
   const [showAgents, setShowAgents] = useState(false);
+  const [showState, setShowState] = useState(false);
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-1 border-b border-line">
@@ -57,6 +62,17 @@ export function SessionView({
             <Badge variant={verdictVariant(overallVerdict)} dot>
               evals {overallVerdict}
             </Badge>
+          )}
+          {/* No fetch behind this one (it folds `allSpans`), so it works on the share page too. */}
+          {hasState && (
+            <button
+              onClick={() => setShowState(true)}
+              title="Shared state threaded through this conversation"
+              className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-[12px] text-fg-muted transition-colors hover:border-signal/40 hover:text-fg"
+            >
+              <StateIcon />
+              State
+            </button>
           )}
           {!shared && (
           <button
@@ -78,6 +94,9 @@ export function SessionView({
 
       {showAgents && (
         <AgentsSidePanel threadId={conv.thread} onClose={() => setShowAgents(false)} />
+      )}
+      {showState && (
+        <StatePanel threadId={conv.thread} spans={allSpans} onClose={() => setShowState(false)} />
       )}
 
       <div style={wide ? WIDE_STYLE : undefined} className="transition-[width,margin] duration-200">

@@ -1,10 +1,12 @@
 "use client";
 
 import clsx from "clsx";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { ConvNode, SpanOut } from "../lib/api";
 import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
 import { AgentsSidePanel } from "./AgentsSidePanel";
+import { StateIcon, StatePanel } from "./StatePanel";
+import { spanStateWrites } from "./state-fold";
 import { TraceTable } from "./TraceTable";
 import { Waterfall } from "./Waterfall";
 import { Badge, verdictVariant } from "./ui";
@@ -24,6 +26,8 @@ export function SingleTraceView({
   const [tab, setTab] = useState<"table" | "timeline">("table");
   const [wide, setWide] = useWide();
   const [showAgents, setShowAgents] = useState(false);
+  const [showState, setShowState] = useState(false);
+  const hasState = useMemo(() => spans.some((s) => spanStateWrites(s) !== null), [spans]);
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-1 border-b border-line">
@@ -40,6 +44,16 @@ export function SingleTraceView({
             <Badge variant={verdictVariant(verdict)} dot>
               evals {verdict}
             </Badge>
+          )}
+          {hasState && (
+            <button
+              onClick={() => setShowState(true)}
+              title="Shared state threaded through this trace"
+              className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-[12px] text-fg-muted transition-colors hover:border-signal/40 hover:text-fg"
+            >
+              <StateIcon />
+              State
+            </button>
           )}
           <button
             onClick={() => setShowAgents(true)}
@@ -62,6 +76,9 @@ export function SingleTraceView({
       </div>
       {showAgents && (
         <AgentsSidePanel threadId={conv.thread} onClose={() => setShowAgents(false)} />
+      )}
+      {showState && (
+        <StatePanel threadId={conv.thread} spans={spans} onClose={() => setShowState(false)} />
       )}
     </div>
   );

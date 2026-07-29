@@ -187,6 +187,34 @@ def test_langgraph_node_metadata_maps_to_step() -> None:
     assert e["step_name"] == "call" and e["step_id"] == "1"
 
 
+def test_langgraph_node_output_marked_as_state_delta() -> None:
+    """A NODE span's output is the channel dict the node returned — mark it so the State view can
+    fold it, without copying the body into metadata a second time."""
+    e = _event(
+        {
+            "openinference.span.kind": "CHAIN",
+            "metadata": json.dumps(
+                {"ls_integration": "langgraph", "langgraph_step": 1, "langgraph_node": "planner"}
+            ),
+        },
+        name="planner",
+    )
+    assert e["metadata"]["tracely.state_source"] == "output"
+
+
+def test_langgraph_graph_root_is_not_marked_as_state_delta() -> None:
+    """The compiled-graph span carries `ls_integration` too, but its output is the full final
+    state, not a delta — marking it would double-count every channel in the fold."""
+    e = _event(
+        {
+            "openinference.span.kind": "CHAIN",
+            "metadata": json.dumps({"ls_integration": "langgraph"}),
+        },
+        name="my-graph",
+    )
+    assert "tracely.state_source" not in e["metadata"]
+
+
 # ── PRD 12 P3: convention-version-aware ingestion (R14/D4) ──────────────────
 
 
