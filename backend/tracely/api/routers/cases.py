@@ -108,6 +108,20 @@ async def get_case(case_id: str, project_id: str = Depends(get_project_id)) -> d
     return res
 
 
+@router.delete("/cases/{case_id}")
+async def delete_case(case_id: str, project_id: str = Depends(get_project_id)) -> dict:
+    """Delete a regression case and its replay history. The source trace stays — promote it again
+    to recreate the case."""
+
+    def work():
+        with SyncSessionLocal() as s:
+            return repo.case_delete(s, project_id, case_id)
+
+    if not await run_in_threadpool(work):
+        raise HTTPException(status_code=404, detail="case not found")
+    return {"deleted": case_id}
+
+
 @router.post("/cases/{case_id}/replay")
 async def replay(
     case_id: str,
@@ -126,7 +140,14 @@ async def replay(
                 r = RegressionService(s).replay_case(project_id, case_id, tid)
             except NotFound as e:
                 return ("err", str(e))
-            return ("ok", {"verdict": r.verdict, "candidate_trace_id": r.candidate_trace_id, "detail": r.detail})
+            return (
+                "ok",
+                {
+                    "verdict": r.verdict,
+                    "candidate_trace_id": r.candidate_trace_id,
+                    "detail": r.detail,
+                },
+            )
 
     status, payload = await run_in_threadpool(work)
     if status == "err":

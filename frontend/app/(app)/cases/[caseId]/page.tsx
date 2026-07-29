@@ -1,5 +1,6 @@
 import { getCase } from "@/app/lib/api";
 import { ReplayControls } from "@/app/components/ReplayControls";
+import { DeleteCaseButton } from "@/app/components/DeleteCaseButton";
 import { CopyId } from "@/app/components/CopyId";
 import { Badge, statusVariant, TypeChip, verdictVariant } from "@/app/components/ui";
 import { IconArrowLeft } from "@/app/components/icons";
@@ -29,6 +30,9 @@ export default async function CasePage({ params }: { params: Promise<{ caseId: s
           <h1 className="font-display text-[24px] font-extrabold tracking-tight">{c.title || "case"}</h1>
           <Badge variant={statusVariant(c.status)} dot>{c.status}</Badge>
           {c.fail_to_pass_validated && <Badge variant="signal">fail → pass validated</Badge>}
+          <span className="ml-auto">
+            <DeleteCaseButton caseId={c.id} title={c.title} />
+          </span>
         </div>
       </header>
 

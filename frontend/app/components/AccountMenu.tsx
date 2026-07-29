@@ -141,6 +141,12 @@ export function AccountMenu({ me }: { me: Me | null }) {
           >
             Settings · API keys
           </a>
+          <a
+            href="/settings/data"
+            className="block px-3 py-2 text-[12.5px] text-fg-muted transition-colors hover:bg-white/[0.04] hover:text-fg"
+          >
+            Settings · Data
+          </a>
           {MODE === "local" && me?.user_id && (
             <a
               href="/settings/account"

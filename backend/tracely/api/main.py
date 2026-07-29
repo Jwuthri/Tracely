@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from tracely.api.routers import (
+    admin,
     analytics,
     cases,
     calibration,
@@ -138,6 +139,7 @@ app.include_router(meta_analysis.router)
 app.include_router(calibration.router)
 app.include_router(monitors.router)
 app.include_router(share.router)
+app.include_router(admin.router)
 
 # Auth: /auth/me + /auth/logout always; mode-specific endpoints gated by AUTH_MODE.
 app.include_router(auth_router.common_router)

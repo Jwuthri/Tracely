@@ -9,10 +9,11 @@
       "autoPort": true
     },
     {
-      "name": "website",
+      "name": "frontend",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["-C", "website", "dev"],
-      "port": 3003
+      "runtimeArgs": ["-C", "frontend", "dev"],
+      "port": 3001,
+      "autoPort": true
     },
     {
       "name": "docs",

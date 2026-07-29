@@ -1,4 +1,4 @@
-import { getGates, type GateRun } from "@/app/lib/api";
+import { getAgents, getCases, getGates, type GateRun } from "@/app/lib/api";
 import { Badge } from "@/app/components/ui";
 import { RowLink } from "@/app/components/RowLink";
 import { RunGateButton } from "@/app/components/RunGateButton";
@@ -24,7 +24,13 @@ function Counts({ g }: { g: GateRun }) {
 }
 
 export default async function GatesPage() {
-  const gates = await getGates();
+  const [gates, agents, cases] = await Promise.all([getGates(), getAgents(), getCases()]);
+  // Offer the agents that can actually gate something first — an agent with no promoted cases
+  // only ever returns NO_COVERAGE.
+  const caseCounts: Record<string, number> = {};
+  for (const c of cases) caseCounts[c.agent_id] = (caseCounts[c.agent_id] ?? 0) + 1;
+  const ranked = [...agents].sort((a, b) => (caseCounts[b.id] ?? 0) - (caseCounts[a.id] ?? 0));
+
   return (
     <div className="space-y-6">
       <header className="reveal flex flex-wrap items-end justify-between gap-4">
@@ -35,7 +41,7 @@ export default async function GatesPage() {
             must <span className="text-fg">not</span> recur. Runs in CI via the GitHub Action.
           </p>
         </div>
-        <RunGateButton agent="planner" />
+        <RunGateButton agents={ranked} caseCounts={caseCounts} />
       </header>
 
       <div className="reveal card overflow-hidden" style={{ animationDelay: "80ms" }}>

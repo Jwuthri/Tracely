@@ -64,4 +64,43 @@
   .reveal {
     @apply animate-fadeup;
   }
+
+  /* ---- marketing page only (app/(marketing)) — the app shell uses .bg-grid/.card above ---- */
+
+  /* blueprint grid, wider and masked so it dissolves at the edges */
+  .bg-blueprint {
+    background-image:
+      linear-gradient(to right, rgba(186, 215, 247, 0.035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(186, 215, 247, 0.035) 1px, transparent 1px);
+    background-size: 64px 64px;
+    background-position: -1px -1px;
+    mask-image: radial-gradient(ellipse 90% 80% at 50% 30%, black 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 30%, black 30%, transparent 75%);
+  }
+  /* frosted glass plate — the marketing card surface */
+  .glass {
+    @apply rounded-2xl border border-line/80 bg-ink-800/55 backdrop-blur-md shadow-frame;
+  }
+  .text-gradient {
+    background: linear-gradient(180deg, #f2f6ff 25%, #8fe8fa 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .text-gradient-cyan {
+    background: linear-gradient(180deg, #7df0ff 0%, #22d3ee 55%, #0e7490 130%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .eyebrow {
+    @apply font-mono text-[11px] font-medium uppercase tracking-[0.28em] text-signal/80;
+  }
+  .hairline-x {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(186, 215, 247, 0.16), transparent);
+  }
+  .nav-blur {
+    @apply border-b border-line/60 bg-ink-950/70 backdrop-blur-md;
+  }
 }

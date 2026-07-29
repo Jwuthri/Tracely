@@ -17,12 +17,16 @@ from sqlalchemy.orm import Session
 
 from tracely.infrastructure.db.models import (
     Agent,
+    AgentVersion,
     CaseReplay,
     ClusterMember,
     ConversationAgent,
     EvaluationCase,
+    EvaluationSuite,
+    EvaluationSuiteCase,
     Evaluator,
     FailureCluster,
+    FailureEmbedding,
     GateCase,
     GateRun,
     MetaAnalysis,
@@ -62,9 +66,7 @@ def agents_list(s: Session, project_id: str) -> list[Agent]:
     """A project's registered agents (for the meta-analysis agent selector), newest first."""
     return list(
         s.execute(
-            select(Agent)
-            .where(Agent.project_id == project_id)
-            .order_by(desc(Agent.created_at))
+            select(Agent).where(Agent.project_id == project_id).order_by(desc(Agent.created_at))
         ).scalars()
     )
 
@@ -77,9 +79,7 @@ def agent_in_project(s: Session, project_id: str, agent_id: str) -> Agent | None
 
 def evaluator_score_names(s: Session, project_id: str) -> set[str]:
     return set(
-        s.execute(
-            select(Evaluator.score_name).where(Evaluator.project_id == project_id)
-        ).scalars()
+        s.execute(select(Evaluator.score_name).where(Evaluator.project_id == project_id)).scalars()
     )
 
 
@@ -90,9 +90,7 @@ def advisory_score_names(s: Session, project_id: str) -> list[str]:
     the read layer excludes these names uniformly (see `domain.evaluation.verdict`)."""
     return [
         r.score_name
-        for r in s.execute(
-            select(Evaluator).where(Evaluator.project_id == project_id)
-        ).scalars()
+        for r in s.execute(select(Evaluator).where(Evaluator.project_id == project_id)).scalars()
         if (r.config or {}).get("advisory") is True
     ]
 
@@ -170,10 +168,14 @@ def evaluator_enabled_specs(
     the dependent simply grades without that context."""
     all_specs = [
         {
-            "id": r.id, "kind": r.kind, "config": r.config or {},
-            "score_name": r.score_name, "level": r.level,
+            "id": r.id,
+            "kind": r.kind,
+            "config": r.config or {},
+            "score_name": r.score_name,
+            "level": r.level,
             # targeting + sampling — the runner applies these on the auto (on-ingest) run
-            "target_agent": r.target_agent or "", "target_env": r.target_env or "",
+            "target_agent": r.target_agent or "",
+            "target_env": r.target_env or "",
             "sampling": r.sampling if r.sampling is not None else 1.0,
         }
         for r in s.execute(
@@ -190,7 +192,7 @@ def evaluator_enabled_specs(
     frontier = [spec for spec in all_specs if spec["id"] in selected_ids]
     while frontier:  # transitively pull in dependencies so prerequisites run too
         spec = frontier.pop()
-        for dep_name in (spec["config"].get("depends_on") or []):
+        for dep_name in spec["config"].get("depends_on") or []:
             dep = by_name.get(dep_name)
             if dep and dep["id"] not in selected_ids:
                 selected_ids.add(dep["id"])
@@ -228,7 +230,9 @@ def case_last_replay(s: Session, case_id: str) -> CaseReplay | None:
             .where(CaseReplay.case_id == case_id)
             .order_by(desc(CaseReplay.created_at))
             .limit(1)
-        ).scalars().first()
+        )
+        .scalars()
+        .first()
     )
 
 
@@ -242,12 +246,32 @@ def case_replays(s: Session, case_id: str) -> list[CaseReplay]:
     )
 
 
+def case_delete(s: Session, project_id: str, case_id: str) -> bool:
+    """Delete one regression case plus everything that points at it (replays, suite membership,
+    per-gate verdicts). False if the case is unknown or belongs to another project.
+
+    Past gate *runs* survive with their counters intact — only the deleted case's verdict row goes,
+    so a historical gate can end up listing fewer cases than its `total`. That's honest: the case
+    no longer exists to explain.
+
+    ponytail: leaves the case's S3 fixture bundle. Blobs are cheap and orphaned ones are harmless;
+    add a sweep if storage cost ever shows up.
+    """
+    c = case_get(s, project_id, case_id)
+    if c is None:
+        return False
+    s.execute(delete(GateCase).where(GateCase.evaluation_case_id == case_id))
+    s.execute(delete(EvaluationSuiteCase).where(EvaluationSuiteCase.case_id == case_id))
+    s.execute(delete(CaseReplay).where(CaseReplay.case_id == case_id))
+    s.delete(c)
+    s.commit()
+    return True
+
+
 # ── failure clusters ──────────────────────────────────────────────────────────
 
 
-def clusters_list_with_agent(
-    s: Session, project_id: str
-) -> list[tuple[FailureCluster, str]]:
+def clusters_list_with_agent(s: Session, project_id: str) -> list[tuple[FailureCluster, str]]:
     return [
         (cl, slug)
         for cl, slug in s.execute(
@@ -339,28 +363,41 @@ def search_registry(s: Session, project_id: str, q: str) -> list[dict]:
         .where(FailureCluster.project_id == project_id, FailureCluster.label.ilike(like))
         .limit(6)
     ).scalars():
-        rows.append({
-            "type": "issue", "label": cl.label, "sub": cl.taxonomy or "",
-            "href": f"/clusters/{cl.id}",
-        })
+        rows.append(
+            {
+                "type": "issue",
+                "label": cl.label,
+                "sub": cl.taxonomy or "",
+                "href": f"/clusters/{cl.id}",
+            }
+        )
     for c in s.execute(
         select(EvaluationCase)
         .where(EvaluationCase.project_id == project_id, EvaluationCase.title.ilike(like))
         .limit(6)
     ).scalars():
-        rows.append({
-            "type": "case", "label": c.title, "sub": c.status, "href": f"/cases/{c.id}",
-        })
+        rows.append(
+            {
+                "type": "case",
+                "label": c.title,
+                "sub": c.status,
+                "href": f"/cases/{c.id}",
+            }
+        )
     for g in s.execute(
         select(GateRun)
         .where(GateRun.project_id == project_id, GateRun.git_ref.ilike(like))
         .order_by(desc(GateRun.created_at))
         .limit(4)
     ).scalars():
-        rows.append({
-            "type": "gate", "label": g.git_ref or g.id[:8], "sub": g.status,
-            "href": f"/gates/{g.id}",
-        })
+        rows.append(
+            {
+                "type": "gate",
+                "label": g.git_ref or g.id[:8],
+                "sub": g.status,
+                "href": f"/gates/{g.id}",
+            }
+        )
     return rows
 
 
@@ -368,17 +405,28 @@ def search_registry(s: Session, project_id: str, q: str) -> list[dict]:
 
 
 def registry_counts(s: Session, project_id: str) -> dict:
-    agents = s.execute(
-        select(func.count()).select_from(Agent).where(Agent.project_id == project_id)
-    ).scalar() or 0
-    cases = s.execute(
-        select(func.count()).select_from(EvaluationCase).where(EvaluationCase.project_id == project_id)
-    ).scalar() or 0
-    open_clusters = s.execute(
-        select(func.count()).select_from(FailureCluster).where(
-            FailureCluster.project_id == project_id, FailureCluster.status == "OPEN"
-        )
-    ).scalar() or 0
+    agents = (
+        s.execute(
+            select(func.count()).select_from(Agent).where(Agent.project_id == project_id)
+        ).scalar()
+        or 0
+    )
+    cases = (
+        s.execute(
+            select(func.count())
+            .select_from(EvaluationCase)
+            .where(EvaluationCase.project_id == project_id)
+        ).scalar()
+        or 0
+    )
+    open_clusters = (
+        s.execute(
+            select(func.count())
+            .select_from(FailureCluster)
+            .where(FailureCluster.project_id == project_id, FailureCluster.status == "OPEN")
+        ).scalar()
+        or 0
+    )
     return {"agents": int(agents), "cases": int(cases), "open_clusters": int(open_clusters)}
 
 
@@ -387,9 +435,7 @@ def gate_cluster_trends(s: Session, project_id: str) -> dict:
     case count, and the MTTR proxy (cluster first-seen → promoted regression case)."""
     from collections import defaultdict
 
-    gates = list(
-        s.execute(select(GateRun).where(GateRun.project_id == project_id)).scalars()
-    )
+    gates = list(s.execute(select(GateRun).where(GateRun.project_id == project_id)).scalars())
     gate_total = len(gates)
     gate_passed = sum(1 for g in gates if g.status == "PASS")
     by_day: dict[str, list[int]] = defaultdict(lambda: [0, 0])  # [passed, failed]
@@ -465,7 +511,9 @@ def meta_analysis_latest_for_agent(
             )
             .order_by(desc(MetaAnalysis.created_at))
             .limit(1)
-        ).scalars().first()
+        )
+        .scalars()
+        .first()
     )
 
 
@@ -486,15 +534,15 @@ def meta_analysis_delete(s: Session, project_id: str, analysis_id: str) -> bool:
 # ── rolling summaries ─────────────────────────────────────────────────────────
 
 
-def rolling_summary_get_by_span(
-    s: Session, project_id: str, span_id: str
-) -> RollingSummary | None:
+def rolling_summary_get_by_span(s: Session, project_id: str, span_id: str) -> RollingSummary | None:
     return (
         s.execute(
             select(RollingSummary).where(
                 RollingSummary.project_id == project_id, RollingSummary.span_id == span_id
             )
-        ).scalars().first()
+        )
+        .scalars()
+        .first()
     )
 
 
@@ -505,12 +553,12 @@ def rolling_summary_latest_for_thread(
     return (
         s.execute(
             select(RollingSummary)
-            .where(
-                RollingSummary.project_id == project_id, RollingSummary.thread_id == thread_id
-            )
+            .where(RollingSummary.project_id == project_id, RollingSummary.thread_id == thread_id)
             .order_by(desc(RollingSummary.step_order), desc(RollingSummary.created_at))
             .limit(1)
-        ).scalars().first()
+        )
+        .scalars()
+        .first()
     )
 
 
@@ -528,7 +576,9 @@ def rolling_summary_latest_before(
             )
             .order_by(desc(RollingSummary.step_order))
             .limit(1)
-        ).scalars().first()
+        )
+        .scalars()
+        .first()
     )
 
 
@@ -538,9 +588,7 @@ def rolling_summary_list_for_thread(
     return list(
         s.execute(
             select(RollingSummary)
-            .where(
-                RollingSummary.project_id == project_id, RollingSummary.thread_id == thread_id
-            )
+            .where(RollingSummary.project_id == project_id, RollingSummary.thread_id == thread_id)
             .order_by(RollingSummary.step_order)
         ).scalars()
     )
@@ -605,7 +653,9 @@ def conversation_agents_get(
                 ConversationAgent.project_id == project_id,
                 ConversationAgent.thread_id == thread_id,
             )
-        ).scalars().first()
+        )
+        .scalars()
+        .first()
     )
 
 
@@ -633,7 +683,9 @@ def conversation_agents_upsert(
 
 
 # ── score annotations (judge-vs-human calibration) ──────────────────────────────
-def _annotation_key(q, project_id, score_name, evaluation_level, trace_id, session_id, observation_id, labeled_by):
+def _annotation_key(
+    q, project_id, score_name, evaluation_level, trace_id, session_id, observation_id, labeled_by
+):
     return q.where(
         ScoreAnnotation.project_id == project_id,
         ScoreAnnotation.score_name == score_name,
@@ -662,16 +714,29 @@ def score_annotation_upsert(
     """Insert or replace one reviewer's label on a judge score (keyed by the score's natural identity
     + labeler). `judge_verdict` is snapshotted so agreement reflects what the human reviewed."""
     row = _annotation_key(
-        select(ScoreAnnotation), project_id, score_name, evaluation_level, trace_id, session_id,
-        observation_id, labeled_by,
+        select(ScoreAnnotation),
+        project_id,
+        score_name,
+        evaluation_level,
+        trace_id,
+        session_id,
+        observation_id,
+        labeled_by,
     )
     row = s.execute(row).scalar_one_or_none()
     if row is None:
         row = ScoreAnnotation(
-            id=str(uuid4()), project_id=project_id, score_name=score_name,
-            evaluation_level=evaluation_level, trace_id=trace_id, session_id=session_id,
-            observation_id=observation_id, judge_verdict=judge_verdict,
-            human_verdict=human_verdict, note=note, labeled_by=labeled_by,
+            id=str(uuid4()),
+            project_id=project_id,
+            score_name=score_name,
+            evaluation_level=evaluation_level,
+            trace_id=trace_id,
+            session_id=session_id,
+            observation_id=observation_id,
+            judge_verdict=judge_verdict,
+            human_verdict=human_verdict,
+            note=note,
+            labeled_by=labeled_by,
         )
         s.add(row)
     else:
@@ -696,8 +761,14 @@ def score_annotation_delete(
 ) -> bool:
     """Remove a reviewer's label (clearing it). Returns whether a row was deleted."""
     row = _annotation_key(
-        select(ScoreAnnotation), project_id, score_name, evaluation_level, trace_id, session_id,
-        observation_id, labeled_by,
+        select(ScoreAnnotation),
+        project_id,
+        score_name,
+        evaluation_level,
+        trace_id,
+        session_id,
+        observation_id,
+        labeled_by,
     )
     row = s.execute(row).scalar_one_or_none()
     if row is None:
@@ -708,7 +779,11 @@ def score_annotation_delete(
 
 
 def score_annotations_for_trace(
-    s: Session, project_id: str, *, trace_id: str = "", session_id: str = "",
+    s: Session,
+    project_id: str,
+    *,
+    trace_id: str = "",
+    session_id: str = "",
     labeled_by: str | None = None,
 ) -> list[ScoreAnnotation]:
     """Existing labels on a trace and/or its thread (optionally just one reviewer's) — used to render
@@ -782,9 +857,7 @@ def monitor_create(
     return m
 
 
-def monitor_update(
-    s: Session, project_id: str, monitor_id: str, patch: dict
-) -> Monitor | None:
+def monitor_update(s: Session, project_id: str, monitor_id: str, patch: dict) -> Monitor | None:
     m = monitor_get(s, project_id, monitor_id)
     if m is None:
         return None
@@ -807,6 +880,88 @@ def monitor_delete(s: Session, project_id: str, monitor_id: str) -> bool:
 def enabled_monitors_across_projects(s: Session) -> list[Monitor]:
     """Every enabled monitor across every project — the worker's fan-out input. Cheap (small
     table, indexed `(project_id, enabled)`)."""
-    return list(
-        s.execute(select(Monitor).where(Monitor.enabled.is_(True))).scalars()
+    return list(s.execute(select(Monitor).where(Monitor.enabled.is_(True))).scalars())
+
+
+# ── project reset ─────────────────────────────────────────────────────────────
+
+
+def project_data_delete(s: Session, project_id: str) -> dict[str, int]:
+    """Delete everything DERIVED FROM TRACES in this project; keep everything CONFIGURED BY HAND.
+
+    Gone: agents (+versions), regression cases (+replays/suites), gate runs, failure clusters
+    (+members/embeddings), meta-analyses, rolling summaries, conversation agents, score
+    annotations. Agents count as derived — they auto-register on ingest and come straight back
+    with the next trace.
+
+    Kept: the project, ingest keys, users/memberships, evaluators and monitors. Those are your
+    setup, not your data — wiping them would mean reconfiguring the workspace to use it again.
+    Evaluators/monitors target agents by slug (no FK), so they survive an agent wipe intact.
+
+    Returns per-table row counts. Caller is responsible for the ClickHouse half
+    (`infrastructure.clickhouse.deletes.delete_project_events`).
+    """
+    case_ids = list(
+        s.execute(
+            select(EvaluationCase.id).where(EvaluationCase.project_id == project_id)
+        ).scalars()
     )
+    gate_ids = list(s.execute(select(GateRun.id).where(GateRun.project_id == project_id)).scalars())
+    cluster_ids = list(
+        s.execute(
+            select(FailureCluster.id).where(FailureCluster.project_id == project_id)
+        ).scalars()
+    )
+    agent_ids = list(s.execute(select(Agent.id).where(Agent.project_id == project_id)).scalars())
+    suite_ids = list(
+        s.execute(
+            select(EvaluationSuite.id).where(EvaluationSuite.project_id == project_id)
+        ).scalars()
+    )
+
+    counts: dict[str, int] = {}
+
+    def wipe(key: str, stmt) -> None:
+        counts[key] = int(s.execute(stmt).rowcount or 0)
+
+    # children first — plain FKs, no ON DELETE CASCADE in the schema
+    if gate_ids:
+        wipe("gate_cases", delete(GateCase).where(GateCase.gate_run_id.in_(gate_ids)))
+    if case_ids:
+        wipe("case_replays", delete(CaseReplay).where(CaseReplay.case_id.in_(case_ids)))
+    if suite_ids:
+        wipe(
+            "evaluation_suite_cases",
+            delete(EvaluationSuiteCase).where(EvaluationSuiteCase.suite_id.in_(suite_ids)),
+        )
+    if cluster_ids:
+        wipe(
+            "cluster_members",
+            delete(ClusterMember).where(ClusterMember.cluster_id.in_(cluster_ids)),
+        )
+
+    wipe("gate_runs", delete(GateRun).where(GateRun.project_id == project_id))
+    wipe("evaluation_cases", delete(EvaluationCase).where(EvaluationCase.project_id == project_id))
+    wipe(
+        "evaluation_suites", delete(EvaluationSuite).where(EvaluationSuite.project_id == project_id)
+    )
+    wipe("failure_clusters", delete(FailureCluster).where(FailureCluster.project_id == project_id))
+    wipe(
+        "failure_embeddings",
+        delete(FailureEmbedding).where(FailureEmbedding.project_id == project_id),
+    )
+    wipe("meta_analyses", delete(MetaAnalysis).where(MetaAnalysis.project_id == project_id))
+    wipe("rolling_summaries", delete(RollingSummary).where(RollingSummary.project_id == project_id))
+    wipe(
+        "conversation_agents",
+        delete(ConversationAgent).where(ConversationAgent.project_id == project_id),
+    )
+    wipe(
+        "score_annotations", delete(ScoreAnnotation).where(ScoreAnnotation.project_id == project_id)
+    )
+    if agent_ids:
+        wipe("agent_versions", delete(AgentVersion).where(AgentVersion.agent_id.in_(agent_ids)))
+    wipe("agents", delete(Agent).where(Agent.project_id == project_id))
+
+    s.commit()
+    return {k: v for k, v in counts.items() if v}

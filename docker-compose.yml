@@ -224,6 +224,7 @@ services:
     volumes:
       - ./frontend/app:/app/app           # live source -> next dev hot-reload (node_modules/.next stay baked)
       - ./frontend/middleware.ts:/app/middleware.ts   # the auth guard lives outside app/ — without this, edits to it silently never reach the container
+      - ./frontend/tailwind.config.ts:/app/tailwind.config.ts   # theme tokens also live outside app/ — a new token used by app/ code fails the build without this
     environment:
       TRACELY_API: http://backend:8000     # server-side fetch uses the compose network
       TRACELY_KEY: tracely_dev_key         # dev-mode fallback only (AUTH_MODE=dev)

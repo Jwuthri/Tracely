@@ -8,6 +8,7 @@ const MODE = process.env.NEXT_PUBLIC_AUTH_MODE ?? "dev";
 const SESSION_COOKIE = "tracely_session";
 
 const PUBLIC = [
+  /^\/$/, // the marketing landing page
   /^\/login/,
   /^\/register/,
   /^\/accept-invite/,
@@ -25,6 +26,7 @@ export default async function middleware(req: NextRequest, ev: NextFetchEvent) {
     // Keep in sync with PUBLIC above — Clerk mode has its own matcher, so a route added to only
     // one of the two lists is public in local mode and a redirect loop in Clerk mode.
     const isPublicClerk = createRouteMatcher([
+      "/",
       "/sign-in(.*)",
       "/sign-up(.*)",
       "/share/(.*)",

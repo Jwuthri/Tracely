@@ -8,7 +8,8 @@ export async function POST(req: NextRequest) {
   const r = await fetch(`${API}/api/gate`, {
     method: "POST",
     headers: { ...(await authHeaders()), "content-type": "application/json" },
-    body: JSON.stringify({ agent: agent ?? "planner", env: env ?? "ci" }),
+    // no agent fallback — an unset agent is a 400 from the backend, not a guess at a slug
+    body: JSON.stringify({ agent, env: env ?? "ci" }),
   });
   const data = await r.json();
   return NextResponse.json(data, { status: r.status });

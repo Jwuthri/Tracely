@@ -41,8 +41,10 @@ There are **two** ways the UI talks to the backend, and which one you use depend
 
 ```
 app/
+  (marketing)/      # public landing page at "/" — bare layout, no sidebar, no auth
   (auth)/           # sign-in, sign-up, register, login, accept-invite + layout
   (app)/            # authenticated app shell
+    dashboard/      # the dashboard — "/" belongs to marketing now
     settings/
       api-keys/     # API key management
       team/         # member list + InviteManager
@@ -55,7 +57,8 @@ All are **Server Components** unless noted; each lists the `lib/api.ts` calls it
 
 | Route | Fetches | Renders |
 |---|---|---|
-| `/` | `getStats`, `getTraces`, `getCases` | Dashboard — 4 stat cards + recent traces & cases. |
+| `/` | — | **Public marketing landing page** (`(marketing)/`) — no auth, no app shell. Client component animated with GSAP; all motion behind `gsap.matchMedia("(prefers-reduced-motion: no-preference)")`. |
+| `/dashboard` | `getStats`, `getTraces`, `getCases` | Dashboard — 4 stat cards + recent traces & cases. |
 | `/traces` | `getSessions` | `TracesExplorer` (filter + search + date range) wrapping the hierarchical **TraceTable** in list mode. |
 | `/traces/[traceId]` | `getTrace` | Single trace header (spans/latency/**usage totals**, `PromoteButton` if failing) + `SingleTraceView` (Table / Timeline tabs + an Agents drawer). |
 | `/sessions/[threadId]` | `getSession` + `getTrace` per turn | A conversation, pre-expanded: builds a `ConvNode` with all turns + spans and renders **TraceTable** in detail mode. Header shows conversation usage totals. |

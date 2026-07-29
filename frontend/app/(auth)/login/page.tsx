@@ -21,7 +21,7 @@ export default function LoginPage() {
       body: JSON.stringify({ email, password }),
     });
     if (r.ok) {
-      const next = new URLSearchParams(window.location.search).get("next") || "/";
+      const next = new URLSearchParams(window.location.search).get("next") || "/dashboard";
       router.push(next);
       router.refresh();
     } else {

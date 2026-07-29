@@ -26,7 +26,7 @@ export default function AcceptInvitePage() {
       body: JSON.stringify({ token, password, display_name: name }),
     });
     if (r.ok) {
-      router.push("/");
+      router.push("/dashboard");
       router.refresh();
     } else {
       const d = await r.json().catch(() => ({}));

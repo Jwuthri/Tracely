@@ -6,6 +6,7 @@ import { IconChevron, IconSearch } from "./icons";
 
 const LABELS: Record<string, string> = {
   "": "Dashboard",
+  dashboard: "Dashboard",
   traces: "Traces",
   cases: "Regression cases",
   gates: "CI gates",
@@ -14,7 +15,7 @@ const LABELS: Record<string, string> = {
 
 function crumbs(path: string) {
   const segs = path.split("/").filter(Boolean);
-  if (segs.length === 0) return [{ href: "/", label: "Dashboard" }];
+  if (segs.length === 0) return [{ href: "/dashboard", label: "Dashboard" }];
   const out: { href: string; label: string }[] = [];
   let acc = "";
   segs.forEach((seg, i) => {

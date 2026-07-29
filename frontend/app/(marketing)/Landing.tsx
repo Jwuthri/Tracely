@@ -8,8 +8,8 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 gsap.registerPlugin(useGSAP, ScrollTrigger);
 
 const GITHUB = "https://github.com/Jwuthri/Tracely";
-const APP = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3001";
-const DOCS = `${GITHUB}/tree/master/docs`;
+const APP = "/dashboard"; // same app — the authed shell lives in the (app) route group
+const DOCS = "https://doc.tracely-studio.xyz";
 
 /* ---------------------------------- ui bits ---------------------------------- */
 
@@ -94,6 +94,21 @@ const IconSpinner = (p: P) => (
     <path d="M12 3a9 9 0 1 0 9 9" />
   </svg>
 );
+
+/** The Tracely mark — same geometry as the app shell's (components/Sidebar.tsx, (auth)/_ui.tsx). */
+function Mark({ size = 34 }: { size?: number }) {
+  return (
+    <span
+      className="relative grid shrink-0 place-items-center rounded-[11px] border border-signal/30 bg-signal/10 shadow-[0_0_22px_-6px_rgba(34,211,238,0.7)]"
+      style={{ width: size, height: size, borderRadius: size * 0.32 }}
+    >
+      <svg width={size * 0.5} height={size * 0.5} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path d="M12 2 22 12 12 22 2 12Z" stroke="#22d3ee" strokeWidth="1.8" strokeLinejoin="round" />
+        <circle cx="12" cy="12" r="2.7" fill="#22d3ee" />
+      </svg>
+    </span>
+  );
+}
 
 /** Words wrapped in overflow-hidden masks for the hero line-reveal. */
 function MaskWords({ text, wordClass = "" }: { text: string; wordClass?: string }) {
@@ -455,9 +470,14 @@ export default function Landing() {
       {/* ================================ nav ================================ */}
       <header className="site-nav fixed inset-x-0 top-0 z-50 transition-colors duration-300">
         <nav className="mx-auto flex h-16 max-w-[1200px] items-center justify-between px-6">
-          <a href="#top" className="flex items-center gap-2.5">
-            <span className="h-2.5 w-2.5 rounded-full bg-signal shadow-glow" />
-            <span className="font-display text-lg font-bold tracking-tight">Tracely</span>
+          <a href="#top" className="flex items-center gap-3">
+            <Mark size={34} />
+            <span className="leading-none">
+              <span className="block font-display text-lg font-bold tracking-tight">Tracely</span>
+              <span className="mt-1 block font-mono text-[9px] uppercase tracking-[0.22em] text-fg-faint">
+                trace-native ci/cd
+              </span>
+            </span>
           </a>
           <div className="hidden items-center gap-7 text-sm text-fg-muted md:flex">
             <a className="transition hover:text-fg" href="#loop">How it works</a>
@@ -480,7 +500,7 @@ export default function Landing() {
       <main id="top">
         {/* ================================ hero ================================ */}
         <section className="hero-wrap relative overflow-hidden px-6 pb-24 pt-40">
-          <div className="bg-grid pointer-events-none absolute inset-0" />
+          <div className="bg-blueprint pointer-events-none absolute inset-0" />
           <div
             className="pointer-events-none absolute inset-x-0 top-0 h-[520px]"
             style={{ background: "radial-gradient(640px 320px at 50% -8%, rgba(34,211,238,0.16), transparent 70%)" }}
@@ -875,7 +895,7 @@ export default function Landing() {
 
         {/* ================================ final cta ================================ */}
         <section className="final-cta relative overflow-hidden px-6 pb-10 pt-32">
-          <div className="bg-grid pointer-events-none absolute inset-0" />
+          <div className="bg-blueprint pointer-events-none absolute inset-0" />
           <div
             className="pointer-events-none absolute inset-x-0 bottom-0 h-[420px]"
             style={{ background: "radial-gradient(720px 360px at 50% 108%, rgba(34,211,238,0.13), transparent 70%)" }}
@@ -896,7 +916,7 @@ export default function Landing() {
 
             <footer className="flex flex-col items-center justify-between gap-4 border-t border-line/60 py-8 sm:flex-row">
               <p className="flex items-center gap-2.5 text-sm text-fg-faint">
-                <span className="h-2 w-2 rounded-full bg-signal" />
+                <Mark size={22} />
                 <span className="font-display font-bold text-fg-muted">Tracely</span> · trace-native CI/CD for AI
                 agents · © 2026
               </p>

@@ -11,9 +11,15 @@ importers:
       '@clerk/nextjs':
         specifier: ^7.4.3
         version: 7.4.3(next@15.5.19(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@gsap/react':
+        specifier: ^2.1.2
+        version: 2.1.2(gsap@3.15.0)(react@19.2.7)
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      gsap:
+        specifier: ^3.15.0
+        version: 3.15.0
       next:
         specifier: ^15.5.9
         version: 15.5.19(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -317,6 +323,12 @@ packages:
     peerDependenciesMeta:
       '@noble/hashes':
         optional: true
+
+  '@gsap/react@2.1.2':
+    resolution: {integrity: sha512-JqliybO1837UcgH2hVOM4VO+38APk3ECNrsuSM4MuXp+rbf+/2IG2K1YJiqfTcXQHH7XlA0m3ykniFYstfq0Iw==}
+    peerDependencies:
+      gsap: ^3.12.5
+      react: '>=17'
 
   '@img/colour@1.1.0':
     resolution: {integrity: sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==}
@@ -993,6 +1005,9 @@ packages:
 
   glob-to-regexp@0.4.1:
     resolution: {integrity: sha512-lkX1HJXwyMcprw/5YUZc2s7DrpAiHB21/V+E1rHUrVNokkvB6bqMzT0VfV6/86ZNabt1k14YOIaT7nDvOX3Iiw==}
+
+  gsap@3.15.0:
+    resolution: {integrity: sha512-dMW4CWBTUK1AEEDeZc1g4xpPGIrSf9fJF960qbTZmN/QwZIWY5wgliS6JWl9/25fpTGJrMRtSjGtOmPnfjZB+A==}
 
   hasown@2.0.4:
     resolution: {integrity: sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==}
@@ -1681,6 +1696,11 @@ snapshots:
 
   '@exodus/bytes@1.15.1': {}
 
+  '@gsap/react@2.1.2(gsap@3.15.0)(react@19.2.7)':
+    dependencies:
+      gsap: 3.15.0
+      react: 19.2.7
+
   '@img/colour@1.1.0':
     optional: true
 
@@ -2206,6 +2226,8 @@ snapshots:
       is-glob: 4.0.3
 
   glob-to-regexp@0.4.1: {}
+
+  gsap@3.15.0: {}
 
   hasown@2.0.4:
     dependencies:

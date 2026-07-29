@@ -4,13 +4,13 @@ import clsx from "clsx";
 import { usePathname } from "next/navigation";
 import type { Me } from "@/app/lib/auth/types";
 import { AccountMenu } from "./AccountMenu";
-import { IconActivity, IconGate, IconGrid, IconLayers, IconScale, IconSettings, IconShield, IconTrend } from "./icons";
+import { IconActivity, IconDatabase, IconGate, IconGrid, IconLayers, IconScale, IconSettings, IconShield, IconTrend } from "./icons";
 
 const NAV = [
   {
     group: "Observe",
     items: [
-      { href: "/", label: "Dashboard", Icon: IconGrid, exact: true },
+      { href: "/dashboard", label: "Dashboard", Icon: IconGrid, exact: true },
       { href: "/traces", label: "Traces", Icon: IconActivity },
       { href: "/trends", label: "Trends", Icon: IconTrend },
     ],
@@ -32,7 +32,10 @@ const NAV = [
   },
   {
     group: "Configure",
-    items: [{ href: "/settings/api-keys", label: "Settings", Icon: IconSettings }],
+    items: [
+      { href: "/settings/api-keys", label: "Settings", Icon: IconSettings },
+      { href: "/settings/data", label: "Data", Icon: IconDatabase },
+    ],
   },
 ];
 

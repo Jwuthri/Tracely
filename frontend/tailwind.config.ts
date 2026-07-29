@@ -12,6 +12,7 @@ const config: Config = {
       colors: {
         ink: {
           DEFAULT: "#090b10",
+          950: "#05070c", // marketing page canvas (one step deeper than the app shell)
           900: "#0b0e14",
           800: "#0f131b",
           700: "#141925",
@@ -34,6 +35,8 @@ const config: Config = {
       boxShadow: {
         glow: "0 0 0 1px rgba(34,211,238,0.25), 0 8px 30px -8px rgba(34,211,238,0.35)",
         panel: "0 1px 0 0 rgba(255,255,255,0.03) inset, 0 20px 40px -24px rgba(0,0,0,0.8)",
+        frame:
+          "0 1px 1px 0 rgba(216,236,248,0.14) inset, 0 24px 48px 0 rgba(34,211,238,0.04) inset, 0 32px 64px -24px rgba(0,0,0,0.85)",
       },
       keyframes: {
         fadeup: {
@@ -48,11 +51,16 @@ const config: Config = {
           "0%,100%": { opacity: "1" },
           "50%": { opacity: "0.35" },
         },
+        marquee: {
+          "0%": { transform: "translateX(0)" },
+          "100%": { transform: "translateX(-50%)" },
+        },
       },
       animation: {
         fadeup: "fadeup 0.4s cubic-bezier(0.2,0.7,0.2,1) both",
         grow: "grow 0.5s cubic-bezier(0.2,0.7,0.2,1) both",
         pulse2: "pulse2 2s ease-in-out infinite",
+        marquee: "marquee 36s linear infinite",
       },
     },
   },

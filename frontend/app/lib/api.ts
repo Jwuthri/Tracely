@@ -303,6 +303,14 @@ export type GateRun = {
   cases?: GateCaseResult[];
 };
 
+export type AgentRow = { id: string; slug: string; display_name: string };
+
+/** The project's registered agents (auto-registered on ingest). Backed by the meta-analysis
+ *  selector's endpoint — same list, no reason for a second one. */
+export async function getAgents(): Promise<AgentRow[]> {
+  return getJson<AgentRow[]>(`/api/meta-analyses/agents`);
+}
+
 export async function getGates(): Promise<GateRun[]> {
   return getJson<GateRun[]>(`/api/gates`);
 }
