@@ -90,7 +90,7 @@ export const COLUMNS: Col[] = [
   { key: "mtime", label: "Datetime", group: "M", width: 160 },
   { key: "mdur",  label: "Duration", group: "M", width: 96 },
   { key: "content", label: "Content", group: "M", width: 420 },
-  { key: "mstate", label: "State Δ", group: "M", width: 180 },
+  { key: "mstate", label: "State Δ", group: "M", width: 240 },
   { key: "mrsummary", label: "Rolling summary", group: "M", width: 240 },
   { key: "musage", label: "Usage", group: "M", width: 180 },
   { key: "sindex", label: "#", group: "S", width: 56 },
@@ -102,7 +102,7 @@ export const COLUMNS: Col[] = [
   { key: "name", label: "Name", group: "S", width: 170 },
   { key: "input", label: "Input", group: "S", width: 240 },
   { key: "output", label: "Output", group: "S", width: 240 },
-  { key: "sstate", label: "State Δ", group: "S", width: 180 },
+  { key: "sstate", label: "State Δ", group: "S", width: 240 },
   { key: "srsummary", label: "Rolling summary", group: "S", width: 240 },
   { key: "susage", label: "Usage", group: "S", width: 180 },
 ];

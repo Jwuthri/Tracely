@@ -527,37 +527,19 @@ function AgentBadge({ agent }: { agent: string }) {
   );
 }
 
-// The channels a row wrote to the shared state object. Names only — the value rides in the tooltip
-// and the full before/after story is the State drawer's job; a cell that inlines a `messages` array
-// is a cell nobody can scan past. At M level this is the union across the turn's steps, which is
-// how you spot "turn 3 is where `plan` changed" without expanding anything.
-function StateCell({ writes }: { writes: Array<{ key: string; preview: string }> }) {
-  if (writes.length === 0) return <span className="text-slate-500">—</span>;
-  return (
-    <span className="flex flex-wrap gap-1">
-      {writes.map((w) => (
-        <span
-          key={w.key}
-          title={w.preview}
-          className="inline-flex max-w-full items-center truncate rounded border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[10.5px] text-cyan-300"
-        >
-          {w.key}
-        </span>
-      ))}
-    </span>
-  );
+// What this row wrote to the shared state object, as the object itself — rendered by the same
+// JsonPill the Input/Output columns use, so it previews inline and expands to the full JSON.
+function StateCell({ writes }: { writes: Record<string, unknown> | null }) {
+  if (!writes) return <span className="text-slate-500">—</span>;
+  return <JsonPill raw={JSON.stringify(writes)} />;
 }
 
-// One row's writes, newest-wins within the row, as {key, preview} for the cell above.
-function stateWritesOf(spans: SpanOut[]): Array<{ key: string; preview: string }> {
-  const seen = new Map<string, string>();
-  for (const s of spans) {
-    for (const [k, v] of Object.entries(spanStateWrites(s) ?? {})) {
-      const enc = typeof v === "string" ? v : (JSON.stringify(v) ?? "");
-      seen.set(k, enc.length > 300 ? `${enc.slice(0, 300)}…` : enc);
-    }
-  }
-  return [...seen].map(([key, preview]) => ({ key, preview }));
+// The row's writes merged into one delta object; later spans win, so an M row shows the turn's
+// net change rather than each step's intermediate value.
+function stateWritesOf(spans: SpanOut[]): Record<string, unknown> | null {
+  const merged: Record<string, unknown> = {};
+  for (const s of spans) Object.assign(merged, spanStateWrites(s) ?? {});
+  return Object.keys(merged).length > 0 ? merged : null;
 }
 
 function ModelBadge({ model }: { model: string }) {

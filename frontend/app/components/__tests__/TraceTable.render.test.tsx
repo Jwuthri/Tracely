@@ -109,12 +109,27 @@ function turnWith(spans: SpanOut[]): FullTurn {
 }
 
 describe("TraceTable State Δ columns", () => {
-  it("shows the written channel at step and message level", async () => {
+  it("shows the written delta as a JSON object at step and message level", async () => {
     render(<TraceTable conversations={[conv({ turnsData: [turnWith([stateSpan()])] })]} />);
     // both the M and S columns carry the same header label
     expect(await screen.findAllByText("State Δ")).toHaveLength(2);
-    // `plan` chip: once on the step row, once on the assistant message row (the union)
-    expect(screen.getAllByText("plan")).toHaveLength(2);
+    // JsonPill preview: `plan:` key + its value — on the step row and the assistant message row
+    expect(screen.getAllByText("plan:")).toHaveLength(2);
+    expect(screen.getAllByText(/step-a/).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("merges a turn's steps into one net delta on the message row", async () => {
+    const spans = [
+      stateSpan({ span_id: "s1", metadata: { "tracely.state.plan": '["a"]' } }),
+      stateSpan({
+        span_id: "s2", step_name: "replan", start_time: "2026-06-14T10:00:02Z",
+        metadata: { "tracely.state.plan": "[]", "tracely.state.retries": "1" },
+      }),
+    ];
+    render(<TraceTable conversations={[conv({ turnsData: [turnWith(spans)] })]} />);
+    await screen.findAllByText("State Δ");
+    // the M row's pill previews the first key plus a "+1" for the second — the turn's net change
+    expect(screen.getAllByText("+1").length).toBeGreaterThanOrEqual(1);
   });
 
   it("hides both columns entirely when nothing loaded carries state", async () => {
