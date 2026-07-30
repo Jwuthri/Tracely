@@ -64,7 +64,16 @@ OPENAI_API_KEY=...                   # embeddings only
 
 # Hosted frontend origin (CORS allow-list — wildcard localhost is OFF in prod)
 FRONTEND_ORIGIN=https://app.your-domain.com
+# Set on BOTH backend and worker: the backend builds invite links from it, and the worker builds
+# monitor links (services/monitoring_service.py). Worker-only omission = alerts linking to localhost.
 APP_BASE_URL=https://app.your-domain.com
+
+# Transactional email (Resend) — BACKEND SERVICE ONLY; the frontend never sends mail, it proxies to
+# the backend. WITHOUT RESEND_API_KEY invites are created but never emailed and the UI silently
+# falls back to "share this link". EMAIL_FROM must be on a domain verified at resend.com/domains,
+# otherwise every send is rejected.
+RESEND_API_KEY=re_...
+EMAIL_FROM=Tracely <invites@your-domain.com>
 
 # Worker pool (real concurrency — see §3)
 CELERY_POOL=prefork

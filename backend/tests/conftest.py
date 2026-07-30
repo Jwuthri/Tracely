@@ -11,6 +11,9 @@ from uuid import uuid4
 
 os.environ.setdefault("AUTH_MODE", "local")
 os.environ.setdefault("SESSION_SECRET", "test-session-secret-at-least-32-chars-long")
+# Hard-off, not setdefault: a dev .env with a real key made every invite test send a live Resend
+# email to `@x.test`, i.e. a hard bounce per run. Env beats the dotenv file in pydantic-settings.
+os.environ["RESEND_API_KEY"] = ""
 
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402

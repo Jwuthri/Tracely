@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from tracely.infrastructure import mailer
+
 
 def _bearer(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+def test_mailer_is_off_in_tests():
+    """The invite tests below hit POST /auth/invitations for real. If the mailer is live they send
+    real email to `@x.test`, and the bounce rate gets the sending domain suspended."""
+    assert not mailer.email_enabled()
 
 
 async def test_register_bootstrap_login_and_me(client):
