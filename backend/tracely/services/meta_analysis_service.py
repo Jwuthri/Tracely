@@ -32,7 +32,8 @@ class MetaAnalysisService:
             agent = repositories.agent_in_project(s, project_id, agent_id) if agent_id else None
             agent_slug = agent.slug if agent else ""
 
-        result, meta = cls._analyze(agent_id, agent_slug, rows)
+        with provider.use_project_key(project_id):
+            result, meta = cls._analyze(agent_id, agent_slug, rows)
 
         with SyncSessionLocal() as s:
             row = repositories.meta_analysis_create(

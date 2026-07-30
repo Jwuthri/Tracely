@@ -46,6 +46,7 @@ class Evaluator(ABC):
 
     def __init__(self) -> None:
         self.level: str = self.default_level
+        self.score_name: str = ""  # stamped by dispatch() — lets a failing run() log which column it is
 
     @abstractmethod
     def run(self, ctx: RunContext, params: dict) -> list[EvalResult]:
@@ -89,6 +90,7 @@ class EvaluatorRegistry:
             return []
         ev = cls()
         ev.level = level or cls.default_level
+        ev.score_name = score_name
         results = ev.run(ctx, config.get("params") or config or {})
         for r in results:
             r.name = score_name

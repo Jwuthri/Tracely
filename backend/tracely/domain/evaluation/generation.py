@@ -95,14 +95,15 @@ def _schema_from_fields(fields: list[GeneratedSchemaField]) -> dict[str, Any] | 
     return {"type": "object", "properties": properties, "required": required}
 
 
-def generate_evaluator_config(description: str) -> dict[str, Any]:
+def generate_evaluator_config(description: str, project_id: str) -> dict[str, Any]:
     """Returns a normalized draft `{name, description, kind, level, config{prompt, output_type,
     threshold?, output_schema?}}`. Raises on transport errors (caller maps to HTTP 502)."""
-    draft = provider.run_structured_agent(
-        f"Design an evaluation metric for: {description.strip()[:2000]}",
-        response_format=GeneratedEvaluatorDraft,
-        system_prompt=_SYSTEM,
-    )
+    with provider.use_project_key(project_id):
+        draft = provider.run_structured_agent(
+            f"Design an evaluation metric for: {description.strip()[:2000]}",
+            response_format=GeneratedEvaluatorDraft,
+            system_prompt=_SYSTEM,
+        )
     level = draft.level.upper().strip()
     if level not in LEVELS:
         level = "AGENT_RUN"

@@ -54,6 +54,9 @@ class Project(Base):
     source: Mapped[str] = mapped_column(String(16), default="local")
     # Clerk org_id, or "user:<clerk_user_id>" for a personal workspace; NULL for local single-workspace
     external_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # This workspace's own OpenRouter key (Fernet-encrypted, see infrastructure/llm/provider.py),
+    # used for every LLM eval call instead of the server-wide OPENROUTER_API_KEY. NULL = server key.
+    openrouter_api_key_encrypted: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     ingest_keys: Mapped[list["IngestKey"]] = relationship(back_populates="project")

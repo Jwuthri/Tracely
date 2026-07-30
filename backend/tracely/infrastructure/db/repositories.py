@@ -31,9 +31,28 @@ from tracely.infrastructure.db.models import (
     GateRun,
     MetaAnalysis,
     Monitor,
+    Project,
     RollingSummary,
     ScoreAnnotation,
 )
+
+# ── projects (workspaces) ─────────────────────────────────────────────────────
+
+
+def project_get(s: Session, project_id: str) -> Project | None:
+    return s.get(Project, project_id)
+
+
+def project_set_openrouter_key(s: Session, project_id: str, encrypted: str | None) -> bool:
+    """Set (or, with `encrypted=None`, clear) this workspace's own OpenRouter key. Returns False
+    if the project doesn't exist."""
+    proj = s.get(Project, project_id)
+    if proj is None:
+        return False
+    proj.openrouter_api_key_encrypted = encrypted
+    s.commit()
+    return True
+
 
 # ── evaluators (= evaluation columns) ─────────────────────────────────────────
 

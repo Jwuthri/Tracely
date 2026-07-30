@@ -30,6 +30,13 @@ x-app-env: &app-env
   OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   LLM_JUDGE_API_KEY: ${OPENAI_API_KEY:-}
+  # Encrypts a workspace's own OpenRouter key (Settings -> LLM key) at rest. Any string
+  # >=32 chars; generate with `openssl rand -base64 32`. Blank = that feature can't be used.
+  SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-}
+  # Output-token cap per judge/agent call. OpenRouter reserves credit for the FULL max_tokens up
+  # front, so leaving this unset makes calls fail with "requires more credits" long before the
+  # balance is spent. Raise only if a reasoning-heavy judge model gets truncated.
+  LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-4096}
   # Meta-analysis ("Analyze") synthesis model + rolling-summary compression model. The heavy
   # lifting (correlations/outliers; verbatim short steps) is deterministic; these only set the
   # model for the prose/compression LLM calls (both via the OpenRouter provider).

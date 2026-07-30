@@ -57,6 +57,13 @@ async def run_evaluations(
 ) -> StreamingResponse:
     threads = [t for t in dict.fromkeys(body.thread_ids) if t][:MAX_TARGETS]
     traces = [t for t in dict.fromkeys(body.trace_ids) if t][:MAX_TARGETS]
+    log.info(
+        "eval_run_clicked",
+        project_id=project_id,
+        evaluator_ids=body.evaluator_ids or "all",
+        threads=len(threads),
+        traces=len(traces),
+    )
     if not threads and not traces:
         raise HTTPException(status_code=400, detail="no targets: pass thread_ids and/or trace_ids")
 
@@ -104,6 +111,7 @@ async def run_evaluations(
 
     async def gen():
         task = asyncio.create_task(run_all())
+        results = errors = 0
         try:
             yield _sse({"type": "start", "targets": len(targets), "evaluators": len(specs)})
             while True:
@@ -114,7 +122,18 @@ async def run_evaluations(
                     break
                 if msg.get("type") == "__complete__":
                     break
+                if msg.get("type") == "result":
+                    results += 1
+                elif msg.get("type") == "target_error":
+                    errors += 1
                 yield _sse(msg)
+            log.info(
+                "eval_run_finished",
+                project_id=project_id,
+                targets=len(targets),
+                results=results,
+                target_errors=errors,
+            )
             yield _sse({"type": "done"})
             yield "data: [DONE]\n\n"
         finally:

@@ -30,6 +30,7 @@ from tracely.infrastructure.clickhouse import async_reader
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.db.models import Evaluator
+from tracely.infrastructure.llm import provider
 from tracely.infrastructure.llm.provider import (
     default_model_id,
     estimate_cost_usd_cents,
@@ -120,7 +121,12 @@ async def list_evaluators(project_id: str = Depends(get_project_id)) -> list[dic
 async def list_judge_models(project_id: str = Depends(get_project_id)) -> dict:
     """The curated judge-model choices for the Add Column form (verified against OpenRouter
     when reachable) plus the project default used when a column doesn't pick one."""
-    models = await run_in_threadpool(list_models)
+
+    def work():
+        with provider.use_project_key(project_id):
+            return list_models()
+
+    models = await run_in_threadpool(work)
     return {"default": default_model_id(), "models": models}
 
 
@@ -141,13 +147,14 @@ async def evaluator_cost(
 
     evaluators: dict[str, dict] = {}
     total_in = total_out = total_runs = total_cents = 0
-    for name, c in by_name.items():
-        cents = estimate_cost_usd_cents(c["model"], c["input_tokens"], c["output_tokens"])
-        evaluators[name] = {**c, "cost_usd_cents": cents}
-        total_runs += c["runs"]
-        total_in += c["input_tokens"]
-        total_out += c["output_tokens"]
-        total_cents += cents
+    with provider.use_project_key(project_id):
+        for name, c in by_name.items():
+            cents = estimate_cost_usd_cents(c["model"], c["input_tokens"], c["output_tokens"])
+            evaluators[name] = {**c, "cost_usd_cents": cents}
+            total_runs += c["runs"]
+            total_in += c["input_tokens"]
+            total_out += c["output_tokens"]
+            total_cents += cents
     return {
         "evaluators": evaluators,
         "summary": {
@@ -234,13 +241,16 @@ async def generate_evaluator(
 ) -> dict:
     """Natural-language description → a draft evaluator config (the UI pre-fills the manual
     form with it; nothing is persisted here)."""
-    if not llm_enabled():
+    with provider.use_project_key(project_id):
+        enabled = llm_enabled()
+    if not enabled:
         raise HTTPException(
             status_code=503,
-            detail="AI generation needs the judge LLM configured (set OPENROUTER_API_KEY).",
+            detail="AI generation needs the judge LLM configured (set OPENROUTER_API_KEY, or a "
+            "workspace one in Settings).",
         )
     try:
-        return await run_in_threadpool(generate_evaluator_config, body.description)
+        return await run_in_threadpool(generate_evaluator_config, body.description, project_id)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"generation failed: {exc}") from None
 

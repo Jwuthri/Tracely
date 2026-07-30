@@ -32,6 +32,10 @@ dependencies = [
   # auth & multi-tenancy: JWT sign/verify (HS256 local + RS256/JWKS Clerk), argon2 password hashing
   "pyjwt[crypto]>=2.8",
   "argon2-cffi>=23.1",
+  # Fernet symmetric encryption for workspace-supplied secrets at rest (e.g. a project's own
+  # OpenRouter key) — already pulled in transitively by pyjwt[crypto]; declared directly since we
+  # import it ourselves now.
+  "cryptography>=43",
   "httpx>=0.27",
 ]
 

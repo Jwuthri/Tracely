@@ -32,6 +32,7 @@ from tracely.infrastructure.db.models import (
     FailureEmbedding,
 )
 from tracely.infrastructure.llm import analysis_agents as agents
+from tracely.infrastructure.llm import provider
 from tracely.infrastructure.llm.embeddings import Embedder, embeddings_enabled
 
 log = structlog.get_logger()
@@ -52,25 +53,26 @@ class FailureIntelService:
 
     def rebuild_clusters(self, project_id: str) -> dict:
         """Recompute the per-agent embedding clusters for this project."""
-        if not embeddings_enabled():
-            return {"error": "OPENROUTER_API_KEY not configured"}
+        with provider.use_project_key(project_id):
+            if not embeddings_enabled():
+                return {"error": "OPENROUTER_API_KEY not configured"}
 
-        reasons_by_tid = self.trace_reader.failing_trace_reasons(project_id)
-        by_agent = self._group_by_agent(project_id, reasons_by_tid)
+            reasons_by_tid = self.trace_reader.failing_trace_reasons(project_id)
+            by_agent = self._group_by_agent(project_id, reasons_by_tid)
 
-        issues = 0
-        pruned = 0
-        with SyncSessionLocal() as s:
-            # drop clusters for agents with no current failing traces, then rebuild the rest —
-            # keeps the project consistent instead of accumulating stale clusters from agents
-            # that dropped out.
-            pruned = self._prune_orphan_clusters(s, project_id, set(by_agent))
-            for agent_id, items in by_agent.items():
-                issues += self._rebuild_agent(s, project_id, agent_id, items)
-        log.info(
-            "fi_rebuild", project_id=project_id, agents=len(by_agent), issues=issues, pruned=pruned
-        )
-        return {"agents": len(by_agent), "issues": issues, "pruned": pruned}
+            issues = 0
+            pruned = 0
+            with SyncSessionLocal() as s:
+                # drop clusters for agents with no current failing traces, then rebuild the rest —
+                # keeps the project consistent instead of accumulating stale clusters from agents
+                # that dropped out.
+                pruned = self._prune_orphan_clusters(s, project_id, set(by_agent))
+                for agent_id, items in by_agent.items():
+                    issues += self._rebuild_agent(s, project_id, agent_id, items)
+            log.info(
+                "fi_rebuild", project_id=project_id, agents=len(by_agent), issues=issues, pruned=pruned
+            )
+            return {"agents": len(by_agent), "issues": issues, "pruned": pruned}
 
     # ── grouping + persistence helpers ────────────────────────────────────────
 

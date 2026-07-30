@@ -36,6 +36,7 @@ from tracely.infrastructure.clickhouse.score_writer import ScoreWriter
 from tracely.infrastructure.clickhouse.trace_reader import TraceReader
 from tracely.infrastructure.db import repositories
 from tracely.infrastructure.db.engine import SyncSessionLocal
+from tracely.infrastructure.llm import provider
 from tracely.services.structural_clustering_service import StructuralClusteringService
 
 log = structlog.get_logger()
@@ -333,28 +334,31 @@ class EvaluationService:
         # under span_id "" — see `_inject_dependencies` / the judge's per-span resolution).
         completed: dict[str, list[dict]] = {}
         results: list[EvalResult] = []
-        for spec in specs:
-            spec = _inject_dependencies(spec, completed)
-            try:
-                new_results = self.registry.dispatch(
-                    spec["kind"], spec["config"], spec["score_name"], spec["level"], ctx
-                )
-                results.extend(new_results)
-                if new_results:
-                    completed[spec["score_name"]] = [
-                        {
-                            "span_id": r.target_span_id,
-                            "payload": _chain_payload({
-                                "string_value": r.string_value, "value": r.value,
-                                "verdict": r.verdict, "comment": r.comment,
-                            }),
-                        }
-                        for r in new_results
-                    ]
-            except Exception as exc:  # one bad evaluator must not sink the rest
-                log.warning(
-                    "evaluator_failed", evaluator=spec.get("score_name", "?"), error=str(exc)
-                )
+        # THE chokepoint every eval path funnels through (on-ingest, on-demand run, gate quality
+        # grading) — scoping here once covers every llm_judge call this dispatch makes.
+        with provider.use_project_key(ctx.project_id):
+            for spec in specs:
+                spec = _inject_dependencies(spec, completed)
+                try:
+                    new_results = self.registry.dispatch(
+                        spec["kind"], spec["config"], spec["score_name"], spec["level"], ctx
+                    )
+                    results.extend(new_results)
+                    if new_results:
+                        completed[spec["score_name"]] = [
+                            {
+                                "span_id": r.target_span_id,
+                                "payload": _chain_payload({
+                                    "string_value": r.string_value, "value": r.value,
+                                    "verdict": r.verdict, "comment": r.comment,
+                                }),
+                            }
+                            for r in new_results
+                        ]
+                except Exception as exc:  # one bad evaluator must not sink the rest
+                    log.warning(
+                        "evaluator_failed", evaluator=spec.get("score_name", "?"), error=str(exc)
+                    )
         return results
 
     @staticmethod

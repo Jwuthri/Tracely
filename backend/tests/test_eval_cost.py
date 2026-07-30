@@ -47,9 +47,10 @@ def test_model_pricing_prefers_live_openrouter(monkeypatch):
 
 def test_model_pricing_falls_back_to_static_table_when_offline(monkeypatch):
     monkeypatch.setattr(provider, "_openrouter_models", lambda: {})
-    # In the static table — should return its known values.
-    pin, pout = provider.model_pricing("openai/gpt-5.4-nano")
-    assert pin == 0.10 and pout == 0.40
+    # Asserts the *behavior* (offline → consult the static table), not a literal price: the table
+    # is refreshed from OpenRouter whenever the catalog moves, and that must not break this test.
+    expected = provider._FALLBACK_PRICING_USD_PER_MTOK["openai/gpt-5.4-nano"]
+    assert provider.model_pricing("openai/gpt-5.4-nano") == expected
 
 
 def test_model_pricing_unknown_returns_none(monkeypatch):
@@ -60,8 +61,8 @@ def test_model_pricing_unknown_returns_none(monkeypatch):
 def test_model_pricing_normalizes_bare_id_to_openai_prefix(monkeypatch):
     monkeypatch.setattr(provider, "_openrouter_models", lambda: {})
     # `gpt-5.4-nano` (bare) is the OpenAI direct-endpoint form — normalize to `openai/gpt-5.4-nano`.
-    pin, pout = provider.model_pricing("gpt-5.4-nano")
-    assert pin == 0.10 and pout == 0.40
+    expected = provider._FALLBACK_PRICING_USD_PER_MTOK["openai/gpt-5.4-nano"]
+    assert provider.model_pricing("gpt-5.4-nano") == expected
 
 
 def test_model_pricing_empty_id_is_unknown(monkeypatch):
@@ -78,21 +79,35 @@ def test_estimate_cost_unknown_model_is_zero_not_error(monkeypatch):
     assert provider.estimate_cost_usd_cents("vendor/unknown", 1_000_000, 1_000_000) == 0
 
 
+def _priced(monkeypatch, prompt_per_mtok: float, completion_per_mtok: float) -> str:
+    """Pin a synthetic model at an exact price so the arithmetic below is locked independently of
+    whatever the real catalog charges this month."""
+    monkeypatch.setattr(
+        provider, "_openrouter_models",
+        lambda: {"test/judge": {"name": "T", "prompt_per_mtok": prompt_per_mtok,
+                                "completion_per_mtok": completion_per_mtok}},
+    )
+    return "test/judge"
+
+
 def test_estimate_cost_for_known_model_rounds_to_cents(monkeypatch):
-    monkeypatch.setattr(provider, "_openrouter_models", lambda: {})
-    # gpt-5.4-nano: $0.10 / Mtok input, $0.40 / Mtok output
+    mid = _priced(monkeypatch, 0.10, 0.40)
     # 1M input + 1M output = $0.10 + $0.40 = $0.50 = 50¢
-    assert provider.estimate_cost_usd_cents("openai/gpt-5.4-nano", 1_000_000, 1_000_000) == 50
+    assert provider.estimate_cost_usd_cents(mid, 1_000_000, 1_000_000) == 50
 
 
-def test_estimate_cost_typical_judge_call(monkeypatch):
-    monkeypatch.setattr(provider, "_openrouter_models", lambda: {})
-    # 543 in + 73 out on gpt-5.4-nano: (543*0.10 + 73*0.40)/1M $ ≈ $0.0000835 → 0¢ (rounds down)
-    assert provider.estimate_cost_usd_cents("openai/gpt-5.4-nano", 543, 73) == 0
-    # A heavy judge: 50k in + 5k out on opus → (50000*15 + 5000*75)/1M $ = $1.125 → 112¢
-    # (Python's `round` uses banker's rounding: 112.5 → 112, not 113. Document that here so
-    # nobody "fixes" it back to 113.)
-    assert provider.estimate_cost_usd_cents("anthropic/claude-opus-4.6", 50_000, 5_000) == 112
+def test_estimate_cost_sub_cent_call_floors_to_zero(monkeypatch):
+    mid = _priced(monkeypatch, 0.10, 0.40)
+    # 543 in + 73 out: (543*0.10 + 73*0.40)/1M $ ≈ $0.0000835 → 0¢
+    assert provider.estimate_cost_usd_cents(mid, 543, 73) == 0
+
+
+def test_estimate_cost_uses_bankers_rounding_on_exact_half_cent(monkeypatch):
+    mid = _priced(monkeypatch, 15.0, 75.0)
+    # 50k in + 5k out → (50000*15 + 5000*75)/1M $ = $1.125 → exactly 112.5¢.
+    # Python's `round` uses banker's rounding: 112.5 → 112, not 113. Documented here so nobody
+    # "fixes" it back to 113.
+    assert provider.estimate_cost_usd_cents(mid, 50_000, 5_000) == 112
 
 
 def test_estimate_cost_zero_tokens_is_zero(monkeypatch):
@@ -146,3 +161,29 @@ def test_openrouter_models_parses_pricing_from_catalog(monkeypatch):
     # Back-compat shim still returns name-only.
     names = provider._openrouter_model_names()
     assert names["openai/gpt-5.4-nano"] == "GPT-5.4 Nano"
+
+
+# ── the curated dropdown vs the pricing table ────────────────────────────────
+def test_every_curated_model_has_a_fallback_price():
+    """Adding a model to the dropdown without a fallback price is silent: the column works, but
+    with OpenRouter unreachable its cost renders $0.00 and quietly under-reports judge spend."""
+    missing = [mid for mid, _ in provider._CURATED_MODELS
+               if mid not in provider._FALLBACK_PRICING_USD_PER_MTOK]
+    assert missing == [], f"curated models with no fallback price: {missing}"
+
+
+def test_config_default_models_are_priced():
+    """The judge / meta-analysis / rolling-summary defaults never appear in the dropdown, but they
+    DO get stamped onto scores — so they need prices too, or their spend reads as free."""
+    from tracely.config import settings
+
+    defaults = {settings.llm_judge_model, settings.meta_analysis_model,
+                settings.rolling_summary_model}
+    missing = [m for m in defaults
+               if provider._normalize_model(m) not in provider._FALLBACK_PRICING_USD_PER_MTOK]
+    assert missing == [], f"config default models with no fallback price: {missing}"
+
+
+def test_curated_models_have_no_duplicates():
+    ids = [mid for mid, _ in provider._CURATED_MODELS]
+    assert len(ids) == len(set(ids))

@@ -498,7 +498,7 @@ class LLMJudgeEvaluator(Evaluator):
                 on_usage=usage.update,
             )
         except Exception as exc:
-            log.warning("llm_judge_failed", error=str(exc))
+            log.warning("llm_judge_failed", evaluator=self.score_name, level=self.level, error=str(exc))
             return None
         return self._attach_usage(self._to_result(config, output_type, verdict), usage)
 

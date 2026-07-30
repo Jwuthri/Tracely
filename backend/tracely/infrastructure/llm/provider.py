@@ -8,14 +8,22 @@
 - `run_structured_agent()` → one-shot `create_agent(..., tools=[], response_format=Model)`
   call returning the validated structured response. This is THE primitive the judge, the
   metric generator, and the failure-intelligence agents build on.
+- `use_project_key(project_id)` → a workspace can set its own OpenRouter key (Settings -> LLM
+  key) so its eval spend bills to its own account instead of ours. Every project-scoped entry
+  point (EvaluationService, FailureIntelService, MetaAnalysisService, RollingSummaryService, the
+  evaluator-generation/model-list/cost routers) wraps its work in this; everything above —
+  `get_chat_model`, `llm_enabled`, `list_models` — picks it up automatically via
+  `effective_openrouter_key()`, so no call site below the wrap needs to know about it.
 
 Heavy imports are lazy so the worker/API start even when the LLM stack isn't exercised.
 """
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import time
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Iterator, TypeVar
 
 import structlog
 
@@ -28,6 +36,23 @@ T = TypeVar("T")
 # Optional sink invoked with `{input_tokens, output_tokens, total_tokens, model}` after a call,
 # so callers (the judge) can attribute LLM-eval token spend per evaluator.
 UsageSink = Callable[[dict], None]
+
+# The current request/task's project OpenRouter key, when `use_project_key()` is active — a
+# per-request/per-task ambient override (same safety property `structlog.contextvars` already
+# relies on here: each Celery task and each FastAPI request runs in its own copied Context, so
+# concurrent projects never see each other's key).
+_project_key_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "tracely_project_openrouter_key", default=None
+)
+
+# Redis cache of the per-project key, so the eval hot path (one `use_project_key` per trace on
+# ingest) doesn't hit Postgres every time. We cache the CIPHERTEXT, never the decrypted key:
+# Redis here is the Celery broker, not a secrets store, so a Redis compromise alone must not
+# hand over customers' OpenRouter keys — you'd still need SECRETS_ENCRYPTION_KEY. Fernet decrypt
+# is microseconds; the Postgres round-trip was the actual cost.
+_KEY_CACHE = "tracely:llm:key:{project}"
+_KEY_CACHE_TTL_S = 300
+_redis_client: Any = None
 
 
 def _extract_usage(result: dict, model: str | None) -> dict:
@@ -45,40 +70,75 @@ def _extract_usage(result: dict, model: str | None) -> dict:
         "model": _normalize_model((model or settings.llm_judge_model).strip()),
     }
 
-# The judge-model choices offered in the column UI. Curated (a 300-model dropdown is not a
+# The judge-model choices offered in the column UI. Curated (a 367-model dropdown is not a
 # selector) and verified against the live OpenRouter catalog when a key is configured —
-# unavailable ids are dropped, labels upgraded to OpenRouter's display names.
+# unavailable ids are dropped, labels upgraded to OpenRouter's display names (so these labels are
+# only what you see when the catalog is unreachable). Ordered cheap/fast → expensive within each
+# provider, since a judge runs per trace and cost/latency is the real selection axis.
 _CURATED_MODELS: list[tuple[str, str]] = [
-    ("openai/gpt-5.4-nano", "GPT-5.4 Nano — fast & cheap"),
-    ("openai/gpt-5.4-mini", "GPT-5.4 Mini"),
-    ("openai/gpt-5.1", "GPT-5.1"),
-    ("openai/gpt-5-mini", "GPT-5 Mini"),
-    ("anthropic/claude-haiku-4.5", "Claude Haiku 4.5"),
-    ("anthropic/claude-fable-5", "Claude Fable 5"),
-    ("anthropic/claude-opus-4.6", "Claude Opus 4.6"),
-    ("google/gemini-3.5-flash", "Gemini 3.5 Flash"),
-    ("google/gemini-3.1-pro-preview", "Gemini 3.1 Pro"),
-    ("meta-llama/llama-4-maverick", "Llama 4 Maverick"),
-    ("mistralai/mistral-large-2512", "Mistral Large 3"),
+    # OpenAI
+    ("openai/gpt-5.6-luna", "OpenAI GPT-5.6 Luna"),
+    ("openai/gpt-5.4-nano", "OpenAI GPT-5.4 Nano"),
+    ("openai/gpt-5.4-mini", "OpenAI GPT-5.4 Mini"),
+    ("openai/gpt-5.6-terra", "OpenAI GPT-5.6 Terra"),
+    ("openai/gpt-5.4", "OpenAI GPT-5.4"),
+    ("openai/gpt-5.6-sol", "OpenAI GPT-5.6 Sol"),
+    # Google
+    ("google/gemini-3.5-flash-lite", "Google Gemini 3.5 Flash Lite"),
+    ("google/gemini-3.6-flash", "Google Gemini 3.6 Flash"),
+    ("google/gemini-3.1-pro-preview", "Google Gemini 3.1 Pro"),
+    # Anthropic
+    ("anthropic/claude-haiku-4.5", "Anthropic Claude Haiku 4.5"),
+    ("anthropic/claude-sonnet-5", "Anthropic Claude Sonnet 5"),
+    ("anthropic/claude-opus-4.8", "Anthropic Claude Opus 4.8"),
+    # xAI
+    ("x-ai/grok-4.3", "xAI Grok 4.3"),
+    ("x-ai/grok-4.5", "xAI Grok 4.5"),
+    # Open-weights / low cost
+    ("inclusionai/ling-3.0-flash:free", "Ling 3.0 Flash (free)"),
+    ("openai/gpt-oss-120b", "OpenAI GPT-OSS 120B"),
+    ("qwen/qwen3-32b", "Qwen3 32B"),
+    ("minimax/minimax-m2.7", "MiniMax M2.7"),
 ]
+# Deliberately NOT offered, despite being live on OpenRouter — both fail 100% of the time on the
+# structured-output call every judge output type except schema-less `json` uses, so listing them
+# would just yield columns that silently produce no scores (the judge swallows the error per
+# evaluator). Verified against the live API on 2026-07-30:
+#   qwen/qwen3.7-flash   — `structured_outputs: false`; Alibaba downgrades json_schema to
+#                          json_object, which then 400s with "'messages' must contain the word
+#                          'json' ... to use 'response_format' of type 'json_object'".
+#   meta/muse-spark-1.1  — 400 "only `auto` is supported for `tool_choice`"; LangChain's
+#                          `response_format` path pins a named/required tool to force the schema.
+# Both DO work through `run_text_agent`, so revisit if a free-text-only judge path ever exists.
+_STRUCTURED_OUTPUT_INCOMPATIBLE = ("qwen/qwen3.7-flash", "meta/muse-spark-1.1")
 # Fallback prices in USD per 1M tokens, used when OpenRouter isn't reachable (or the model id
-# isn't in OpenRouter's catalog). Approximate but order-of-magnitude correct so the cost view
-# doesn't read $0.00 in disconnected demos / dev. Override per-deployment by setting the
-# OpenRouter key — live pricing wins.
+# isn't in OpenRouter's catalog) so the cost view doesn't read $0.00 in disconnected demos / dev.
+# Live pricing always wins when the catalog is reachable. Generated from OpenRouter's catalog on
+# 2026-07-30 — exact at that date, so re-pull rather than hand-editing when it drifts.
 _FALLBACK_PRICING_USD_PER_MTOK: dict[str, tuple[float, float]] = {
-    "openai/gpt-5.4-nano":             (0.10,  0.40),
-    "openai/gpt-5.4-mini":             (0.40,  1.60),
-    "openai/gpt-5.1":                  (2.50, 10.00),
-    "openai/gpt-5-mini":               (0.25,  1.00),
-    "openai/gpt-4o":                   (2.50, 10.00),
-    "openai/gpt-4o-mini":              (0.15,  0.60),
-    "anthropic/claude-haiku-4.5":      (0.80,  4.00),
-    "anthropic/claude-fable-5":        (3.00, 15.00),
-    "anthropic/claude-opus-4.6":      (15.00, 75.00),
-    "google/gemini-3.5-flash":         (0.075, 0.30),
-    "google/gemini-3.1-pro-preview":   (1.25,  5.00),
-    "meta-llama/llama-4-maverick":     (0.18,  0.55),
-    "mistralai/mistral-large-2512":    (2.00,  6.00),
+    "openai/gpt-5.6-luna":             (0.10,  0.60),
+    "openai/gpt-5.4-nano":             (0.20,  1.25),
+    "openai/gpt-5.4-mini":             (0.75,  4.50),
+    "openai/gpt-5.6-terra":            (1.00,  6.00),
+    "openai/gpt-5.4":                  (2.50, 15.00),
+    "openai/gpt-5.6-sol":              (5.00, 30.00),
+    "openai/gpt-oss-120b":             (0.037, 0.17),
+    "google/gemini-3.5-flash-lite":    (0.30,  2.50),
+    "google/gemini-3.6-flash":         (1.50,  7.50),
+    "google/gemini-3.1-pro-preview":   (2.00, 12.00),
+    "anthropic/claude-haiku-4.5":      (1.00,  5.00),
+    "anthropic/claude-sonnet-5":       (2.00, 10.00),
+    "anthropic/claude-opus-4.8":       (5.00, 25.00),
+    "x-ai/grok-4.3":                   (1.25,  2.50),
+    "x-ai/grok-4.5":                   (2.00,  6.00),
+    "inclusionai/ling-3.0-flash:free": (0.00,  0.00),
+    "qwen/qwen3.7-flash":              (0.03,  0.13),
+    "qwen/qwen3-32b":                  (0.08,  0.28),
+    "minimax/minimax-m2.7":            (0.25,  1.00),
+    "meta/muse-spark-1.1":             (1.25,  4.25),
+    # Not in the dropdown, but shipped as a `Settings` default (`meta_analysis_model`), so it can
+    # show up in a score's recorded model and must still price correctly.
+    "openai/gpt-5-mini":               (0.25,  2.00),
 }
 _MODELS_TTL_S = 3600
 # `by_id`: {model_id: {"name": str, "prompt_per_mtok": float|None, "completion_per_mtok": float|None}}.
@@ -87,9 +147,118 @@ _MODELS_TTL_S = 3600
 _models_cache: dict[str, Any] = {"ts": 0.0, "by_id": None}
 
 
+def _fernet():
+    """The Fernet cipher for workspace-secret encryption, keyed off `SECRETS_ENCRYPTION_KEY`
+    (any string >=32 chars, SHA256-derived into a valid Fernet key — same UX as SESSION_SECRET,
+    no separate keygen step). Raises when unconfigured; callers decide whether that's a hard
+    error (saving a key) or a graceful degrade (reading one)."""
+    if len(settings.secrets_encryption_key) < 32:
+        raise RuntimeError("SECRETS_ENCRYPTION_KEY is not configured on this server (need >=32 chars)")
+    from base64 import urlsafe_b64encode
+    from hashlib import sha256
+
+    from cryptography.fernet import Fernet
+
+    return Fernet(urlsafe_b64encode(sha256(settings.secrets_encryption_key.encode()).digest()))
+
+
+def encrypt_project_key(plain: str) -> str:
+    """Encrypt a customer-supplied OpenRouter key for storage
+    (`Project.openrouter_api_key_encrypted`). Raises RuntimeError if the server has no
+    `SECRETS_ENCRYPTION_KEY` — the save endpoint surfaces that directly rather than storing
+    plaintext."""
+    return _fernet().encrypt(plain.strip().encode()).decode()
+
+
+def _decrypt_project_key(token: str) -> str | None:
+    """None on any failure (bad/rotated encryption key, corrupt row) — a broken decrypt must
+    degrade to 'no project key configured', never crash the eval pipeline."""
+    from cryptography.fernet import InvalidToken
+
+    try:
+        return _fernet().decrypt(token.encode()).decode()
+    except (InvalidToken, RuntimeError, ValueError) as exc:
+        log.warning("project_key_decrypt_failed", error=str(exc))
+        return None
+
+
+def effective_openrouter_key() -> str:
+    """The OpenRouter key in effect right now: the current project's own key when
+    `use_project_key()` is active and one is configured, else the server-wide key."""
+    return _project_key_ctx.get() or settings.openrouter_api_key
+
+
+def _redis():
+    global _redis_client
+    if _redis_client is None:
+        import redis
+
+        _redis_client = redis.Redis.from_url(settings.redis_url)
+    return _redis_client
+
+
+def _encrypted_key_for(project_id: str) -> str | None:
+    """This project's ENCRYPTED OpenRouter token, or None when it has none.
+
+    Redis-cached, including the negative result — "this workspace has no key of its own" is the
+    common case and would otherwise pay a Postgres round-trip per evaluated trace. Any Redis
+    error falls straight through to Postgres (cache is an optimization, never a dependency)."""
+    cache_key = _KEY_CACHE.format(project=project_id)
+    try:
+        hit = _redis().get(cache_key)
+        if hit is not None:
+            return hit.decode() or None  # b"" is the cached "no key configured"
+    except Exception:
+        pass
+
+    from tracely.infrastructure.db import repositories as repo
+    from tracely.infrastructure.db.engine import SyncSessionLocal
+
+    with SyncSessionLocal() as s:
+        proj = repo.project_get(s, project_id)
+        encrypted = (proj.openrouter_api_key_encrypted if proj else None) or None
+
+    try:
+        _redis().setex(cache_key, _KEY_CACHE_TTL_S, encrypted or "")
+    except Exception:
+        pass
+    return encrypted
+
+
+def invalidate_project_key(project_id: str) -> None:
+    """Drop the cached token so a workspace setting/clearing its key takes effect on the next
+    evaluation instead of up to `_KEY_CACHE_TTL_S` later. Best-effort: if Redis is unreachable the
+    TTL is the backstop, so a missed invalidation self-heals in 5 minutes."""
+    try:
+        _redis().delete(_KEY_CACHE.format(project=project_id))
+    except Exception as exc:
+        log.warning("project_key_invalidate_failed", project_id=project_id, error=str(exc))
+
+
+@contextlib.contextmanager
+def use_project_key(project_id: str) -> Iterator[None]:
+    """Scope every provider.py call inside the block to `project_id`'s own OpenRouter key when
+    one is configured — server-wide key otherwise. Wrap any project-scoped entry point that ends
+    up calling get_chat_model/run_structured_agent/run_text_agent/list_models/llm_enabled (the
+    judge, failure intelligence, meta-analysis, rolling summary, evaluator generation)."""
+    key: str | None = None
+    try:
+        encrypted = _encrypted_key_for(project_id)
+        if encrypted:
+            key = _decrypt_project_key(encrypted)
+    except Exception as exc:  # a lookup hiccup must fall back to the server key, never block
+        log.warning("project_key_lookup_failed", project_id=project_id, error=str(exc))
+
+    token = _project_key_ctx.set(key)
+    try:
+        yield
+    finally:
+        _project_key_ctx.reset(token)
+
+
 def llm_enabled() -> bool:
     """Whether any judge/agent LLM credential is configured."""
-    return bool(settings.openrouter_api_key or settings.llm_judge_api_key)
+    return bool(effective_openrouter_key() or settings.llm_judge_api_key)
 
 
 def _normalize_model(model: str) -> str:
@@ -121,14 +290,15 @@ def _openrouter_models() -> dict[str, dict]:
     now = time.monotonic()
     if _models_cache["by_id"] is not None and now - _models_cache["ts"] < _MODELS_TTL_S:
         return _models_cache["by_id"]
-    if not settings.openrouter_api_key:
+    key = effective_openrouter_key()
+    if not key:
         return {}
     try:
         import httpx
 
         resp = httpx.get(
             f"{settings.openrouter_base_url.rstrip('/')}/models",
-            headers={"Authorization": f"Bearer {settings.openrouter_api_key}"},
+            headers={"Authorization": f"Bearer {key}"},
             timeout=10,
         )
         resp.raise_for_status()
@@ -191,8 +361,15 @@ def list_models() -> list[dict[str, str]]:
     `openai/*` when only the legacy direct OpenAI-compatible endpoint is configured (other
     providers' ids can't be served there)."""
     curated = _CURATED_MODELS
-    if not settings.openrouter_api_key:
-        curated = [(mid, label) for mid, label in curated if mid.startswith("openai/")]
+    if not effective_openrouter_key():
+        # Legacy direct OpenAI-compatible endpoint: only ids api.openai.com actually serves.
+        # `openai/gpt-oss-*` is open-weights hosted by third parties — its id starts with
+        # `openai/` but offering it here would hand the user a model that 404s at judge time.
+        curated = [
+            (mid, label)
+            for mid, label in curated
+            if mid.startswith("openai/") and not mid.startswith("openai/gpt-oss")
+        ]
     available = _openrouter_model_names()
     if available:
         out = [
@@ -210,12 +387,16 @@ def get_chat_model(model: str | None = None, temperature: float = 0.0):
     from langchain_openai import ChatOpenAI
 
     name = (model or settings.llm_judge_model).strip()
-    if settings.openrouter_api_key:
+    key = effective_openrouter_key()
+    if key:
         return ChatOpenAI(
             model=_normalize_model(name),
-            api_key=settings.openrouter_api_key,
+            api_key=key,
             base_url=settings.openrouter_base_url,
             temperature=temperature,
+            # Always bounded — see `Settings.llm_max_output_tokens`. Without it OpenRouter reserves
+            # credit for the provider's default 64k and rejects the call outright.
+            max_tokens=settings.llm_max_output_tokens,
         )
     # Legacy direct endpoint: OpenAI-style bare model ids (strip an OpenRouter-style prefix).
     return ChatOpenAI(
@@ -223,7 +404,29 @@ def get_chat_model(model: str | None = None, temperature: float = 0.0):
         api_key=settings.llm_judge_api_key,
         base_url=settings.llm_judge_base_url,
         temperature=temperature,
+        max_tokens=settings.llm_max_output_tokens,
     )
+
+
+def _invoke(agent, prompt: str) -> dict[str, Any]:
+    """Run the agent, translating one badly-disguised provider failure into a readable error.
+
+    OpenRouter reports some failures — credit exhaustion above all — as HTTP **200** with an
+    `{"error": …}` body and no `choices`. The OpenAI SDK's parser then trips over `choices=None`
+    and raises `TypeError: 'NoneType' object is not iterable`, which tells an operator nothing and
+    reads like a Tracely bug. The judge swallows exceptions per-evaluator, so the visible symptom
+    is simply "no scores appeared" — worth spending a few lines to name the real cause."""
+    try:
+        return agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+    except TypeError as exc:
+        if "NoneType" in str(exc):
+            raise RuntimeError(
+                "LLM provider returned an error body instead of a completion (no `choices`). "
+                "Most often OpenRouter credit exhaustion — check the balance at "
+                "https://openrouter.ai/settings/credits. Lowering LLM_MAX_OUTPUT_TOKENS also "
+                f"reduces the credit OpenRouter reserves per call. [{exc}]"
+            ) from exc
+        raise
 
 
 def run_structured_agent(
@@ -246,7 +449,7 @@ def run_structured_agent(
         system_prompt=system_prompt,
         response_format=response_format,
     )
-    result: dict[str, Any] = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+    result = _invoke(agent, prompt)
     if on_usage is not None:
         on_usage(_extract_usage(result, model))
     return result["structured_response"]
@@ -268,7 +471,7 @@ def run_text_agent(
     agent = create_agent(
         get_chat_model(model, temperature), tools=[], system_prompt=system_prompt
     )
-    result: dict[str, Any] = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+    result = _invoke(agent, prompt)
     if on_usage is not None:
         on_usage(_extract_usage(result, model))
     content = result["messages"][-1].content

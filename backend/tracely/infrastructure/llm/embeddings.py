@@ -7,17 +7,23 @@ is set (one key for the whole pipeline), else a direct `OPENAI_API_KEY`.
 from __future__ import annotations
 
 from tracely.config import settings
+from tracely.infrastructure.llm import provider
 
 
 def embeddings_enabled() -> bool:
     """Whether any embedding credential is configured (either key works)."""
-    return bool(settings.openrouter_api_key or settings.openai_api_key)
+    return bool(provider.effective_openrouter_key() or settings.openai_api_key)
 
 
 class Embedder:
     """Thin facade over `langchain_openai.OpenAIEmbeddings`. The LangChain client itself caches
     nothing useful, so it's cheap to construct per call — but we keep one per instance for the
-    common batch-embed path."""
+    common batch-embed path.
+
+    `model`/`api_key`/`base_url` are resolved lazily (properties, not `__init__` state) so a
+    caller that constructs the `Embedder` before entering `provider.use_project_key(...)` (e.g.
+    `FailureIntelService.__init__`) still picks up the project's key once `.embed()` actually
+    runs inside that scope."""
 
     def __init__(
         self,
@@ -25,29 +31,39 @@ class Embedder:
         api_key: str | None = None,
         dimensions: int | None = None,
     ) -> None:
-        name = (model or settings.embedding_model).strip()
-        # Same schema either way; only the model id differs — OpenRouter wants
-        # `openai/text-embedding-3-small`, OpenAI wants it bare.
-        if not api_key and settings.openrouter_api_key:
-            self.model = name if "/" in name else f"openai/{name}"
-            self.api_key = settings.openrouter_api_key
-            self.base_url: str | None = settings.openrouter_base_url
-        else:
-            self.model = name.removeprefix("openai/")
-            self.api_key = api_key or settings.openai_api_key
-            self.base_url = None
+        self._model_arg = model
+        self._api_key_arg = api_key
         self.dimensions = dimensions if dimensions is not None else settings.embedding_dim
         self._client = None
+
+    def _resolved(self) -> tuple[str, str | None, str | None]:
+        name = (self._model_arg or settings.embedding_model).strip()
+        # Same schema either way; only the model id differs — OpenRouter wants
+        # `openai/text-embedding-3-small`, OpenAI wants it bare.
+        key = self._api_key_arg or provider.effective_openrouter_key()
+        if key:
+            return (name if "/" in name else f"openai/{name}"), key, settings.openrouter_base_url
+        return name.removeprefix("openai/"), (self._api_key_arg or settings.openai_api_key), None
+
+    @property
+    def model(self) -> str:
+        return self._resolved()[0]
+
+    @property
+    def api_key(self) -> str | None:
+        return self._resolved()[1]
+
+    @property
+    def base_url(self) -> str | None:
+        return self._resolved()[2]
 
     def _ensure(self):
         if self._client is None:
             from langchain_openai import OpenAIEmbeddings
 
+            model, api_key, base_url = self._resolved()
             self._client = OpenAIEmbeddings(
-                model=self.model,
-                api_key=self.api_key,
-                base_url=self.base_url,
-                dimensions=self.dimensions,
+                model=model, api_key=api_key, base_url=base_url, dimensions=self.dimensions
             )
         return self._client
 

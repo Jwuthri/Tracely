@@ -95,7 +95,7 @@ class RollingSummaryService:
 
         running: list[dict] = []
         llm_steps = 0
-        with SyncSessionLocal() as s:
+        with provider.use_project_key(project_id), SyncSessionLocal() as s:
             if force:
                 repositories.rolling_summary_delete_for_thread(s, project_id, thread_id)
                 existing: dict[str, list] = {}

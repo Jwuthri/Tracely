@@ -23,6 +23,7 @@ from tracely.infrastructure.clickhouse.trace_reader import TraceReader
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.db.models import Agent, FailureCluster
+from tracely.infrastructure.llm import provider
 from tracely.infrastructure.llm.embeddings import embeddings_enabled
 from tracely.infrastructure.llm.provider import llm_enabled
 from tracely.infrastructure.text import message_text
@@ -61,7 +62,9 @@ def _cluster_dict(
 async def rebuild(project_id: str = Depends(get_project_id)) -> dict:
     # Embeddings and the analysis agents both go through OpenRouter (OPENAI_API_KEY is only a
     # fallback for embeddings on older deployments).
-    if not embeddings_enabled() or not llm_enabled():
+    with provider.use_project_key(project_id):
+        ready = embeddings_enabled() and llm_enabled()
+    if not ready:
         raise HTTPException(
             status_code=400,
             detail="Set OPENROUTER_API_KEY (embeddings + agent analysis) to enable cluster rebuild",

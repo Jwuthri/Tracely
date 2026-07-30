@@ -63,6 +63,19 @@ class Settings(BaseSettings):
     # (see infrastructure/llm/provider.py). Model ids are OpenRouter-style `provider/model`.
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # Symmetric key (any string, >=32 chars — SHA256-derived into a Fernet key, same UX as
+    # SESSION_SECRET) encrypting a workspace's own OpenRouter key at rest in Postgres
+    # (`Project.openrouter_api_key_encrypted`). Only needed once a workspace sets its own key —
+    # blank deployments (server-wide key only) are unaffected.
+    secrets_encryption_key: str = ""
+    # Cap on OUTPUT tokens per judge/agent call. A judge emits a small structured verdict, so the
+    # providers' 64k default is pure waste — and worse, OpenRouter reserves credit for the full
+    # max_tokens UP FRONT, so an uncapped request fails with "requires more credits, you requested
+    # up to 65536 tokens" while the balance is nowhere near spent. That surfaces as an opaque
+    # `TypeError: 'NoneType' object is not iterable` (OpenRouter answers HTTP 200 with an error
+    # body and no `choices`, which the OpenAI SDK's parser can't read). Raise this if a
+    # reasoning-heavy judge model starts getting truncated.
+    llm_max_output_tokens: int = 4096
     # judge model + legacy direct-endpoint fallback (used only when no OpenRouter key is set,
     # so existing deployments keep their judge until they switch keys)
     llm_judge_model: str = "openai/gpt-5.4-nano"

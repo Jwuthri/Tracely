@@ -59,8 +59,19 @@ S3_ACCESS_KEY_ID=...
 S3_SECRET_ACCESS_KEY=...
 
 # LLM (judge, failure-intel agents, rolling summary, meta-analysis)
-OPENROUTER_API_KEY=...
+OPENROUTER_API_KEY=...               # the fallback key, used by workspaces that set none of their own
 OPENAI_API_KEY=...                   # embeddings only
+
+# Encrypts a workspace's OWN OpenRouter key at rest (Settings -> LLM key), so a customer's eval
+# spend bills to their account instead of yours. `openssl rand -hex 32` (>=32 chars).
+# Set the SAME value on the backend AND the worker: the API encrypts, the worker (which runs the
+# on-ingest judge) decrypts. A mismatch means every stored key silently fails to decrypt and
+# every project falls back to OPENROUTER_API_KEY — i.e. you quietly pay for their evals.
+# Leaving it unset is safe: the feature refuses to store a key (HTTP 500 with a clear message)
+# rather than persisting anything in plaintext; everything else keeps working on the server key.
+# Rotating it orphans already-stored workspace keys — they degrade to the server key and each
+# workspace must re-enter theirs.
+SECRETS_ENCRYPTION_KEY=...
 
 # Hosted frontend origin (CORS allow-list — wildcard localhost is OFF in prod)
 FRONTEND_ORIGIN=https://app.your-domain.com
