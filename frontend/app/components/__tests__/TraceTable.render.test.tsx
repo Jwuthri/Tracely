@@ -85,6 +85,33 @@ describe("TraceTable (render safety net)", () => {
     await screen.findByText("Conversation");
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
+
+  // The conversation row's agent icon was a dead button; it must now open that thread's agent config.
+  it("opens the conversation agents panel from the row's agent icon", async () => {
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(
+          url.includes("/agents")
+            ? { declared: [{ name: "Support Agent", description: "Handles support", tools: [] }], observed: [] }
+            : {},
+        ),
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TraceTable conversations={[conv()]} />);
+    fireEvent.click(await screen.findByTitle("View 1 agent"));
+    expect(push).not.toHaveBeenCalled(); // it's a button click, not a row navigation
+
+    expect(await screen.findByText("Conversation Agents")).toBeInTheDocument();
+    expect(screen.getByText("thread-1")).toBeInTheDocument();
+    expect(await screen.findByText("Support Agent")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Close"));
+    expect(screen.queryByText("Conversation Agents")).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
 });
 
 // ── State Δ columns (M + S) ──────────────────────────────────────────────────

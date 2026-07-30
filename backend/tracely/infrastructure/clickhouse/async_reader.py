@@ -303,7 +303,8 @@ async def sessions_overview(
     1-turn thread), newest-last-activity first, with per-thread rollups + parsed metadata.
     The optional time window bounds each trace's start_time INSIDE the per-trace subquery so
     ClickHouse can prune by the `toYYYYMM(start_time)` partition. `advisory` excludes those
-    evaluators' FAILs from the per-thread `failing` flag (see `_FAILING`)."""
+    evaluators' FAILs from the per-thread `failing` flag (see `_FAILING`). Content-less 1-turn
+    threads (no input, no output, not failing) are dropped entirely — see the HAVING clause."""
     client = await get_async_client()
     time_clause = ""
     params: dict = {"p": project_id, "n": limit, "o": max(offset, 0), "adv": list(advisory)}
@@ -367,6 +368,10 @@ async def sessions_overview(
           GROUP BY trace_id
         )
         GROUP BY thread
+        -- Drop 1-turn threads with no message content on either side (e.g. a lone TOOL/RETRIEVER
+        -- span the output-normalizer couldn't map to text) unless an evaluator flagged it — pure
+        -- ingestion noise, not a conversation worth listing.
+        HAVING NOT (turns = 1 AND first_input = '' AND last_output = '' AND failing = 0)
         ORDER BY last_ts DESC
         LIMIT {{n:UInt32}} OFFSET {{o:UInt32}}
         """,

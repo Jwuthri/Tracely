@@ -63,7 +63,7 @@ export function SuggestedEvaluatorCard({ ev }: { ev: SuggestedEvaluator }) {
         <div className="flex items-center gap-3">
           <button
             onClick={() => setOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-[12.5px] font-medium text-white transition-colors hover:bg-blue-500"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-signal/40 bg-signal/15 px-3.5 py-2 text-[12.5px] font-medium text-signal transition-all hover:bg-signal/25 hover:shadow-glow"
           >
             + Create evaluator
           </button>

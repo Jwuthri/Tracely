@@ -20,6 +20,7 @@ import { mergeMeta } from "../lib/meta";
 import { useHiddenTypes } from "../lib/typePrefs";
 import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
 import { AddColumnModal } from "./AddColumnModal";
+import { AgentsSidePanel } from "./AgentsSidePanel";
 import { SelectBox } from "./SelectBox";
 import { spanHasState, spanStateWrites } from "./state-fold";
 import { ExpandableText, FloatingPanel, HighlightedJson, IconBox, JsonPill, Pill, Plain, prettyJson } from "./JsonView";
@@ -997,6 +998,7 @@ function DataRow({
   open,
   onToggle,
   agentCount,
+  onShowAgents,
 }: {
   depth: 0 | 1 | 2;
   ctx: RowCtx;
@@ -1005,6 +1007,7 @@ function DataRow({
   open?: boolean;
   onToggle?: () => void;
   agentCount?: number;
+  onShowAgents?: (thread: string) => void;
 }) {
   const router = useRouter();
   const sel = useContext(SelectContext);
@@ -1059,7 +1062,15 @@ function DataRow({
       </td>
       <td style={CTRL} className="px-2 py-2 align-top sm:px-3">
         {ctx.level === "C" ? (
-          <button tabIndex={-1} className="inline-flex h-6 w-6 items-center justify-center rounded-lg opacity-0 transition-opacity hover:bg-slate-700 group-hover:opacity-100" title={`View ${agentCount ?? 1} agent${(agentCount ?? 1) === 1 ? "" : "s"}`}>
+          <button
+            tabIndex={-1}
+            onClick={(e) => {
+              e.stopPropagation();
+              onShowAgents?.(ctx.conv.thread);
+            }}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-lg opacity-0 transition-opacity hover:bg-slate-700 group-hover:opacity-100"
+            title={`View ${agentCount ?? 1} agent${(agentCount ?? 1) === 1 ? "" : "s"}`}
+          >
             <Bot className="h-3 w-3 text-slate-400" />
           </button>
         ) : null}
@@ -1142,6 +1153,7 @@ function ConvRows({
   hiddenTypes,
   onToggleConv,
   onToggleTurn,
+  onShowAgents,
 }: {
   conv: ConvNode;
   turns: FullTurn[] | "loading" | undefined;
@@ -1152,6 +1164,7 @@ function ConvRows({
   hiddenTypes: Set<string>;
   onToggleConv: (t: string) => void;
   onToggleTurn: (t: string) => void;
+  onShowAgents: (thread: string) => void;
 }) {
   const agentCount = useMemo(() => {
     if (!conv.turnsData) return 1;
@@ -1165,7 +1178,7 @@ function ConvRows({
 
   return (
     <>
-      <DataRow depth={0} cols={cols} ctx={{ level: "C", conv, agentCount }} canExpand open={open} onToggle={() => onToggleConv(conv.thread)} agentCount={agentCount} />
+      <DataRow depth={0} cols={cols} ctx={{ level: "C", conv, agentCount }} canExpand open={open} onToggle={() => onToggleConv(conv.thread)} agentCount={agentCount} onShowAgents={onShowAgents} />
       {open &&
         (turns === "loading" || turns === undefined ? (
           <LoadingTr cols={cols} />
@@ -1415,6 +1428,7 @@ export function TraceTable({
   const [colMenu, setColMenu] = useState(false);
   const [typeMenu, setTypeMenu] = useState(false);
   const [wide, setWide] = useWide();
+  const [agentsThread, setAgentsThread] = useState<string | null>(null);
 
   // ── conversation multi-select + delete ────────────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -1866,6 +1880,7 @@ export function TraceTable({
                     hiddenTypes={hiddenTypes}
                     onToggleConv={toggleConv}
                     onToggleTurn={toggleTurn}
+                    onShowAgents={setAgentsThread}
                   />
                 ))
               )}
@@ -1881,6 +1896,7 @@ export function TraceTable({
         onClose={() => setColumnModal({ open: false, editing: null })}
         onSaved={() => void listEvaluators().then(setEvaluators)}
       />
+      {agentsThread && <AgentsSidePanel threadId={agentsThread} onClose={() => setAgentsThread(null)} />}
       </SelectContext.Provider>
       </RollingSummaryContext.Provider>
       </LiveScoreContext.Provider>
