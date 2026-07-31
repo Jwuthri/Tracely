@@ -65,7 +65,7 @@ const TYPE: Record<string, string> = {
   EMBEDDING: "text-t_llm",
   TOOL: "text-t_tool",
   RETRIEVER: "text-t_retriever",
-  THINKING: "text-violet-300",
+  THINKING: "text-t_think",
 };
 const TYPE_DOT: Record<string, string> = {
   AGENT: "bg-t_agent",
@@ -74,7 +74,7 @@ const TYPE_DOT: Record<string, string> = {
   EMBEDDING: "bg-t_llm",
   TOOL: "bg-t_tool",
   RETRIEVER: "bg-t_retriever",
-  THINKING: "bg-violet-300",
+  THINKING: "bg-t_think",
 };
 
 // Canonicalize synonym types for display + filtering. Mirrors backend/tracely/otel/mapping.py:

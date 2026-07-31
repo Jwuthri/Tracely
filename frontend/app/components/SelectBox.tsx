@@ -27,7 +27,7 @@ export function SelectBox({
     <label
       onClick={(e) => e.stopPropagation()}
       title={label}
-      className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-lg transition-colors hover:bg-slate-700/70"
+      className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-lg transition-colors hover:bg-ink-600/70"
     >
       <input ref={ref} type="checkbox" checked={checked} onChange={onChange} aria-label={label} className="peer sr-only" />
       <span className="flex h-[15px] w-[15px] items-center justify-center rounded-[4px] border border-line-bright bg-ink-900/80 transition-colors peer-hover:border-signal/60 peer-checked:border-signal peer-checked:bg-signal peer-focus-visible:ring-2 peer-focus-visible:ring-signal/40">

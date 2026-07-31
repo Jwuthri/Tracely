@@ -6,6 +6,9 @@
   --font-sans: "Hanken Grotesk";
   --font-mono: "JetBrains Mono";
   --font-display: "Bricolage Grotesque";
+  /* The app is dark-only. Without this every NATIVE control — number spinners, select
+     dropdowns, checkboxes, date pickers, autofill — renders in light browser chrome. */
+  color-scheme: dark;
 }
 
 @layer base {
@@ -56,6 +59,17 @@
   }
   .hairline {
     @apply border-b border-line/70;
+  }
+  /* Buttons. Same idiom as .card above — these three strings were copy-pasted across ~15 call
+     sites and had already drifted (a solid blue fill in a cyan app). One place to change now. */
+  .btn-primary {
+    @apply inline-flex items-center gap-2 rounded-lg border border-signal/40 bg-signal/15 px-3.5 py-2 text-[13px] font-medium text-signal transition-all hover:bg-signal/25 hover:shadow-glow disabled:opacity-60;
+  }
+  .btn-danger {
+    @apply inline-flex items-center gap-2 rounded-lg border border-fail/40 bg-fail/15 px-3.5 py-2 text-[13px] font-medium text-fail transition-all hover:bg-fail/25 disabled:opacity-60;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-[12px] text-fg-muted transition-colors hover:border-signal/40 hover:text-fg disabled:opacity-60;
   }
   .text-balance {
     text-wrap: balance;

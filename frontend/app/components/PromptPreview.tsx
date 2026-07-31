@@ -153,12 +153,12 @@ export function PromptPreview({
       {result && (result.variables_used.length > 0 || result.variables_missing.length > 0) && (
         <div className="flex flex-wrap gap-1.5">
           {result.variables_used.length > 0 && (
-            <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[9.5px] font-medium text-emerald-400">
+            <span className="rounded border border-ok/30 bg-ok/10 px-1.5 py-0.5 text-[9.5px] font-medium text-ok">
               Resolved: {result.variables_used.join(", ")}
             </span>
           )}
           {result.variables_missing.length > 0 && (
-            <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9.5px] font-medium text-amber-400">
+            <span className="rounded border border-warn/30 bg-warn/10 px-1.5 py-0.5 text-[9.5px] font-medium text-warn">
               Missing: {result.variables_missing.join(", ")}
             </span>
           )}
@@ -169,7 +169,7 @@ export function PromptPreview({
       {error ? (
         <p className="text-[11px] text-fail">{error}</p>
       ) : !prompt.trim() ? (
-        <p className="text-[11px] text-fg-faint">Write a prompt with <span className="font-mono text-emerald-400">@variables</span> to preview the resolved text.</p>
+        <p className="text-[11px] text-fg-faint">Write a prompt with <span className="font-mono text-ok">@variables</span> to preview the resolved text.</p>
       ) : result ? (
         <>
           {raw ? (

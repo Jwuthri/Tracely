@@ -5,6 +5,11 @@ redacted) → sha256 → stable cluster_key. Two failures with the same masked s
 into the same `FailureCluster`. The semantic embedding pass (`services.failure_intel_service`)
 replaces these later, but the cheap signature is what the worker computes on every failing
 trace so the cluster appears immediately.
+
+Exact hashing alone splits LLM-judge prose into one cluster per trace ("the response is not
+helpful" vs "the answer is not a helpful reply"). So the key is only the FIRST lookup: the
+clusterer falls back to a token-overlap match against existing clusters with the same failed
+evaluators (`tokens` / `similarity` below).
 """
 
 from __future__ import annotations
@@ -15,9 +20,22 @@ from dataclasses import dataclass
 
 _MASK_PATTERNS = [
     (re.compile(r"\b[0-9a-f]{8,}\b", re.I), "<id>"),  # hex/uuids
-    (re.compile(r"\b\d+(\.\d+)?\b"), "<n>"),           # numbers
-    (re.compile(r"'[^']*'|\"[^\"]*\""), "<*>"),        # quoted strings
+    (re.compile(r"\b\d+(\.\d+)?\b"), "<n>"),  # numbers
+    (re.compile(r"'[^']*'|\"[^\"]*\""), "<*>"),  # quoted strings
 ]
+
+# Dropped before comparing two failure texts: grammar glue plus the words every judge comment
+# repeats ("the agent response ..."). Negations are deliberately KEPT — "helpful" and "not
+# helpful" must not look alike. Whatever survives is the distinguishing content.
+_BOILERPLATE = frozenset(
+    """a an the this that these those it its is are was were be been being do does did doing
+    of to for and or as in on at by with from into about there here which who whom what when
+    have has had only just any some such
+    agent response responses answer answers reply replies output outputs result results user
+    users assistant model llm trace run turn span message messages provide provides provided
+    """.split()
+)
+_WORD = re.compile(r"[a-z]+")
 
 # Recognized evaluator score names -> human-readable taxonomy. Anything else falls back to
 # the generic "execution: error" bucket.
@@ -38,6 +56,29 @@ def mask(text: str) -> str:
     return out.strip()
 
 
+def tokens(text: str) -> frozenset[str]:
+    """Content words of a failure text — lowercased, boilerplate and 1-char noise removed."""
+    return frozenset(w for w in _WORD.findall(text.lower()) if len(w) > 1 and w not in _BOILERPLATE)
+
+
+def similarity(a: frozenset[str], b: frozenset[str]) -> float:
+    """Jaccard overlap of two token sets. Jaccard (not containment) on purpose: containment
+    merges any short failure into a longer unrelated one that happens to include its words."""
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def eval_part(signature: str) -> str:
+    """The failed-evaluator half of a signature string — the hard gate for merging."""
+    return signature.split(" ## ", 1)[0]
+
+
+def text_part(signature: str) -> str:
+    """The failure-text half of a signature string — what gets compared for similarity."""
+    return signature.split(" ## ", 1)[-1]
+
+
 @dataclass(frozen=True, slots=True)
 class FailureSignature:
     """The computed signature for a failing trace.
@@ -51,6 +92,16 @@ class FailureSignature:
     key: str
     label: str
     taxonomy: str
+
+    def matches(self, other_signature: str, threshold: float) -> bool:
+        """True if an existing cluster's signature describes the same failure: identical failed
+        evaluators AND enough shared content words."""
+        if eval_part(self.signature) != eval_part(other_signature):
+            return False
+        return (
+            similarity(tokens(text_part(self.signature)), tokens(text_part(other_signature)))
+            >= threshold
+        )
 
     @classmethod
     def compute(cls, eval_failures, spans: list[dict]) -> "FailureSignature":

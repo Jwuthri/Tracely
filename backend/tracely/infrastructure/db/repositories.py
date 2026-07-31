@@ -290,13 +290,19 @@ def case_delete(s: Session, project_id: str, case_id: str) -> bool:
 # ── failure clusters ──────────────────────────────────────────────────────────
 
 
-def clusters_list_with_agent(s: Session, project_id: str) -> list[tuple[FailureCluster, str]]:
+def clusters_list_with_agent(
+    s: Session, project_id: str, min_size: int = 1
+) -> list[tuple[FailureCluster, str]]:
+    """`min_size` hides clusters with fewer members — a failure seen once is noise, not an issue."""
     return [
         (cl, slug)
         for cl, slug in s.execute(
             select(FailureCluster, Agent.slug)
             .join(Agent, FailureCluster.agent_id == Agent.id)
-            .where(FailureCluster.project_id == project_id)
+            .where(
+                FailureCluster.project_id == project_id,
+                FailureCluster.count >= min_size,
+            )
             .order_by(desc(FailureCluster.count), desc(FailureCluster.last_seen_at))
         ).all()
     ]

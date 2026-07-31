@@ -74,7 +74,7 @@ export function RunGateButton({
         <button
           onClick={go}
           disabled={busy}
-          className="inline-flex items-center gap-2 rounded-lg border border-signal/40 bg-signal/15 px-3.5 py-2 text-[13px] font-medium text-signal transition-all hover:bg-signal/25 hover:shadow-glow disabled:opacity-60"
+          className="btn-primary"
         >
           <IconGate className="h-4 w-4" />
           {busy ? "Running gate…" : `Run gate · ${agent.slug} · ci`}
@@ -89,7 +89,7 @@ export function RunGateButton({
         </p>
       )}
       {err && (
-        <p role="alert" className="text-[12px] text-rose-400">
+        <p role="alert" className="text-[12px] text-fail">
           {err}
         </p>
       )}

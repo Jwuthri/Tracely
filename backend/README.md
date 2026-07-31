@@ -212,7 +212,7 @@ Three Celery tasks, each a thin dispatch into a service class: `ingest_otlp_blob
 | `GET …/{thread}/rolling-summary` · `…/by-level` · `POST …/generate` | `sessions.py` | the accumulated conversation summary (whole / per-level) + on-demand rebuild. |
 | `GET /api/search` | `search.py` | ⌘K search over conversations/issues/cases/gates. |
 | `GET /api/stats` · `POST /api/promote` · `GET /api/cases` · `GET /api/cases/{id}` · `DELETE /api/cases/{id}` · `POST /api/cases/{id}/replay` | `cases.py` | dashboard stats; promote a trace → case; case list/detail; delete a case (+ its replays and per-gate verdicts); manual replay. |
-| `GET /api/clusters`, `/api/clusters/{id}` · `POST …/rebuild` | `clusters.py` | failure clusters list/detail; trigger `rebuild_clusters`. |
+| `GET /api/clusters?min_size=N`, `/api/clusters/{id}` · `POST …/rebuild` | `clusters.py` | failure clusters list/detail; trigger `rebuild_clusters`. The list hides clusters seen fewer than `min_size` times (default `CLUSTER_MIN_SIZE`=5, floor 2) — one-off failures are noise. Detail is never filtered. |
 | `POST /api/gate` · `GET /api/gate/suite` · `GET /api/gates`, `/api/gates/{id}` | `gate.py` | run a gate; fetch the replay suite (cases + inputs + fixtures); gate list/detail. |
 | `GET /api/trends` | `analytics.py` | daily traces/failures + gate pass-rate + summary (failure rate, MTTR proxy…). |
 | `GET /api/ops` | `analytics.py` | latency p50/p95/p99 + TTFT, throughput, error rate, tokens/cost — per day, per model, per span name (`async_reader.ops_metrics`). |

@@ -18,7 +18,7 @@ export function HighlightedJson({ text }: { text: string }) {
     if (m[1] !== undefined && m[2] !== undefined) {
       // "key":  -> key (fuchsia) + colon (slate)
       out.push(<span key={i++} className="text-fuchsia-400">{m[1]}</span>);
-      out.push(<span key={i++} className="text-slate-500">{m[2]}</span>);
+      out.push(<span key={i++} className="text-fg-faint">{m[2]}</span>);
     } else if (m[1] !== undefined) {
       out.push(<span key={i++} className="text-cyan-300">{m[1]}</span>); // string value
     } else if (m[3] !== undefined) {
@@ -135,17 +135,17 @@ export function FloatingPanel({
   return createPortal(
     <>
       <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); onClose(); }} />
-      <div className="fixed z-50 flex flex-col overflow-hidden rounded-lg border border-slate-700 bg-slate-900 shadow-2xl shadow-black/60" style={{ ...pos, width: W, maxHeight }}>
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-700 px-3 py-2">
+      <div className="fixed z-50 flex flex-col overflow-hidden rounded-lg border border-line bg-ink-900 shadow-2xl shadow-black/60" style={{ ...pos, width: W, maxHeight }}>
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-3 py-2">
           <div className="flex min-w-0 items-center gap-2">
             {icon}
             <div className="min-w-0 leading-tight">
-              <div className="truncate text-xs font-medium capitalize text-slate-200">{title}</div>
-              <div className="text-[10px] text-slate-500">{subtitle}</div>
+              <div className="truncate text-xs font-medium capitalize text-fg">{title}</div>
+              <div className="text-[10px] text-fg-faint">{subtitle}</div>
             </div>
           </div>
           {copyText && (
-            <button onClick={copy} className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 transition-colors hover:bg-slate-800 hover:text-white">
+            <button onClick={copy} className="inline-flex shrink-0 items-center gap-1 rounded-md border border-line px-2 py-1 text-[11px] text-fg transition-colors hover:bg-ink-700 hover:text-fg">
               <CopyIcon className="h-3 w-3" />
               {copied ? "Copied" : "Copy"}
             </button>
@@ -177,13 +177,13 @@ export function Pill({
       <button
         ref={btnRef}
         onClick={() => setRect((r) => (r ? null : btnRef.current?.getBoundingClientRect() ?? null))}
-        className="flex max-w-full items-center gap-2 rounded-md border border-slate-700/50 bg-slate-800/60 px-2.5 py-1.5 text-xs backdrop-blur-sm transition-all duration-200 hover:border-slate-600 hover:bg-slate-800/80 hover:shadow-lg hover:shadow-slate-900/50"
+        className="flex max-w-full items-center gap-2 rounded-md border border-line/50 bg-ink-700/60 px-2.5 py-1.5 text-xs backdrop-blur-sm transition-all duration-200 hover:border-line-bright hover:bg-ink-700/80 hover:shadow-lg hover:shadow-ink-950/50"
       >
         {iconBox}
-        <span className="truncate font-mono text-slate-300/90">{summary}</span>
+        <span className="truncate font-mono text-fg/90">{summary}</span>
         {badge}
         <div className={clsx("transition-transform duration-200", rect && "rotate-90")}>
-          <ChevronR className="h-3.5 w-3.5 text-slate-500" />
+          <ChevronR className="h-3.5 w-3.5 text-fg-faint" />
         </div>
       </button>
       {rect && panel(rect, () => setRect(null))}
@@ -194,7 +194,7 @@ export function Pill({
 // A monospace JSON body for a floating panel.
 function JsonPanelBody({ pretty }: { pretty: string }) {
   return (
-    <pre className="whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-relaxed text-slate-300">
+    <pre className="whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-relaxed text-fg">
       <HighlightedJson text={pretty} />
     </pre>
   );
@@ -202,7 +202,7 @@ function JsonPanelBody({ pretty }: { pretty: string }) {
 
 export function Plain({ text }: { text: string }) {
   return (
-    <span className="block max-w-full truncate text-sm text-slate-300" title={text}>
+    <span className="block max-w-full truncate text-sm text-fg" title={text}>
       {text || "—"}
     </span>
   );
@@ -211,16 +211,16 @@ export function Plain({ text }: { text: string }) {
 export function ExpandableText({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <button onClick={() => setOpen((o) => !o)} className="flex w-full items-start gap-1.5 rounded px-1 py-0.5 text-left transition-colors hover:bg-slate-700/40">
-      <ChevronR className={clsx("mt-0.5 h-3 w-3 shrink-0 text-slate-500 transition-transform", open && "rotate-90")} />
-      <span className={clsx("text-sm text-slate-300", open ? "whitespace-pre-wrap" : "line-clamp-2")}>{text}</span>
+    <button onClick={() => setOpen((o) => !o)} className="flex w-full items-start gap-1.5 rounded px-1 py-0.5 text-left transition-colors hover:bg-ink-600/40">
+      <ChevronR className={clsx("mt-0.5 h-3 w-3 shrink-0 text-fg-faint transition-transform", open && "rotate-90")} />
+      <span className={clsx("text-sm text-fg", open ? "whitespace-pre-wrap" : "line-clamp-2")}>{text}</span>
     </button>
   );
 }
 
 function ObjPreview({ obj }: { obj: Record<string, unknown> }) {
   const keys = Object.keys(obj);
-  if (keys.length === 0) return <span className="text-slate-500">{"{}"}</span>;
+  if (keys.length === 0) return <span className="text-fg-faint">{"{}"}</span>;
   const k = keys[0];
   const v = obj[k];
   const vs = typeof v === "string" ? v : JSON.stringify(v);
@@ -229,7 +229,7 @@ function ObjPreview({ obj }: { obj: Record<string, unknown> }) {
     <span className="flex items-center gap-1">
       <span className="text-fuchsia-400">{k}:</span>
       <span className="text-cyan-300/80">&quot;{short}&quot;</span>
-      {keys.length > 1 && <span className="text-slate-500">+{keys.length - 1}</span>}
+      {keys.length > 1 && <span className="text-fg-faint">+{keys.length - 1}</span>}
     </span>
   );
 }
@@ -265,7 +265,7 @@ export function JsonPill({ raw }: { raw: string }) {
     <Pill
       iconBox={icon}
       summary={summary}
-      badge={<span className="rounded bg-slate-700/60 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-slate-400">{count}</span>}
+      badge={<span className="rounded bg-ink-600/60 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-fg-muted">{count}</span>}
       panel={(a, c) => (
         <FloatingPanel anchor={a} onClose={c} icon={icon} title={isArr ? "array" : "object"} subtitle={`${count} ${isArr ? (count === 1 ? "item" : "items") : count === 1 ? "key" : "keys"}`} copyText={pretty}>
           <JsonPanelBody pretty={pretty} />

@@ -102,21 +102,21 @@ const Chevron = ({ open }: { open: boolean }) => (
     strokeWidth={2}
     strokeLinecap="round"
     strokeLinejoin="round"
-    className={clsx("h-3 w-3 shrink-0 text-slate-500 transition-transform", open && "rotate-90")}
+    className={clsx("h-3 w-3 shrink-0 text-fg-faint transition-transform", open && "rotate-90")}
   >
     <path d="m9 18 6-6-6-6" />
   </svg>
 );
 
 const Key = ({ name, idx }: { name: string; idx?: boolean }) => (
-  <span className={clsx("font-mono", idx ? "text-slate-500" : "text-fuchsia-400")}>{name}</span>
+  <span className={clsx("font-mono", idx ? "text-fg-faint" : "text-fuchsia-400")}>{name}</span>
 );
 
 // A scalar leaf, colored to match the JSON highlighter (string=cyan, number=amber, bool/null=violet).
 function Scalar({ value }: { value: unknown }) {
-  if (value === null || value === undefined) return <span className="font-mono text-violet-400">null</span>;
-  if (typeof value === "number") return <span className="font-mono text-amber-300">{String(value)}</span>;
-  if (typeof value === "boolean") return <span className="font-mono text-violet-400">{String(value)}</span>;
+  if (value === null || value === undefined) return <span className="font-mono text-t_think">null</span>;
+  if (typeof value === "number") return <span className="font-mono text-warn">{String(value)}</span>;
+  if (typeof value === "boolean") return <span className="font-mono text-t_think">{String(value)}</span>;
   return <InlineStr text={String(value)} />;
 }
 
@@ -125,18 +125,18 @@ function InlineStr({ text }: { text: string }) {
   const s = text.trim();
   if (/^https?:\/\/\S+$/.test(s)) {
     return (
-      <a href={s} target="_blank" rel="noopener noreferrer" className="break-all font-mono text-cyan-400 underline decoration-cyan-400/40 underline-offset-2 hover:decoration-cyan-400">
+      <a href={s} target="_blank" rel="noopener noreferrer" className="break-all font-mono text-signal underline decoration-signal/40 underline-offset-2 hover:decoration-signal">
         {s}
       </a>
     );
   }
   const long = text.length > 140 || text.includes("\n");
   const [open, setOpen] = useState(false);
-  if (!long) return <span className="break-words font-mono text-cyan-300">&quot;{text}&quot;</span>;
+  if (!long) return <span className="break-words font-mono text-signal">&quot;{text}&quot;</span>;
   return (
     <button onClick={() => setOpen((o) => !o)} className="group inline-flex max-w-full items-start gap-1 text-left align-top">
       <Chevron open={open} />
-      <span className={clsx("break-words font-mono text-cyan-300", open ? "whitespace-pre-wrap" : "line-clamp-2")}>&quot;{text}&quot;</span>
+      <span className={clsx("break-words font-mono text-signal", open ? "whitespace-pre-wrap" : "line-clamp-2")}>&quot;{text}&quot;</span>
     </button>
   );
 }
@@ -146,7 +146,7 @@ function BlockStr({ text }: { text: string }) {
   const s = text.trim();
   if (/^https?:\/\/\S+$/.test(s)) {
     return (
-      <a href={s} target="_blank" rel="noopener noreferrer" className="break-all text-[12.5px] text-cyan-400 underline decoration-cyan-400/40 underline-offset-2 hover:decoration-cyan-400">
+      <a href={s} target="_blank" rel="noopener noreferrer" className="break-all text-[12.5px] text-signal underline decoration-signal/40 underline-offset-2 hover:decoration-signal">
         {s}
       </a>
     );
@@ -167,7 +167,7 @@ function BlockStr({ text }: { text: string }) {
 // ── the object/array tree (the "well-formatted object") ──────────────────────────
 function ObjectView({ data, depth = 0 }: { data: Record<string, unknown>; depth?: number }) {
   const entries = Object.entries(data);
-  if (entries.length === 0) return <span className="font-mono text-slate-500">{"{ }"}</span>;
+  if (entries.length === 0) return <span className="font-mono text-fg-faint">{"{ }"}</span>;
   return (
     <div className="space-y-1">
       {entries.map(([k, v]) => (
@@ -178,7 +178,7 @@ function ObjectView({ data, depth = 0 }: { data: Record<string, unknown>; depth?
 }
 
 function ArrayView({ items, depth = 0 }: { items: unknown[]; depth?: number }) {
-  if (items.length === 0) return <span className="font-mono text-slate-500">[ ]</span>;
+  if (items.length === 0) return <span className="font-mono text-fg-faint">[ ]</span>;
   // an array of scalars renders as a compact inline list rather than one row per index
   if (items.every(isScalar)) {
     return (
@@ -186,7 +186,7 @@ function ArrayView({ items, depth = 0 }: { items: unknown[]; depth?: number }) {
         {items.map((v, i) => (
           <span key={i} className="flex items-baseline">
             <Scalar value={v} />
-            {i < items.length - 1 && <span className="text-slate-600">,</span>}
+            {i < items.length - 1 && <span className="text-fg-faint">,</span>}
           </span>
         ))}
       </div>
@@ -209,7 +209,7 @@ function FieldRow({ name, value, depth, idx }: { name: string; value: unknown; d
       <div className="flex flex-wrap items-baseline gap-x-2">
         <span className="shrink-0">
           <Key name={name} idx={idx} />
-          <span className="text-slate-500">:</span>
+          <span className="text-fg-faint">:</span>
         </span>
         <Scalar value={value} />
       </div>
@@ -221,7 +221,7 @@ function FieldRow({ name, value, depth, idx }: { name: string; value: unknown; d
       <div>
         <div className="mb-1">
           <Key name={name} idx={idx} />
-          <span className="text-slate-500">:</span>
+          <span className="text-fg-faint">:</span>
         </div>
         <div className="ml-1.5 border-l border-line/60 pl-3">
           <Conversation msgs={value as Msg[]} />
@@ -237,8 +237,8 @@ function FieldRow({ name, value, depth, idx }: { name: string; value: unknown; d
       <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-left">
         <Chevron open={open} />
         <Key name={name} idx={idx} />
-        <span className="text-slate-500">:</span>
-        <span className="font-mono text-[10px] text-slate-500">{isArr ? `[${count}]` : `{${count}}`}</span>
+        <span className="text-fg-faint">:</span>
+        <span className="font-mono text-[10px] text-fg-faint">{isArr ? `[${count}]` : `{${count}}`}</span>
       </button>
       {open && (
         <div className="ml-1.5 mt-1 border-l border-line/60 pl-3">
@@ -268,7 +268,7 @@ const ROLE: Record<string, string> = {
   assistant: "border-t_llm/30 bg-t_llm/[0.06] text-t_llm",
   system: "border-line bg-ink-900 text-fg-faint",
   tool: "border-t_tool/30 bg-t_tool/[0.06] text-t_tool",
-  thinking: "border-violet-500/30 bg-violet-500/[0.06] text-violet-300",
+  thinking: "border-t_think/30 bg-t_think/[0.06] text-t_think",
 };
 
 function Conversation({ msgs }: { msgs: Msg[] }) {
@@ -290,7 +290,7 @@ function MessageCard({ m }: { m: Msg }) {
     <div className={clsx("rounded-lg border px-3 py-2", ROLE[role] ?? "border-line bg-ink-900")}>
       <div className="mb-1 flex items-center gap-2">
         <span className="font-mono text-[9.5px] uppercase tracking-wider opacity-80">{role}</span>
-        {finish && <span className="rounded bg-slate-700/40 px-1 py-0.5 font-mono text-[8.5px] uppercase tracking-wider text-slate-400">{finish}</span>}
+        {finish && <span className="rounded bg-ink-600/40 px-1 py-0.5 font-mono text-[8.5px] uppercase tracking-wider text-fg-muted">{finish}</span>}
       </div>
       {hasContent && <MsgContent content={m.content} />}
       {calls.length > 0 && <ToolCalls calls={calls} />}
@@ -381,7 +381,7 @@ function Details({ title, rest }: { title: string; rest: Record<string, unknown>
       <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-1.5 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-wider text-fg-faint hover:text-fg-muted">
         <Chevron open={open} />
         {title} details
-        <span className="text-slate-600">{entries.length}</span>
+        <span className="text-fg-faint">{entries.length}</span>
       </button>
       {open && (
         <div className="border-t border-line/60 px-2.5 py-2">
@@ -441,7 +441,7 @@ function TopLevel({ value }: { value: unknown }) {
 
 function RawJson({ value }: { value: unknown }) {
   return (
-    <pre className="overflow-auto rounded-lg border border-line bg-ink-900 p-3 font-mono text-[11.5px] leading-relaxed text-slate-300">
+    <pre className="overflow-auto rounded-lg border border-line bg-ink-900 p-3 font-mono text-[11.5px] leading-relaxed text-fg">
       <HighlightedJson text={JSON.stringify(value, null, 2)} />
     </pre>
   );

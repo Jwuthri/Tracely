@@ -48,7 +48,7 @@ export default async function SharedThreadPage({ params }: { params: Promise<{ t
           <div className="mt-2 flex flex-wrap items-center gap-3 font-mono text-[11.5px] text-fg-faint">
             <span>{turns.length} turns</span>
             {usage.total_tokens ? <span>{usage.total_tokens.toLocaleString("en-US")} tokens</span> : null}
-            {usage.cost ? <span className="text-amber-300/90">{fmtUsd(usage.cost)}</span> : null}
+            {usage.cost ? <span className="text-warn/90">{fmtUsd(usage.cost)}</span> : null}
           </div>
         </header>
 

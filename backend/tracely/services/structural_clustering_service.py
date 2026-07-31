@@ -13,11 +13,16 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from tracely.config import settings
 from tracely.domain.failure.signature import FailureSignature
 from tracely.infrastructure.db.models import ClusterMember, FailureCluster
+
+# ponytail: only the N most recently active clusters of an agent are considered for a fuzzy
+# merge. Older ones are re-formed by Analyze anyway; raise it if agents run many failure modes.
+_MERGE_SCAN_LIMIT = 200
 
 
 class StructuralClusteringService:
@@ -40,7 +45,9 @@ class StructuralClusteringService:
         sig = FailureSignature.compute(eval_failures, spans)
         now = datetime.now(timezone.utc)
 
-        cl = self._find_existing(project_id, agent_id, sig.key)
+        cl = self._find_existing(project_id, agent_id, sig.key) or self._find_similar(
+            project_id, agent_id, sig
+        )
         if cl is None:
             cl = self._create(project_id, agent_id, sig, now)
 
@@ -61,6 +68,29 @@ class StructuralClusteringService:
             )
         ).scalar_one_or_none()
 
+    def _find_similar(
+        self, project_id: str, agent_id: str, sig: FailureSignature
+    ) -> FailureCluster | None:
+        """Join an existing cluster whose failure text says the same thing in different words.
+
+        Without this every LLM-judge comment hashes to its own cluster and the list is one row
+        per failing trace. IGNOREd clusters are skipped — a merge would resurrect them.
+        """
+        threshold = settings.cluster_merge_similarity
+        if threshold > 1:
+            return None  # merging disabled — exact signature only
+        candidates = self.session.execute(
+            select(FailureCluster)
+            .where(
+                FailureCluster.project_id == project_id,
+                FailureCluster.agent_id == agent_id,
+                FailureCluster.status != "IGNORED",
+            )
+            .order_by(desc(FailureCluster.last_seen_at))
+            .limit(_MERGE_SCAN_LIMIT)
+        ).scalars()
+        return next((c for c in candidates if sig.matches(c.signature or "", threshold)), None)
+
     def _create(
         self,
         project_id: str,
@@ -69,22 +99,31 @@ class StructuralClusteringService:
         now: datetime,
     ) -> FailureCluster:
         cl = FailureCluster(
-            id=str(uuid.uuid4()), project_id=project_id, agent_id=agent_id,
-            cluster_key=sig.key, label=sig.label, taxonomy=sig.taxonomy,
-            signature=sig.signature[:2000], count=0, status="OPEN",
-            first_seen_at=now, last_seen_at=now,
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            agent_id=agent_id,
+            cluster_key=sig.key,
+            label=sig.label,
+            taxonomy=sig.taxonomy,
+            signature=sig.signature[:2000],
+            count=0,
+            status="OPEN",
+            first_seen_at=now,
+            last_seen_at=now,
         )
         self.session.add(cl)
         self.session.flush()
         return cl
 
-    def _record_member(
-        self, cl: FailureCluster, trace_id: str, now: datetime
-    ) -> None:
+    def _record_member(self, cl: FailureCluster, trace_id: str, now: datetime) -> None:
         member = self.session.get(ClusterMember, (cl.id, trace_id))
         if member is None:
-            self.session.add(ClusterMember(
-                cluster_id=cl.id, trace_id=trace_id, is_medoid=(cl.count == 0),
-            ))
+            self.session.add(
+                ClusterMember(
+                    cluster_id=cl.id,
+                    trace_id=trace_id,
+                    is_medoid=(cl.count == 0),
+                )
+            )
             cl.count = (cl.count or 0) + 1
         cl.last_seen_at = now

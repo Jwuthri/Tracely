@@ -269,8 +269,10 @@ export type FailureCluster = {
   suggested_evaluator?: SuggestedEvaluator;
 };
 
-export async function getClusters(): Promise<FailureCluster[]> {
-  return getJson<FailureCluster[]>(`/api/clusters`);
+/** `minSize` hides clusters with fewer members (>= 2); omitted = the backend default. */
+export async function getClusters(minSize?: number): Promise<FailureCluster[]> {
+  const q = minSize ? `?min_size=${minSize}` : "";
+  return getJson<FailureCluster[]>(`/api/clusters${q}`);
 }
 
 export async function getCluster(id: string): Promise<FailureCluster | null> {

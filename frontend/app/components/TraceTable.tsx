@@ -105,8 +105,8 @@ function UsageBody({ usage }: { usage: Record<string, number> }) {
   const tokenRows = ([["Input", "input_tokens"], ["Cached", "cached_tokens"], ["Cache write", "cache_write_tokens"], ["Output", "output_tokens"], ["Thinking", "thinking_tokens"], ["Total", "total_tokens"]] as Array<[string, string]>).filter(([, k]) => usage[k] != null);
   const costRows = ([["Input", "input_price"], ["Output", "output_price"], ["Total", "cost"]] as Array<[string, string]>).filter(([, k]) => usage[k] != null);
   const row = (label: string, k: string, fmt: (n: number) => string, cls: string) => (
-    <div key={k} className={clsx("flex items-center justify-between gap-4", k === "total_tokens" || k === "cost" ? "mt-0.5 border-t border-slate-700/60 pt-1 font-medium" : "")}>
-      <span className="text-slate-400">{label}</span>
+    <div key={k} className={clsx("flex items-center justify-between gap-4", k === "total_tokens" || k === "cost" ? "mt-0.5 border-t border-line/60 pt-1 font-medium" : "")}>
+      <span className="text-fg-muted">{label}</span>
       <span className={clsx("font-mono tabular-nums", cls)}>{fmt(usage[k])}</span>
     </div>
   );
@@ -114,14 +114,14 @@ function UsageBody({ usage }: { usage: Record<string, number> }) {
     <div className="space-y-3 p-3 text-[12px]">
       {tokenRows.length > 0 && (
         <div>
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">Tokens</div>
-          {tokenRows.map(([l, k]) => row(l, k, (n) => n.toLocaleString("en-US"), "text-slate-200"))}
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-fg-faint">Tokens</div>
+          {tokenRows.map(([l, k]) => row(l, k, (n) => n.toLocaleString("en-US"), "text-fg"))}
         </div>
       )}
       {costRows.length > 0 && (
         <div>
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">Cost</div>
-          {costRows.map(([l, k]) => row(l, k, fmtUsd, "text-amber-300"))}
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-fg-faint">Cost</div>
+          {costRows.map(([l, k]) => row(l, k, fmtUsd, "text-warn"))}
         </div>
       )}
     </div>
@@ -129,12 +129,12 @@ function UsageBody({ usage }: { usage: Record<string, number> }) {
 }
 
 function UsageCell({ usage }: { usage: Record<string, number> }) {
-  if (Object.keys(usage).length === 0) return <span className="text-slate-500">—</span>;
+  if (Object.keys(usage).length === 0) return <span className="text-fg-faint">—</span>;
   const icon = <IconBox accent="amber"><span className="text-[10px] font-bold">Σ</span></IconBox>;
   return (
     <Pill
       iconBox={icon}
-      summary={<span className="text-slate-300/90">{usageSummary(usage)}</span>}
+      summary={<span className="text-fg/90">{usageSummary(usage)}</span>}
       panel={(a, c) => (
         <FloatingPanel anchor={a} onClose={c} icon={icon} title="usage" subtitle={usageSummary(usage)} copyText={JSON.stringify(usage, null, 2)}>
           <UsageBody usage={usage} />
@@ -193,10 +193,10 @@ function Attachment({ part }: { part: Exclude<Part, { kind: "text" }> }) {
   const icon = isImg ? (
     <ImageIcon className="h-3.5 w-3.5 shrink-0 text-fuchsia-400" />
   ) : (
-    <FileIcon className="h-3.5 w-3.5 shrink-0 text-sky-400" />
+    <FileIcon className="h-3.5 w-3.5 shrink-0 text-info" />
   );
   const base =
-    "inline-flex max-w-[200px] items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-[11px] text-slate-300";
+    "inline-flex max-w-[200px] items-center gap-1.5 rounded-md border border-line bg-ink-700/60 px-2 py-1 text-[11px] text-fg";
   if (url && /^(https?:|data:)/.test(url)) {
     return (
       <a
@@ -205,11 +205,11 @@ function Attachment({ part }: { part: Exclude<Part, { kind: "text" }> }) {
         rel="noopener noreferrer"
         onClick={(e) => e.stopPropagation()}
         title={`Open ${part.label}`}
-        className={clsx(base, "transition-colors hover:border-slate-500 hover:bg-slate-700/70 hover:text-white")}
+        className={clsx(base, "transition-colors hover:border-line-bright hover:bg-ink-600/70 hover:text-fg")}
       >
         {icon}
         <span className="truncate">{part.label}</span>
-        <ExternalLink className="h-3 w-3 shrink-0 text-slate-500" />
+        <ExternalLink className="h-3 w-3 shrink-0 text-fg-faint" />
       </a>
     );
   }
@@ -223,7 +223,7 @@ function Attachment({ part }: { part: Exclude<Part, { kind: "text" }> }) {
 
 // One message's content value: plain text, multimodal parts (text + image/file chips), or data.
 function ContentParts({ value }: { value: unknown }) {
-  if (value == null || value === "") return <span className="text-slate-500">—</span>;
+  if (value == null || value === "") return <span className="text-fg-faint">—</span>;
   if (typeof value === "string") return <ExpandableText text={value} />;
   if (Array.isArray(value)) {
     const parts = value.map(classifyBlock);
@@ -244,28 +244,28 @@ function ContentParts({ value }: { value: unknown }) {
 }
 
 const ROLE_CHIP: Record<string, string> = {
-  user: "bg-sky-500/10 text-sky-300 border-sky-500/30",
-  assistant: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
-  system: "bg-slate-600/25 text-slate-300 border-slate-600/40",
-  tool: "bg-orange-500/10 text-orange-300 border-orange-500/30",
-  thinking: "bg-violet-500/10 text-violet-300 border-violet-500/30",
+  user: "bg-info/10 text-info border-info/30",
+  assistant: "bg-ok/10 text-ok border-ok/30",
+  system: "bg-line-bright/25 text-fg border-line-bright/40",
+  tool: "bg-t_tool/10 text-t_tool border-t_tool/30",
+  thinking: "bg-t_think/10 text-t_think border-t_think/30",
 };
 function RoleTag({ role }: { role?: string }) {
   const r = (role || "msg").toLowerCase();
   return (
-    <span className={clsx("inline-block shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider", ROLE_CHIP[r] ?? "bg-slate-600/25 text-slate-300 border-slate-600/40")}>
+    <span className={clsx("inline-block shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider", ROLE_CHIP[r] ?? "bg-line-bright/25 text-fg border-line-bright/40")}>
       {r}
     </span>
   );
 }
 // Full (un-clamped) content for the conversation popover: text wraps, attachments as chips, data as JSON.
 function ContentBody({ value }: { value: unknown }) {
-  if (value == null || value === "") return <span className="text-slate-500">—</span>;
+  if (value == null || value === "") return <span className="text-fg-faint">—</span>;
   if (typeof value === "string") {
     const s = value.trim();
     if (/^https?:\/\/\S+$/.test(s)) {
       return (
-        <a href={s} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="break-all text-[12px] leading-relaxed text-cyan-400 underline decoration-cyan-400/40 underline-offset-2 hover:decoration-cyan-400">
+        <a href={s} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="break-all text-[12px] leading-relaxed text-signal underline decoration-signal/40 underline-offset-2 hover:decoration-signal">
           {s}
         </a>
       );
@@ -277,13 +277,13 @@ function ContentBody({ value }: { value: unknown }) {
       const pretty = prettyJson(s);
       if (pretty && pretty !== s) {
         return (
-          <pre className="whitespace-pre-wrap break-words rounded-md border border-slate-700/60 bg-slate-900/50 p-2 font-mono text-[11px] leading-relaxed text-slate-300">
+          <pre className="whitespace-pre-wrap break-words rounded-md border border-line/60 bg-ink-900/50 p-2 font-mono text-[11px] leading-relaxed text-fg">
             <HJson text={pretty} />
           </pre>
         );
       }
     }
-    return <div className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-slate-300">{value}</div>;
+    return <div className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-fg">{value}</div>;
   }
   if (Array.isArray(value)) {
     const parts = value.map(classifyBlock);
@@ -295,13 +295,13 @@ function ContentBody({ value }: { value: unknown }) {
     const media = parts.filter((p): p is Exclude<Part, { kind: "text" }> => p.kind !== "text");
     return (
       <div className="space-y-2">
-        {text && <div className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-slate-300">{text}</div>}
+        {text && <div className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-fg">{text}</div>}
         {media.length > 0 && <div className="flex flex-wrap gap-1.5">{media.map((m, i) => <Attachment key={i} part={m} />)}</div>}
       </div>
     );
   }
   return (
-    <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-slate-300">
+    <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-fg">
       <HJson text={JSON.stringify(value, null, 2)} />
     </pre>
   );
@@ -312,7 +312,7 @@ function ContentBody({ value }: { value: unknown }) {
 function ToolCalls({ calls }: { calls: unknown[] }) {
   return (
     <div className="mt-2 space-y-1.5">
-      <div className="text-[9.5px] uppercase tracking-wider text-slate-500">Tool calls</div>
+      <div className="text-[9.5px] uppercase tracking-wider text-fg-faint">Tool calls</div>
       {calls.map((raw, i) => {
         const c = (raw ?? {}) as Record<string, unknown>;
         const fn = (c.function ?? c) as Record<string, unknown>;
@@ -322,13 +322,13 @@ function ToolCalls({ calls }: { calls: unknown[] }) {
           try { args = JSON.parse(args); } catch { /* keep string */ }
         }
         return (
-          <div key={i} className="rounded-md border border-slate-700/60 bg-slate-900/50 p-2">
-            <div className="flex items-center gap-1.5 font-mono text-[11.5px] font-medium text-violet-300">
+          <div key={i} className="rounded-md border border-line/60 bg-ink-900/50 p-2">
+            <div className="flex items-center gap-1.5 font-mono text-[11.5px] font-medium text-t_think">
               <span className="text-[10px]">⛭</span>
               {name}
             </div>
             {args != null && args !== "" && (
-              <pre className="mt-1 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-slate-300">
+              <pre className="mt-1 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-fg">
                 <HJson text={typeof args === "string" ? args : JSON.stringify(args, null, 2)} />
               </pre>
             )}
@@ -345,16 +345,16 @@ function MessageCard({ m }: { m: ChatMsg }) {
   const finish = typeof m.finish_reason === "string" ? m.finish_reason : null;
   const hasContent = m.content != null && m.content !== "";
   return (
-    <div className="rounded-lg border border-slate-700/60 bg-slate-800/40 p-2.5">
+    <div className="rounded-lg border border-line/60 bg-ink-700/40 p-2.5">
       <div className="mb-1.5 flex items-center gap-2">
         <RoleTag role={m.role} />
         {finish && (
-          <span className="rounded bg-slate-700/50 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-slate-400">{finish}</span>
+          <span className="rounded bg-ink-600/50 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-fg-muted">{finish}</span>
         )}
       </div>
       {hasContent && <ContentBody value={m.content} />}
       {calls.length > 0 && <ToolCalls calls={calls} />}
-      {!hasContent && calls.length === 0 && <span className="text-slate-500">—</span>}
+      {!hasContent && calls.length === 0 && <span className="text-fg-faint">—</span>}
     </div>
   );
 }
@@ -396,11 +396,11 @@ function ChatPill({ msgs }: { msgs: ChatMsg[] }) {
       iconBox={icon}
       summary={
         <span className="flex items-center gap-1.5 truncate">
-          <span className="uppercase text-slate-400">{(last.role || "msg").toString()}</span>
-          {preview && <span className="truncate text-slate-500">{preview}</span>}
+          <span className="uppercase text-fg-muted">{(last.role || "msg").toString()}</span>
+          {preview && <span className="truncate text-fg-faint">{preview}</span>}
         </span>
       }
-      badge={<span className="rounded bg-slate-700/60 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-slate-400">{n}</span>}
+      badge={<span className="rounded bg-ink-600/60 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-fg-muted">{n}</span>}
       panel={(a, c) => (
         <FloatingPanel anchor={a} onClose={c} icon={icon} title="conversation" subtitle={`${n} message${n === 1 ? "" : "s"}`} copyText={JSON.stringify(msgs, null, 2)}>
           <ChatBody msgs={msgs} />
@@ -424,10 +424,10 @@ function TextPill({ text }: { text: string }) {
   return (
     <Pill
       iconBox={icon}
-      summary={<span className="truncate text-slate-300/90">{preview}</span>}
+      summary={<span className="truncate text-fg/90">{preview}</span>}
       panel={(a, c) => (
         <FloatingPanel anchor={a} onClose={c} icon={icon} title="text" subtitle={`${text.length} chars`} copyText={text}>
-          <div className="max-w-full whitespace-pre-wrap break-words p-3 text-[12px] leading-relaxed text-slate-300">{text}</div>
+          <div className="max-w-full whitespace-pre-wrap break-words p-3 text-[12px] leading-relaxed text-fg">{text}</div>
         </FloatingPanel>
       )}
     />
@@ -437,7 +437,7 @@ function TextPill({ text }: { text: string }) {
 // The universal renderer used for every message/step input & output, so the same
 // content reads the same way at any level (and attachments/multi-part work everywhere).
 function MessageContent({ raw }: { raw: string | null }) {
-  if (raw == null || raw === "") return <span className="text-slate-500">—</span>;
+  if (raw == null || raw === "") return <span className="text-fg-faint">—</span>;
   const t = raw.trim();
   let parsed: unknown = null;
   if (t.startsWith("[") || t.startsWith("{")) {
@@ -498,11 +498,11 @@ function MessageContent({ raw }: { raw: string | null }) {
 function TurnMessage({ raw, role }: { raw: string | null; role: "user" | "assistant" }) {
   const msg = useMemo(() => lastTurnMessage(raw, role), [raw, role]);
   if (msg === undefined) return <MessageContent raw={asRoleMessage(role, raw)} />;
-  if (msg === null) return <span className="text-slate-500">—</span>;
+  if (msg === null) return <span className="text-fg-faint">—</span>;
   const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
   if (calls.length > 0) return <ChatPill msgs={[msg]} />; // assistant tool call(s) → keep them visible
   const c = msg.content;
-  if (c == null || c === "" || (Array.isArray(c) && c.length === 0)) return <span className="text-slate-500">—</span>;
+  if (c == null || c === "" || (Array.isArray(c) && c.length === 0)) return <span className="text-fg-faint">—</span>;
   // Render as a chat pill with the role badge — symmetric across user/assistant. Multimodal content
   // (URLs/base64 attachments) survives as the pill's content array and renders in the popover.
   return <ChatPill msgs={[msg]} />;
@@ -510,8 +510,8 @@ function TurnMessage({ raw, role }: { raw: string | null; role: "user" | "assist
 
 // ── badges ──────────────────────────────────────────────────────────────────────
 function RoleBadge({ role }: { role: "user" | "assistant" }) {
-  const cls = role === "user" ? "bg-sky-500/10 text-sky-400 border-sky-500/30" : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
-  const dot = role === "user" ? "bg-sky-400" : "bg-emerald-400";
+  const cls = role === "user" ? "bg-info/10 text-info border-info/30" : "bg-ok/10 text-ok border-ok/30";
+  const dot = role === "user" ? "bg-info" : "bg-ok";
   return (
     <span className={clsx("inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-semibold uppercase", cls)}>
       <span className={clsx("h-1.5 w-1.5 rounded-full", dot)} />
@@ -522,7 +522,7 @@ function RoleBadge({ role }: { role: "user" | "assistant" }) {
 
 function AgentBadge({ agent }: { agent: string }) {
   return (
-    <span className="inline-flex max-w-full items-center truncate rounded border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[11px] font-medium text-indigo-300" title={agent}>
+    <span className="inline-flex max-w-full items-center truncate rounded border border-t_agent/30 bg-t_agent/10 px-2 py-0.5 text-[11px] font-medium text-t_agent" title={agent}>
       {agent}
     </span>
   );
@@ -531,7 +531,7 @@ function AgentBadge({ agent }: { agent: string }) {
 // What this row wrote to the shared state object, as the object itself — rendered by the same
 // JsonPill the Input/Output columns use, so it previews inline and expands to the full JSON.
 function StateCell({ writes }: { writes: Record<string, unknown> | null }) {
-  if (!writes) return <span className="text-slate-500">—</span>;
+  if (!writes) return <span className="text-fg-faint">—</span>;
   return <JsonPill raw={JSON.stringify(writes)} />;
 }
 
@@ -573,8 +573,8 @@ function useCtrlCount(): number {
 function ConvTitleCell({ conv }: { conv: ConvNode }) {
   const href = conv.turns > 1 ? `/sessions/${conv.thread}` : `/traces/${conv.last_trace_id}`;
   return (
-    <a href={href} className="flex max-w-full items-center gap-2 text-sm font-medium text-slate-200 transition-colors hover:text-white" title={conv.thread}>
-      <span className={clsx("h-1.5 w-1.5 shrink-0 rounded-full", conv.failing ? "bg-rose-500" : "bg-emerald-500/70")} />
+    <a href={href} className="flex max-w-full items-center gap-2 text-sm font-medium text-fg transition-colors hover:text-fg" title={conv.thread}>
+      <span className={clsx("h-1.5 w-1.5 shrink-0 rounded-full", conv.failing ? "bg-fail" : "bg-ok/70")} />
       <span className="truncate hover:underline">{deriveTitle(conv.first_input)}</span>
     </a>
   );
@@ -678,7 +678,7 @@ function RollingSummaryCell({
     kind === "conversation" ? (thread ? rs.conversations[thread] : undefined)
     : kind === "trace" ? (id ? rs.traces[id] : undefined)
     : id ? rs.spans[id] : undefined;
-  if (val === undefined) return <span className="text-slate-600">…</span>; // not generated/loaded yet
+  if (val === undefined) return <span className="text-fg-faint">…</span>; // not generated/loaded yet
   const hasContent = Array.isArray(val) && val.length > 0;
   if (!hasContent) {
     // Loaded but empty. At conversation level offer an inline generate (summaries are thread-scoped,
@@ -689,13 +689,13 @@ function RollingSummaryCell({
         <button
           onClick={() => rs.generate(thread)}
           disabled={busy}
-          className="font-mono text-[11px] text-slate-500 transition-colors hover:text-cyan-400 disabled:opacity-50"
+          className="font-mono text-[11px] text-fg-faint transition-colors hover:text-signal disabled:opacity-50"
         >
           {busy ? "generating…" : "generate"}
         </button>
       );
     }
-    return <span className="text-slate-500">—</span>;
+    return <span className="text-fg-faint">—</span>;
   }
   // The full accumulated summary object, as JSON — no truncation (JsonPill previews + expands).
   return <JsonPill raw={JSON.stringify(val)} />;
@@ -709,7 +709,7 @@ function VerdictChip({ verdict }: { verdict: string }) {
     <span
       className={clsx(
         "inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wider",
-        ok ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400" : "border-rose-500/30 bg-rose-500/10 text-rose-400",
+        ok ? "border-ok/30 bg-ok/10 text-ok" : "border-fail/30 bg-fail/10 text-fail",
       )}
     >
       {verdict}
@@ -718,8 +718,8 @@ function VerdictChip({ verdict }: { verdict: string }) {
 }
 
 const EvalSpinner = () => (
-  <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500">
-    <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" />
+  <span className="inline-flex items-center gap-1.5 text-[11px] text-fg-faint">
+    <span className="h-3 w-3 animate-spin rounded-full border-2 border-line border-t-signal" />
     evaluating
   </span>
 );
@@ -751,7 +751,7 @@ function EvalScorePill({ score, evaluator, busy }: { score: EvalScore; evaluator
       {val ? (
         <Pill
           iconBox={icon}
-          summary={<span className="text-slate-300/90">{val.length > 16 ? `${val.slice(0, 16).trimEnd()}…` : val}</span>}
+          summary={<span className="text-fg/90">{val.length > 16 ? `${val.slice(0, 16).trimEnd()}…` : val}</span>}
           panel={(a, c) => (
             <FloatingPanel
               anchor={a}
@@ -762,15 +762,15 @@ function EvalScorePill({ score, evaluator, busy }: { score: EvalScore; evaluator
               copyText={JSON.stringify(score, null, 2)}
             >
               <div className="space-y-2 p-3 text-[12px]">
-                {evaluator.description && <p className="text-slate-500">{evaluator.description}</p>}
+                {evaluator.description && <p className="text-fg-faint">{evaluator.description}</p>}
                 {rows.map(([k, v]) => (
                   <div key={k} className="flex items-start justify-between gap-4">
-                    <span className="shrink-0 text-slate-400">{k}</span>
+                    <span className="shrink-0 text-fg-muted">{k}</span>
                     <span
                       className={clsx(
                         "whitespace-pre-wrap break-words font-mono text-[11.5px]",
                         k === "Output" ? "text-left" : "text-right",
-                        k === "Verdict" ? (v === "FAIL" ? "text-rose-400" : "text-emerald-400") : "text-slate-200",
+                        k === "Verdict" ? (v === "FAIL" ? "text-fail" : "text-ok") : "text-fg",
                       )}
                     >
                       {v}
@@ -826,7 +826,7 @@ function EvalColumnCell({ evaluator, ctx }: { evaluator: EvaluatorDef; ctx: RowC
     score = live ?? ctx.turn.scores?.find((s) => s.name === name && s.observation_id === ctx.span.span_id);
     busy = busy || view.busyRows.has(`tr:${ctx.turn.trace_id}`);
   }
-  if (!score) return busy ? <EvalSpinner /> : <span className="text-slate-500">—</span>;
+  if (!score) return busy ? <EvalSpinner /> : <span className="text-fg-faint">—</span>;
   return <EvalScorePill score={score} evaluator={evaluator} busy={busy} />;
 }
 
@@ -844,14 +844,14 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
       return ctx.level === "C" ? <ConvTitleCell conv={ctx.conv} /> : null;
     case "ctime":
       return ctx.level === "C"
-        ? <span className="font-mono text-xs text-slate-400">{fmtDateTime(ctx.conv.first_ts)}</span>
+        ? <span className="font-mono text-xs text-fg-muted">{fmtDateTime(ctx.conv.first_ts)}</span>
         : null;
     case "cdur": {
       if (ctx.level !== "C") return null;
       const durMs = ctx.conv.first_ts
         ? new Date(ctx.conv.last_ts).getTime() - new Date(ctx.conv.first_ts).getTime()
         : null;
-      return <span className="font-mono text-xs tabular-nums text-slate-400">{fmtMs(durMs)}</span>;
+      return <span className="font-mono text-xs tabular-nums text-fg-muted">{fmtMs(durMs)}</span>;
     }
     case "crsummary":
       return ctx.level === "C" ? <RollingSummaryCell thread={ctx.conv.thread} kind="conversation" /> : null;
@@ -862,7 +862,7 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
         ctx.conv.metadata && Object.keys(ctx.conv.metadata).length
           ? ctx.conv.metadata
           : mergeMeta((ctx.conv.turnsData ?? []).flatMap((t) => t.spans));
-      return Object.keys(m).length ? <JsonPill raw={JSON.stringify(m)} /> : <span className="text-slate-500">—</span>;
+      return Object.keys(m).length ? <JsonPill raw={JSON.stringify(m)} /> : <span className="text-fg-faint">—</span>;
     }
     case "cusage":
       return ctx.level === "C" ? <UsageCell usage={convUsage(ctx.conv)} /> : null;
@@ -872,18 +872,18 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
       const failed = ctx.role === "assistant" && (ctx.turn.verdict === "FAIL" || ctx.turn.failing === 1);
       return (
         <span className="flex items-center gap-1.5">
-          {failed && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" title="failing" />}
+          {failed && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-fail" title="failing" />}
           <RoleBadge role={ctx.role} />
         </span>
       );
     }
     case "mindex":
-      return ctx.level === "M" ? <span className="font-mono text-xs tabular-nums text-slate-500">{ctx.index}</span> : null;
+      return ctx.level === "M" ? <span className="font-mono text-xs tabular-nums text-fg-faint">{ctx.index}</span> : null;
     case "mtime":
-      return ctx.level === "M" ? <span className="font-mono text-xs text-slate-400">{fmtDateTime(ctx.turn.ts)}</span> : null;
+      return ctx.level === "M" ? <span className="font-mono text-xs text-fg-muted">{fmtDateTime(ctx.turn.ts)}</span> : null;
     case "mdur":
       return ctx.level === "M" && ctx.role === "assistant"
-        ? <span className="font-mono text-xs tabular-nums text-slate-400">{fmtMs(ctx.turn.latency_ms)}</span>
+        ? <span className="font-mono text-xs tabular-nums text-fg-muted">{fmtMs(ctx.turn.latency_ms)}</span>
         : null;
     case "content":
       return ctx.level === "M" ? <TurnMessage raw={ctx.role === "user" ? ctx.turn.input : ctx.turn.output} role={ctx.role} /> : null;
@@ -899,13 +899,13 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
       return ctx.level === "M" && ctx.role === "assistant" ? <UsageCell usage={turnUsage(ctx.turn)} /> : null;
     // S group
     case "sindex":
-      return ctx.level === "S" ? <span className="font-mono text-xs tabular-nums text-slate-500">{ctx.index}</span> : null;
+      return ctx.level === "S" ? <span className="font-mono text-xs tabular-nums text-fg-faint">{ctx.index}</span> : null;
     case "type":
       return ctx.level === "S" ? <TypeChip type={ctx.span.type} /> : null;
     case "stime":
-      return ctx.level === "S" ? <span className="font-mono text-xs text-slate-400">{fmtDateTime(ctx.span.start_time)}</span> : null;
+      return ctx.level === "S" ? <span className="font-mono text-xs text-fg-muted">{fmtDateTime(ctx.span.start_time)}</span> : null;
     case "sdur":
-      return ctx.level === "S" ? <span className="font-mono text-xs tabular-nums text-slate-400">{fmtMs(durationMs(ctx.span))}</span> : null;
+      return ctx.level === "S" ? <span className="font-mono text-xs tabular-nums text-fg-muted">{fmtMs(durationMs(ctx.span))}</span> : null;
     case "agent": {
       if (ctx.level !== "S") return null;
       const label = nearestAgentLabel(ctx.span, ctx.turn.spans ?? []);
@@ -970,7 +970,7 @@ function RowRunButton({ ctx }: { ctx: RowCtx }) {
   if (busy) {
     return (
       <span className="inline-flex h-6 w-6 items-center justify-center" title="Evaluating…">
-        <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" />
+        <span className="h-3 w-3 animate-spin rounded-full border-2 border-line border-t-signal" />
       </span>
     );
   }
@@ -982,10 +982,10 @@ function RowRunButton({ ctx }: { ctx: RowCtx }) {
         if (ctx.level === "C") view.runThread(ctx.conv.thread);
         else view.runTrace(ctx.turn.trace_id);
       }}
-      className="inline-flex h-6 w-6 items-center justify-center rounded-lg opacity-0 transition-opacity hover:bg-slate-700 group-hover:opacity-100"
+      className="inline-flex h-6 w-6 items-center justify-center rounded-lg opacity-0 transition-opacity hover:bg-ink-600 group-hover:opacity-100"
       title={ctx.level === "C" ? "Run all evaluations for this conversation" : "Run all evaluations for this turn"}
     >
-      <Play className="h-3 w-3 text-slate-400" />
+      <Play className="h-3 w-3 text-fg-muted" />
     </button>
   );
 }
@@ -1032,7 +1032,7 @@ function DataRow({
             }
       }
       className={clsx(
-        "group border-b border-l-2 border-slate-800 transition-colors hover:bg-slate-800/80",
+        "group border-b border-l-2 border-line-soft transition-colors hover:bg-ink-700/80",
         !isStep && "cursor-pointer",
         ROW_BG[depth],
       )}
@@ -1050,8 +1050,8 @@ function DataRow({
       )}
       <td style={CTRL} className="px-2 py-2 align-top first:pl-2 sm:px-3 sm:first:pl-4">
         {canExpand ? (
-          <button onClick={onToggle} className="rounded p-1 transition-colors hover:bg-slate-700" aria-label={open ? "Collapse" : "Expand"}>
-            <ChevronR className={clsx("h-4 w-4 text-slate-400 transition-transform", open && "rotate-90")} />
+          <button onClick={onToggle} className="rounded p-1 transition-colors hover:bg-ink-600" aria-label={open ? "Collapse" : "Expand"}>
+            <ChevronR className={clsx("h-4 w-4 text-fg-muted transition-transform", open && "rotate-90")} />
           </button>
         ) : (
           <div className="w-4" />
@@ -1068,10 +1068,10 @@ function DataRow({
               e.stopPropagation();
               onShowAgents?.(ctx.conv.thread);
             }}
-            className="inline-flex h-6 w-6 items-center justify-center rounded-lg opacity-0 transition-opacity hover:bg-slate-700 group-hover:opacity-100"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-lg opacity-0 transition-opacity hover:bg-ink-600 group-hover:opacity-100"
             title={`View ${agentCount ?? 1} agent${(agentCount ?? 1) === 1 ? "" : "s"}`}
           >
-            <Bot className="h-3 w-3 text-slate-400" />
+            <Bot className="h-3 w-3 text-fg-muted" />
           </button>
         ) : null}
       </td>
@@ -1080,8 +1080,8 @@ function DataRow({
           key={col.key}
           style={{ width: col.width, minWidth: 80 }}
           className={clsx(
-            "px-2 py-2 align-top text-sm text-slate-300 sm:px-3",
-            (col.evaluator || (i > 0 && cols[i - 1].group !== col.group)) && "border-l border-slate-600/50",
+            "px-2 py-2 align-top text-sm text-fg sm:px-3",
+            (col.evaluator || (i > 0 && cols[i - 1].group !== col.group)) && "border-l border-line-bright/50",
             col.tint?.td,
           )}
         >
@@ -1195,10 +1195,10 @@ function ConvRows({
 
 function LoadingTr({ cols }: { cols: Col[] }) {
   return (
-    <tr className="border-b border-slate-800 bg-slate-800/20">
-      <td colSpan={useCtrlCount() + cols.length} className="px-6 py-3 text-sm text-slate-500">
+    <tr className="border-b border-line-soft bg-ink-700/20">
+      <td colSpan={useCtrlCount() + cols.length} className="px-6 py-3 text-sm text-fg-faint">
         <span className="inline-flex items-center gap-2">
-          <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-700 border-t-slate-400" />
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-line border-t-fg-muted" />
           loading…
         </span>
       </td>
@@ -1208,8 +1208,8 @@ function LoadingTr({ cols }: { cols: Col[] }) {
 
 function EmptyTr({ cols, text }: { cols: Col[]; text: string }) {
   return (
-    <tr className="border-b border-slate-800 bg-slate-800/20">
-      <td colSpan={useCtrlCount() + cols.length} className="px-6 py-3 text-sm text-slate-500">
+    <tr className="border-b border-line-soft bg-ink-700/20">
+      <td colSpan={useCtrlCount() + cols.length} className="px-6 py-3 text-sm text-fg-faint">
         {text}
       </td>
     </tr>
@@ -1228,19 +1228,19 @@ function ColumnsMenu({ all, hidden, cost, onToggle, onClose }: { all: Col[]; hid
   return (
     <>
       <div className="fixed inset-0 z-20" onClick={onClose} />
-      <div className="absolute right-0 top-full z-30 mt-1 w-64 rounded-lg border border-slate-700 bg-slate-900 p-2 shadow-xl shadow-slate-900/50">
-        <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-slate-500">Toggle columns · judge cost (30d)</div>
+      <div className="absolute right-0 top-full z-30 mt-1 w-64 rounded-lg border border-line bg-ink-900 p-2 shadow-xl shadow-ink-950/50">
+        <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-fg-faint">Toggle columns · judge cost (30d)</div>
         <div className="max-h-72 overflow-auto">
           {all.map((col) => {
             const c = col.evaluator ? cost[col.evaluator.score_name] : undefined;
             return (
-              <label key={col.key} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
-                <input type="checkbox" checked={!hidden.has(col.key)} onChange={() => onToggle(col.key)} className="accent-cyan-500" />
+              <label key={col.key} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-fg hover:bg-ink-700">
+                <input type="checkbox" checked={!hidden.has(col.key)} onChange={() => onToggle(col.key)} className="accent-signal" />
                 <span className="truncate">{col.label}</span>
-                {col.evaluator && <span className="rounded bg-cyan-500/15 px-1 text-[9px] font-medium uppercase text-cyan-300">eval</span>}
+                {col.evaluator && <span className="rounded bg-signal/15 px-1 text-[9px] font-medium uppercase text-signal">eval</span>}
                 {c && (
                   <span
-                    className="rounded bg-slate-700/60 px-1 font-mono text-[9px] text-slate-400"
+                    className="rounded bg-ink-600/60 px-1 font-mono text-[9px] text-fg-muted"
                     title={`${c.runs} run(s) · ${c.total_tokens.toLocaleString()} tokens · ${fmtCostCents(c.cost_usd_cents)} over 30d${c.model ? ` · ${c.model}` : ""}`}
                   >
                     {fmtCostCents(c.cost_usd_cents)} · {fmtTokens(c.total_tokens)}
@@ -1262,19 +1262,19 @@ function TypesMenu({ types, hidden, onToggle, onReset, onClose }: { types: strin
   return (
     <>
       <div className="fixed inset-0 z-20" onClick={onClose} />
-      <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-lg border border-slate-700 bg-slate-900 p-2 shadow-xl shadow-slate-900/50">
-        <div className="flex items-center justify-between px-2 py-1 text-[10px] uppercase tracking-wider text-slate-500">
+      <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-lg border border-line bg-ink-900 p-2 shadow-xl shadow-ink-950/50">
+        <div className="flex items-center justify-between px-2 py-1 text-[10px] uppercase tracking-wider text-fg-faint">
           <span>Filter step types</span>
           {hidden.size > 0 && (
-            <button onClick={onReset} className="rounded px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-cyan-400 hover:bg-slate-800 hover:text-cyan-300" title="Show all types">
+            <button onClick={onReset} className="rounded px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-signal hover:bg-ink-700 hover:text-signal" title="Show all types">
               Reset
             </button>
           )}
         </div>
         <div className="max-h-72 overflow-auto">
           {types.map((t) => (
-            <label key={t} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
-              <input type="checkbox" checked={!hidden.has(t)} onChange={() => onToggle(t)} className="accent-cyan-500" />
+            <label key={t} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-fg hover:bg-ink-700">
+              <input type="checkbox" checked={!hidden.has(t)} onChange={() => onToggle(t)} className="accent-signal" />
               <TypeChip type={t} />
             </label>
           ))}
@@ -1295,12 +1295,12 @@ function HeaderEvalControls({ evaluator }: { evaluator: EvaluatorDef }) {
     <span className="ml-0.5 inline-flex items-center">
       {busy ? (
         <span className="inline-flex h-5 w-5 items-center justify-center" title="Evaluating…">
-          <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" />
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-line border-t-signal" />
         </span>
       ) : (
         <button
           onClick={() => view.runColumn(evaluator)}
-          className="inline-flex h-5 w-5 items-center justify-center rounded text-emerald-400 transition-colors hover:bg-slate-700 hover:text-emerald-300"
+          className="inline-flex h-5 w-5 items-center justify-center rounded text-ok transition-colors hover:bg-ink-600 hover:text-ok"
           title={`Run "${evaluator.name}" on all loaded rows`}
         >
           <Play className="h-3 w-3" />
@@ -1309,7 +1309,7 @@ function HeaderEvalControls({ evaluator }: { evaluator: EvaluatorDef }) {
       <span className="relative">
         <button
           onClick={() => setMenu((o) => !o)}
-          className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-500 transition-colors hover:bg-slate-700 hover:text-slate-300"
+          className="inline-flex h-5 w-5 items-center justify-center rounded text-fg-faint transition-colors hover:bg-ink-600 hover:text-fg"
           title="Column options"
         >
           <DotsIcon className="h-3 w-3" />
@@ -1317,19 +1317,19 @@ function HeaderEvalControls({ evaluator }: { evaluator: EvaluatorDef }) {
         {menu && (
           <>
             <span className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
-            <span className="absolute right-0 top-full z-30 mt-1 block w-36 overflow-hidden rounded-lg border border-slate-700 bg-slate-900 py-1 shadow-xl shadow-slate-900/50">
+            <span className="absolute right-0 top-full z-30 mt-1 block w-36 overflow-hidden rounded-lg border border-line bg-ink-900 py-1 shadow-xl shadow-ink-950/50">
               {!evaluator.enabled && (
-                <span className="block px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-amber-400/80">auto-run off</span>
+                <span className="block px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-warn/80">auto-run off</span>
               )}
               <button
                 onClick={() => { setMenu(false); view.editColumn(evaluator); }}
-                className="block w-full px-3 py-1.5 text-left text-xs font-normal normal-case tracking-normal text-slate-300 hover:bg-slate-800"
+                className="block w-full px-3 py-1.5 text-left text-xs font-normal normal-case tracking-normal text-fg hover:bg-ink-700"
               >
                 Edit column
               </button>
               <button
                 onClick={() => { setMenu(false); view.removeColumn(evaluator); }}
-                className="block w-full px-3 py-1.5 text-left text-xs font-normal normal-case tracking-normal text-rose-400 hover:bg-slate-800"
+                className="block w-full px-3 py-1.5 text-left text-xs font-normal normal-case tracking-normal text-fail hover:bg-ink-700"
               >
                 Delete column
               </button>
@@ -1344,7 +1344,7 @@ function HeaderEvalControls({ evaluator }: { evaluator: EvaluatorDef }) {
 function HeaderRow({ cols }: { cols: Col[] }) {
   const sel = useContext(SelectContext);
   return (
-    <tr className="border-b border-slate-700 bg-slate-800">
+    <tr className="border-b border-line bg-ink-700">
       {sel.enabled && (
         <th style={CTRL} className={HEAD_TH}>
           <SelectBox
@@ -1364,7 +1364,7 @@ function HeaderRow({ cols }: { cols: Col[] }) {
           style={{ width: col.width, minWidth: 80 }}
           className={clsx(
             HEAD_TH,
-            (col.evaluator || (i > 0 && cols[i - 1].group !== col.group)) && "border-l border-slate-600/60",
+            (col.evaluator || (i > 0 && cols[i - 1].group !== col.group)) && "border-l border-line-bright/60",
             col.tint?.th,
           )}
         >
@@ -1771,11 +1771,11 @@ export function TraceTable({
       <SelectContext.Provider value={selectView}>
       <div
         style={!embedded && wide ? WIDE_STYLE : undefined}
-        className="overflow-hidden rounded-lg border border-slate-700 transition-[width,margin] duration-200"
+        className="overflow-hidden rounded-lg border border-line transition-[width,margin] duration-200"
       >
-        <div className="flex items-center justify-between border-b border-slate-700 bg-slate-800/50 px-4 py-2">
+        <div className="flex items-center justify-between border-b border-line bg-ink-700/50 px-4 py-2">
           <div className="flex items-center gap-1">
-            <button onClick={toggleAll} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-white">
+            <button onClick={toggleAll} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-fg-muted transition-colors hover:bg-ink-700 hover:text-fg">
               <ChevronsUpDown className="h-3.5 w-3.5" />
               <span>{allOpen ? "Collapse All" : "Expand All"}</span>
             </button>
@@ -1783,21 +1783,21 @@ export function TraceTable({
               <button
                 onClick={runAllEvals}
                 disabled={anyRunning}
-                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-emerald-300 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-fg-muted transition-colors hover:bg-ink-700 hover:text-ok disabled:opacity-50"
                 title="Run every evaluation column on all loaded rows"
               >
                 {anyRunning ? (
-                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-700 border-t-emerald-400" />
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-line border-t-ok" />
                 ) : (
-                  <Play className="h-3.5 w-3.5 text-emerald-400" />
+                  <Play className="h-3.5 w-3.5 text-ok" />
                 )}
                 <span>Run evals</span>
               </button>
             )}
             {selectView.enabled && selected.size > 0 && (
               <>
-                <span className="ml-1 h-5 w-px bg-slate-700" aria-hidden />
-                <span className="px-1 font-mono text-[11px] text-slate-500">{selected.size} selected</span>
+                <span className="ml-1 h-5 w-px bg-ink-600" aria-hidden />
+                <span className="px-1 font-mono text-[11px] text-fg-faint">{selected.size} selected</span>
                 <button
                   onClick={() => void deleteSelected()}
                   disabled={deleting}
@@ -1809,7 +1809,7 @@ export function TraceTable({
                 </button>
                 <button
                   onClick={() => setSelected(new Set())}
-                  className="rounded-lg px-2 py-1.5 text-xs text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-300"
+                  className="rounded-lg px-2 py-1.5 text-xs text-fg-faint transition-colors hover:bg-ink-700 hover:text-fg"
                 >
                   Clear
                 </button>
@@ -1829,15 +1829,15 @@ export function TraceTable({
             )}
             {!embedded && <WideToggle wide={wide} onToggle={() => setWide(!wide)} />}
             <div className="relative">
-              <button onClick={() => setTypeMenu((o) => !o)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-white" title="Filter step types">
+              <button onClick={() => setTypeMenu((o) => !o)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-fg-muted transition-colors hover:bg-ink-700 hover:text-fg" title="Filter step types">
                 <FilterIcon className="h-3.5 w-3.5" />
                 <span>Types</span>
-                {hiddenTypes.size > 0 && <span className="rounded bg-cyan-500/20 px-1.5 text-[10px] font-medium text-cyan-300">{hiddenTypes.size}</span>}
+                {hiddenTypes.size > 0 && <span className="rounded bg-signal/20 px-1.5 text-[10px] font-medium text-signal">{hiddenTypes.size}</span>}
               </button>
               {typeMenu && <TypesMenu types={spanTypes} hidden={hiddenTypes} onToggle={toggleType} onReset={resetTypes} onClose={() => setTypeMenu(false)} />}
             </div>
             <div className="relative">
-              <button onClick={() => setColMenu((o) => !o)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-white" title="Manage Column Visibility">
+              <button onClick={() => setColMenu((o) => !o)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-fg-muted transition-colors hover:bg-ink-700 hover:text-fg" title="Manage Column Visibility">
                 <Eye className="h-3.5 w-3.5" />
                 <span>Columns</span>
               </button>
@@ -1847,9 +1847,9 @@ export function TraceTable({
         </div>
 
         {runError && (
-          <div className="flex items-center justify-between gap-3 border-b border-rose-500/20 bg-rose-500/[0.06] px-4 py-2 text-[12px] text-rose-300">
+          <div className="flex items-center justify-between gap-3 border-b border-fail/20 bg-fail/[0.06] px-4 py-2 text-[12px] text-fail">
             <span className="truncate">{runError}</span>
-            <button onClick={() => setRunError("")} className="shrink-0 rounded px-1.5 text-rose-400 hover:bg-rose-500/10" aria-label="Dismiss">
+            <button onClick={() => setRunError("")} className="shrink-0 rounded px-1.5 text-fail hover:bg-fail/10" aria-label="Dismiss">
               ✕
             </button>
           </div>
@@ -1863,7 +1863,7 @@ export function TraceTable({
             <tbody>
               {conversations.length === 0 ? (
                 <tr>
-                  <td colSpan={3 + (selectView.enabled ? 1 : 0) + cols.length} className="px-6 py-14 text-center text-sm text-slate-500">
+                  <td colSpan={3 + (selectView.enabled ? 1 : 0) + cols.length} className="px-6 py-14 text-center text-sm text-fg-faint">
                     No conversations.
                   </td>
                 </tr>

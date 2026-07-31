@@ -40,7 +40,7 @@ export function DeleteCaseButton({ caseId, title }: { caseId: string; title: str
         {busy ? "Deleting…" : "Delete case"}
       </button>
       {err && (
-        <p role="alert" className="text-[12px] text-rose-400">
+        <p role="alert" className="text-[12px] text-fail">
           {err}
         </p>
       )}
