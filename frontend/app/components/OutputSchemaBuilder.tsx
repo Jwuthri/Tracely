@@ -175,7 +175,7 @@ export function OutputSchemaBuilder({
                   type="checkbox"
                   checked={row.required}
                   onChange={(e) => patchRow(row.id, { required: e.target.checked })}
-                  className="accent-blue-500"
+                  className="accent-info"
                 />
                 Req
               </label>

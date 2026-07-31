@@ -83,18 +83,18 @@ export function VariableAutocomplete({
             onMouseEnter={() => onHover(i)}
             className={clsx(
               "flex w-full items-start gap-2.5 px-2.5 py-1.5 text-left transition-colors",
-              active ? "bg-emerald-500/15" : "hover:bg-ink-700/60",
+              active ? "bg-ok/15" : "hover:bg-ink-700/60",
             )}
           >
             <span className={clsx(
               "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded",
-              active ? "bg-emerald-500/20 text-emerald-300" : "bg-ink-700 text-fg-faint",
+              active ? "bg-ok/20 text-ok" : "bg-ink-700 text-fg-faint",
             )}>
               {it.isObject ? <BracesIcon className="h-3 w-3" /> : <HashIcon className="h-3 w-3" />}
             </span>
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-1.5">
-                <span className={clsx("font-mono text-[12px] font-semibold", active ? "text-emerald-300" : "text-emerald-400")}>
+                <span className={clsx("font-mono text-[12px] font-semibold", active ? "text-ok" : "text-ok")}>
                   {prefix}{it.name}
                 </span>
                 {it.isObject && (

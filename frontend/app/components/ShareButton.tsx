@@ -49,7 +49,7 @@ export function ShareButton({ threadId }: { threadId: string }) {
         type="button"
         onClick={() => (url ? copy(url) : mint())}
         disabled={busy}
-        className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-[12px] text-fg-muted transition-colors hover:border-signal/40 hover:text-fg disabled:opacity-50"
+        className="btn-ghost"
       >
         {copied ? <IconCheck className="h-3.5 w-3.5 text-ok" /> : <IconCopy className="h-3.5 w-3.5" />}
         {busy ? "Creating…" : copied ? "Link copied" : url ? "Copy link" : "Share"}

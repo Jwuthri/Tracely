@@ -75,7 +75,7 @@ export function WipeDataPanel() {
         </div>
 
         {err && (
-          <p role="alert" className="text-[12.5px] text-rose-400">
+          <p role="alert" className="text-[12.5px] text-fail">
             {err}
           </p>
         )}

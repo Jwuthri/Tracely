@@ -50,7 +50,7 @@ export function WideToggle({ wide, onToggle }: { wide: boolean; onToggle: () => 
   return (
     <button
       onClick={onToggle}
-      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
+      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-fg-muted transition-colors hover:bg-ink-700 hover:text-fg"
       title={wide ? "Fit to content" : "Expand to full width"}
     >
       {wide ? (

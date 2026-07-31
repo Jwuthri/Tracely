@@ -92,7 +92,7 @@ export default async function TracePage({ params }: { params: Promise<{ traceId:
               {usage.cached_tokens ? <span>{usage.cached_tokens.toLocaleString("en-US")} cached</span> : null}
               {usage.output_tokens ? <span>{usage.output_tokens.toLocaleString("en-US")} out</span> : null}
               {usage.total_tokens ? <span>{usage.total_tokens.toLocaleString("en-US")} tokens</span> : null}
-              {usage.cost ? <span className="text-amber-300/90">{fmtUsd(usage.cost)}</span> : null}
+              {usage.cost ? <span className="text-warn/90">{fmtUsd(usage.cost)}</span> : null}
             </div>
           </div>
           {failing && <PromoteButton traceId={traceId} />}

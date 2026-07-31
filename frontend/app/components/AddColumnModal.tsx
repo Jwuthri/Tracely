@@ -68,19 +68,19 @@ const LEVEL_OPTIONS: { value: EvaluatorLevel; label: string; hint: string }[] = 
 // Color palette matching the table's level badge / row depth system.
 const LEVEL_COLORS: Record<string, { active: string; dot: string; lborder: string }> = {
   CONVERSATION: {
-    active:  "border-blue-500/50 bg-blue-500/12 text-blue-300",
-    dot:     "bg-blue-400",
-    lborder: "border-l-blue-500",
+    active:  "border-info/50 bg-info/12 text-info",
+    dot:     "bg-info",
+    lborder: "border-l-info",
   },
   AGENT_RUN: {
-    active:  "border-green-500/50 bg-green-500/12 text-green-300",
-    dot:     "bg-green-400",
-    lborder: "border-l-green-500",
+    active:  "border-ok/50 bg-ok/12 text-ok",
+    dot:     "bg-ok",
+    lborder: "border-l-ok",
   },
   SPAN: {
-    active:  "border-purple-500/50 bg-purple-500/12 text-purple-300",
-    dot:     "bg-purple-400",
-    lborder: "border-l-purple-500",
+    active:  "border-t_think/50 bg-t_think/12 text-t_think",
+    dot:     "bg-t_think",
+    lborder: "border-l-t_think",
   },
 };
 const STEP_LABELS: Record<Step, string> = {
@@ -479,9 +479,9 @@ export function AddColumnModal({
               {/* Browse Library — primary full-width card */}
               <button
                 onClick={() => setStep("library")}
-                className="group flex w-full items-center gap-3 rounded-lg border border-line-bright/60 bg-ink-700/50 p-4 text-left transition-colors hover:border-emerald-500/40 hover:bg-ink-600/50"
+                className="group flex w-full items-center gap-3 rounded-lg border border-line-bright/60 bg-ink-700/50 p-4 text-left transition-colors hover:border-ok/40 hover:bg-ink-600/50"
               >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-ok/15 text-ok">
                   <BookIcon className="h-4.5 w-4.5" />
                 </span>
                 <span className="min-w-0">
@@ -516,11 +516,11 @@ export function AddColumnModal({
                   className={clsx(
                     "group flex flex-col items-center gap-2.5 rounded-lg border p-5 text-center transition-colors",
                     aiOpen
-                      ? "border-violet-500/50 bg-violet-500/[0.07]"
+                      ? "border-t_think/50 bg-t_think/[0.07]"
                       : "border-line bg-ink-700/40 hover:border-line-bright hover:bg-ink-600/50",
                   )}
                 >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-500/15 text-violet-400">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-t_think/15 text-t_think">
                     <SparklesIcon className="h-5 w-5" />
                   </span>
                   <span>
@@ -531,7 +531,7 @@ export function AddColumnModal({
               </div>
 
               {aiOpen && (
-                <div className="space-y-3 rounded-lg border border-violet-500/20 bg-ink-900/60 p-4">
+                <div className="space-y-3 rounded-lg border border-t_think/20 bg-ink-900/60 p-4">
                   <label className="block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">Describe your metric</label>
                   <textarea
                     autoFocus
@@ -540,7 +540,7 @@ export function AddColumnModal({
                     onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && aiText.trim()) void runGenerate(); }}
                     rows={4}
                     placeholder="e.g., Check if the assistant's response is helpful and addresses the user's question. I want to evaluate accuracy, completeness, and tone."
-                    className="w-full resize-y rounded-lg border border-line bg-ink-900/80 px-3 py-2 text-[12.5px] text-fg placeholder:text-fg-faint/60 focus:border-violet-500/40 focus:outline-none"
+                    className="w-full resize-y rounded-lg border border-line bg-ink-900/80 px-3 py-2 text-[12.5px] text-fg placeholder:text-fg-faint/60 focus:border-t_think/40 focus:outline-none"
                   />
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] text-fg-faint/60">⌘ Enter to generate</span>
@@ -551,10 +551,10 @@ export function AddColumnModal({
                       <button
                         onClick={() => void runGenerate()}
                         disabled={aiBusy || !aiText.trim()}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3.5 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-t_think px-3.5 py-1.5 text-[12px] font-medium text-fg transition-colors hover:bg-t_think disabled:opacity-50"
                       >
                         {aiBusy ? (
-                          <span className="h-3 w-3 animate-spin rounded-full border-2 border-violet-300/40 border-t-white" />
+                          <span className="h-3 w-3 animate-spin rounded-full border-2 border-t_think/40 border-t-white" />
                         ) : (
                           <SparklesIcon className="h-3.5 w-3.5" />
                         )}
@@ -603,13 +603,13 @@ export function AddColumnModal({
                           </span>
                           <span className="flex shrink-0 items-center gap-1.5">
                             {t.config?.output_type === "json" && (
-                              <span className="rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-sky-400">Schema</span>
+                              <span className="rounded border border-info/30 bg-info/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-info">Schema</span>
                             )}
                             {t.kind === "llm_judge" && (
-                              <span className="rounded border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-violet-400">LLM</span>
+                              <span className="rounded border border-t_think/30 bg-t_think/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-t_think">LLM</span>
                             )}
                             {t.installed && (
-                              <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-emerald-400">Installed</span>
+                              <span className="rounded border border-ok/30 bg-ok/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-ok">Installed</span>
                             )}
                           </span>
                         </button>
@@ -769,7 +769,7 @@ export function AddColumnModal({
                             className={clsx(
                               "rounded px-2.5 py-0.5 text-[10.5px] font-medium capitalize transition-colors",
                               promptMode === m
-                                ? "bg-emerald-500/15 text-emerald-300"
+                                ? "bg-ok/15 text-ok"
                                 : "text-fg-faint hover:text-fg-muted",
                             )}
                           >
@@ -802,7 +802,7 @@ export function AddColumnModal({
                         />
                         {form.executionMode === "sequential" && (
                           <p className="text-[10.5px] text-fg-faint">
-                            Tip: use <span className="font-mono text-emerald-400">@METRIC_PREVIOUS_RESULT</span> to read the previous evaluation result.
+                            Tip: use <span className="font-mono text-ok">@METRIC_PREVIOUS_RESULT</span> to read the previous evaluation result.
                           </p>
                         )}
                         <PromptPreview prompt={form.prompt} level={form.level} defaultThread={previewThread} />
@@ -945,7 +945,7 @@ export function AddColumnModal({
                                         : [...f.dependsOn, e.score_name],
                                     }))
                                   }
-                                  className="accent-cyan-500"
+                                  className="accent-signal"
                                 />
                                 <span className="min-w-0 flex-1 truncate text-[12px] text-fg-muted">{e.name}</span>
                                 <span className={clsx("shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider border", lc.active)}>
@@ -966,7 +966,7 @@ export function AddColumnModal({
                   type="checkbox"
                   checked={form.enabled}
                   onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))}
-                  className="accent-cyan-500"
+                  className="accent-signal"
                 />
                 Run automatically on new traces
               </label>
@@ -983,9 +983,9 @@ export function AddColumnModal({
                 <button
                   onClick={submitConfig}
                   disabled={busy}
-                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-[12.5px] font-medium text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+                  className="btn-primary"
                 >
-                  {busy && <span className="h-3 w-3 animate-spin rounded-full border-2 border-blue-300/40 border-t-white" />}
+                  {busy && <span className="h-3 w-3 animate-spin rounded-full border-2 border-info/40 border-t-white" />}
                   {form.kind === "llm_judge" && form.outputType === "json"
                     ? (editing ? "Next: Edit Schema" : "Next: Define Schema")
                     : saveLabel}
@@ -1013,9 +1013,9 @@ export function AddColumnModal({
                 <button
                   onClick={() => void save()}
                   disabled={busy}
-                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-[12.5px] font-medium text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+                  className="btn-primary"
                 >
-                  {busy && <span className="h-3 w-3 animate-spin rounded-full border-2 border-blue-300/40 border-t-white" />}
+                  {busy && <span className="h-3 w-3 animate-spin rounded-full border-2 border-info/40 border-t-white" />}
                   {saveLabel}
                 </button>
               </div>

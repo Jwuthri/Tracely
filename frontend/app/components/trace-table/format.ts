@@ -151,14 +151,14 @@ export function nearestAgentLabel(span: SpanOut, allSpans: SpanOut[]): string {
   return agentLabel(span);
 }
 
+// One tint per model family. The old version had a distinct shade per version (emerald/green/teal
+// for gpt-4o/gpt-4/gpt-3.5) — three greens nobody could tell apart, and off the theme palette.
 export function modelColor(m: string): string {
   const s = m.toLowerCase();
-  if (s.includes("gpt-4o") || s.includes("gpt-4-turbo")) return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
-  if (s.includes("gpt-4")) return "bg-green-500/10 text-green-400 border-green-500/30";
-  if (s.includes("gpt-3.5")) return "bg-teal-500/10 text-teal-400 border-teal-500/30";
-  if (s.includes("opus")) return "bg-orange-600/10 text-orange-400 border-orange-600/30";
-  if (s.includes("sonnet") || s.includes("haiku") || s.includes("claude")) return "bg-orange-500/10 text-orange-400 border-orange-500/30";
-  return "bg-slate-700/40 text-slate-300 border-slate-600/40";
+  if (s.includes("gpt-")) return "bg-ok/10 text-ok border-ok/30";
+  if (s.includes("opus") || s.includes("sonnet") || s.includes("haiku") || s.includes("claude"))
+    return "bg-t_tool/10 text-t_tool border-t_tool/30";
+  return "bg-ink-600/40 text-fg border-line-bright/40";
 }
 
 // ── chat-message normalization ───────────────────────────────────────────────────

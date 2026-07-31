@@ -187,7 +187,7 @@ export function Waterfall({
           <span className="truncate font-mono text-[10px] text-fg-faint">
             active {fmtGap(activeMs)}
             {breaks.length > 0 && (
-              <span className="text-amber-300/80">
+              <span className="text-warn/80">
                 {" · "}
                 {breaks.length} idle gap{breaks.length > 1 ? "s" : ""} collapsed
               </span>
@@ -248,9 +248,9 @@ export function Waterfall({
                   className="absolute z-10"
                   style={{ left: `${(b.dPos / totalDisplay) * 100}%`, top: RULER_H, bottom: 0 }}
                 >
-                  <div className="h-full border-l border-dashed border-amber-400/40" />
+                  <div className="h-full border-l border-dashed border-warn/40" />
                   <span
-                    className="absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap rounded-b bg-amber-400/15 px-1 py-0.5 font-mono text-[8.5px] leading-none text-amber-300/90"
+                    className="absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap rounded-b bg-warn/15 px-1 py-0.5 font-mono text-[8.5px] leading-none text-warn/90"
                     title={`idle ${fmtGap(b.realMs)} skipped between turns`}
                   >
                     ⏸ {fmtGap(b.realMs)}
@@ -419,7 +419,7 @@ function Attributes({ entries }: { entries: [string, string][] }) {
           key={k}
           className="grid grid-cols-[150px_1fr] items-start gap-3 border-b border-line/40 px-4 py-1.5 text-[11.5px] last:border-0"
         >
-          <span className="truncate font-mono text-sky-300/80" title={k}>
+          <span className="truncate font-mono text-info/80" title={k}>
             {k}
           </span>
           <AttrValue value={v} />

@@ -67,7 +67,7 @@ function renderHighlighted(text: string): ReactNode[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) out.push(<span key={key++}>{text.slice(last, m.index)}</span>);
-    out.push(<span key={key++} className="font-semibold text-emerald-400">{m[0]}</span>);
+    out.push(<span key={key++} className="font-semibold text-ok">{m[0]}</span>);
     last = m.index + m[0].length;
   }
   // trailing text + a ZWSP so the overlay keeps the final (possibly empty) line aligned
@@ -242,7 +242,7 @@ export function AdvancedPromptEditor({
       )}
       <div className="mt-1.5 flex items-center justify-between text-[10.5px] text-fg-faint">
         <span>
-          Type <span className="font-mono text-emerald-400">@</span> to insert a variable
+          Type <span className="font-mono text-ok">@</span> to insert a variable
         </span>
         <span>
           Available variables: {levelCount} · Level: {catalogLevel(level)}

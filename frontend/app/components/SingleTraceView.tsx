@@ -49,7 +49,7 @@ export function SingleTraceView({
             <button
               onClick={() => setShowState(true)}
               title="Shared state threaded through this trace"
-              className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-[12px] text-fg-muted transition-colors hover:border-signal/40 hover:text-fg"
+              className="btn-ghost"
             >
               <StateIcon />
               State
@@ -58,7 +58,7 @@ export function SingleTraceView({
           <button
             onClick={() => setShowAgents(true)}
             title="Agents & tools in this trace"
-            className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-[12px] text-fg-muted transition-colors hover:border-signal/40 hover:text-fg"
+            className="btn-ghost"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
               <rect x="4" y="8" width="16" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.7" />

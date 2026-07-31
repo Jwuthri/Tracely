@@ -43,7 +43,7 @@ export function SuggestedEvaluatorCard({ ev }: { ev: SuggestedEvaluator }) {
           <span className="font-mono text-[11px] text-fg-faint">{ev.name}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="rounded border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wider text-violet-400">
+          <span className="rounded border border-t_think/30 bg-t_think/10 px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wider text-t_think">
             {isStructural ? "check" : "llm"}
           </span>
           <span className="rounded bg-ink-700 px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">

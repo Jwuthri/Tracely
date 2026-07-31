@@ -200,10 +200,10 @@ describe("fmtScoreValue", () => {
 });
 
 describe("modelColor", () => {
-  it("maps families to tints", () => {
-    expect(modelColor("gpt-4o")).toContain("emerald");
-    expect(modelColor("claude-haiku-4-5")).toContain("orange");
-    expect(modelColor("mystery-model")).toContain("slate");
+  it("maps families to theme tokens", () => {
+    expect(modelColor("gpt-4o")).toContain("text-ok");
+    expect(modelColor("claude-haiku-4-5")).toContain("text-t_tool");
+    expect(modelColor("mystery-model")).toContain("text-fg");
   });
 });
 

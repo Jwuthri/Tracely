@@ -24,32 +24,32 @@ export type Col = {
 // Cycled per metric column, TurnWise-style. Literal class strings (Tailwind JIT needs to see
 // them in source); header gets the stronger wash, body cells a subtle one.
 export const METRIC_TINTS: MetricTint[] = [
-  { th: "bg-emerald-500/15", td: "bg-emerald-500/[0.06]" },
-  { th: "bg-rose-500/15", td: "bg-rose-500/[0.06]" },
-  { th: "bg-sky-500/15", td: "bg-sky-500/[0.06]" },
-  { th: "bg-violet-500/15", td: "bg-violet-500/[0.06]" },
-  { th: "bg-amber-500/15", td: "bg-amber-500/[0.06]" },
-  { th: "bg-teal-500/15", td: "bg-teal-500/[0.06]" },
+  { th: "bg-ok/15", td: "bg-ok/[0.06]" },
+  { th: "bg-fail/15", td: "bg-fail/[0.06]" },
+  { th: "bg-info/15", td: "bg-info/[0.06]" },
+  { th: "bg-t_think/15", td: "bg-t_think/[0.06]" },
+  { th: "bg-warn/15", td: "bg-warn/[0.06]" },
+  { th: "bg-ok/15", td: "bg-ok/[0.06]" },
   { th: "bg-fuchsia-500/15", td: "bg-fuchsia-500/[0.06]" },
-  { th: "bg-indigo-500/15", td: "bg-indigo-500/[0.06]" },
+  { th: "bg-t_agent/15", td: "bg-t_agent/[0.06]" },
 ];
 
 export const LEVEL_BADGE: Record<Group, string> = {
-  C: "bg-blue-500/20 text-blue-400",
-  M: "bg-green-500/20 text-green-400",
-  S: "bg-purple-500/20 text-purple-400",
+  C: "bg-info/20 text-info",
+  M: "bg-ok/20 text-ok",
+  S: "bg-t_think/20 text-t_think",
 };
 
 export const ROW_BG: Record<number, string> = {
-  0: "bg-slate-800/50 border-l-blue-500",
-  1: "bg-slate-800/30 border-l-green-500",
-  2: "bg-slate-800/10 border-l-purple-500",
+  0: "bg-ink-700/50 border-l-info",
+  1: "bg-ink-700/30 border-l-ok",
+  2: "bg-ink-700/10 border-l-t_think",
 };
 
 // ── static layout tokens ──────────────────────────────────────────────────────
 export const CTRL = { width: 40, minWidth: 20 };
 export const HEAD_TH =
-  "text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-2 sm:px-3 py-3 first:pl-2 sm:first:pl-4 whitespace-nowrap";
+  "text-left text-xs font-medium text-fg-muted uppercase tracking-wider px-2 sm:px-3 py-3 first:pl-2 sm:first:pl-4 whitespace-nowrap";
 
 // Persisted view preferences (hidden columns). The full-width toggle lives in ../../lib/useWide so
 // the Timeline + Evaluations tabs share one Enlarge/Concise control with the table.
