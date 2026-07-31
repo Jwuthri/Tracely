@@ -92,6 +92,13 @@ class Settings(BaseSettings):
     # (UMAP needs a large, diverse set — on few/near-duplicate points it invents structure).
     fi_umap_min_n: int = 50
     fi_min_cluster_size: int = 2
+    # Structural (ingest-time) clustering: a new failure joins an existing cluster of the same
+    # agent when it has the same failed evaluators and this much token overlap. Higher = more,
+    # tighter clusters; >1 disables merging (exact signature hash only, the old behaviour).
+    cluster_merge_similarity: float = 0.5
+    # Default floor for GET /api/clusters — one-off failures are noise, not an issue. Callers
+    # override per request with ?min_size=N (N >= 2).
+    cluster_min_size: int = 5
 
     # Meta-analysis ("Analyze"): cross-metric correlation/outlier synthesis over an agent's
     # evaluator scores. The stats (Spearman, z-score) are deterministic Python; only the prose

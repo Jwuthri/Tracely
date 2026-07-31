@@ -44,6 +44,11 @@ x-app-env: &app-env
   ROLLING_SUMMARY_MODEL: ${ROLLING_SUMMARY_MODEL:-openai/gpt-5.4-nano}
   ROLLING_SUMMARY_STEP_MAX_TOKENS: ${ROLLING_SUMMARY_STEP_MAX_TOKENS:-512}
   ROLLING_SUMMARY_MAX_TOKENS: ${ROLLING_SUMMARY_MAX_TOKENS:-20000}
+  # Failure clustering. CLUSTER_MERGE_SIMILARITY: token overlap at which a new failure joins an
+  # existing cluster instead of starting one (higher = tighter/more clusters, >1 = exact-signature
+  # only). CLUSTER_MIN_SIZE: default floor for the clusters list (>=2).
+  CLUSTER_MERGE_SIMILARITY: ${CLUSTER_MERGE_SIMILARITY:-0.5}
+  CLUSTER_MIN_SIZE: ${CLUSTER_MIN_SIZE:-5}
   # Auth (default "dev" = no human login, ingest key only — the stack runs open out of the box).
   # Self-host: set AUTH_MODE=local and SESSION_SECRET ($(openssl rand -hex 32)) in .env, then docker compose up
   AUTH_MODE: ${AUTH_MODE:-dev}

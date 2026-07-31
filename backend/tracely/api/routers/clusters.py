@@ -12,11 +12,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from tracely.api.auth import get_project_id
+from tracely.config import settings
 from tracely.domain.evaluation.evaluator_suggestion import suggest_evaluator
 from tracely.domain.failure.histogram import histogram
 from tracely.infrastructure.clickhouse.trace_reader import TraceReader
@@ -74,11 +75,17 @@ async def rebuild(project_id: str = Depends(get_project_id)) -> dict:
 
 
 @router.get("/clusters")
-async def list_clusters(project_id: str = Depends(get_project_id)) -> list[dict]:
+async def list_clusters(
+    project_id: str = Depends(get_project_id),
+    min_size: int = Query(default=None, ge=2, description="hide clusters with fewer members"),
+) -> list[dict]:
+    floor = settings.cluster_min_size if min_size is None else min_size
+
     def work():
         with SyncSessionLocal() as s:
             return [
-                _cluster_dict(cl, slug) for cl, slug in repo.clusters_list_with_agent(s, project_id)
+                _cluster_dict(cl, slug)
+                for cl, slug in repo.clusters_list_with_agent(s, project_id, floor)
             ]
 
     return await run_in_threadpool(work)
