@@ -68,12 +68,18 @@ class Step:
 class Group:
     """One unit of work inside a recording — an evaluator, a conversation turn. Carries its own
     input/output so it is legible on its own: reading `llm_judge · AGENT_RUN` → `FAIL — invented a
-    refund policy` should not require expanding it."""
+    refund policy` should not require expanding it.
+
+    `meta` (evaluator / level / kind) is stamped on the group AND on every step under it, so the
+    table's metadata column answers "which column, at what level?" on any row — not just the one
+    you happened to expand.
+    """
 
     name: str
     input: str = ""
     output: str = ""
     error: str = ""
+    meta: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -95,10 +101,19 @@ class Recording:
     env: str = "prod"
     # What the run is ABOUT, in words. The subject id alone is unreadable as a title.
     subject_label: str = ""
+    # Groups every recording about the same conversation into ONE row of the traces table, so the
+    # eval hierarchy lands on the table's own hierarchy: conversation → one run per turn (plus the
+    # conversation-level run) → one step per evaluator column. Namespaced (`eval:`/`sim:`) so it
+    # can never merge with the real conversation it is about.
+    conversation_id: str = ""
+    turn_index: int = 0
     steps: list[Step] = field(default_factory=list)
     groups: list[Group] = field(default_factory=list)
     start_ns: int = field(default_factory=time.time_ns)
     _label: str = ""
+    # Names the NEXT captured step — set by a step-level judge before each span it grades, so N
+    # calls read as the spans they judged instead of N identical rows named after the model.
+    target: str = ""
 
     @property
     def label(self) -> str:
@@ -110,7 +125,9 @@ class Recording:
         if name and not any(g.name == name for g in self.groups):
             self.groups.append(Group(name))
 
-    def describe(self, *, input: str = "", output: str = "", error: str = "") -> None:
+    def describe(
+        self, *, input: str = "", output: str = "", error: str = "", meta: dict | None = None
+    ) -> None:
         """Set the current group's own input/output — what it was asked to do and what it decided.
         This is what replaced a separate 'verdict' child span per evaluator: one row, not two."""
         group = next((g for g in self.groups if g.name == self._label), None)
@@ -122,6 +139,8 @@ class Recording:
             group.output = output
         if error:
             group.error = error
+        if meta:
+            group.meta.update({str(k): str(v) for k, v in meta.items() if v})
 
     def add(
         self,
@@ -136,8 +155,11 @@ class Recording:
         start_ns: int = 0,
     ) -> None:
         now = time.time_ns()
+        # A target set by the caller wins over the generic name (the model id), and is consumed —
+        # it describes one call, not every call that follows it.
+        label, self.target = (self.target or name), ""
         self.steps.append(Step(
-            name=name, input=input, output=output, group=self.label, obs_type=obs_type,
+            name=label, input=input, output=output, group=self._label, obs_type=obs_type,
             model=model, tokens=tokens or {}, error=error,
             start_ns=start_ns or now, end_ns=now,
         ))
@@ -169,12 +191,20 @@ def payload(rec: Recording) -> dict | None:
     trace_id = uuid.uuid4().bytes
     end_ns = max((s.end_ns for s in rec.steps), default=time.time_ns())
 
-    def base(extra: list[dict] | None = None) -> list[dict]:
+    def base(group: Group | None = None, extra: list[dict] | None = None) -> list[dict]:
+        meta = (group.meta if group else {})
         return [
             otlp.attr("tracely.internal.kind", rec.kind),
             otlp.attr("tracely.internal.subject_id", rec.subject_id),
             otlp.attr("tracely.env", rec.env),
             *([otlp.attr("tracely.agent.id", rec.agent_slug)] if rec.agent_slug else []),
+            *([otlp.attr("tracely.conversation.id", rec.conversation_id)]
+              if rec.conversation_id else []),
+            *([otlp.attr("tracely.turn.index", rec.turn_index)] if rec.turn_index else []),
+            # Which evaluator column, at what level — on EVERY span, so scanning the table answers
+            # it without expanding anything.
+            *([otlp.attr("tracely.step.name", group.name)] if group else []),
+            *(otlp.attr(f"tracely.metadata.{k}", v) for k, v in meta.items()),
             *(extra or []),
         ]
 
@@ -182,7 +212,7 @@ def payload(rec: Recording) -> dict | None:
     spans = [otlp.span(
         trace_id=trace_id, span_id=root_id, name=rec.name,
         start_ns=rec.start_ns, end_ns=end_ns,
-        attributes=base([
+        attributes=base(extra=[
             otlp.attr("tracely.observation.type", _CHAIN),
             otlp.attr("tracely.is_app_root", True),
             otlp.attr("tracely.trace.name", rec.name),
@@ -206,21 +236,21 @@ def payload(rec: Recording) -> dict | None:
             trace_id=trace_id, span_id=gid, parent_span_id=root_id, name=group.name,
             start_ns=members[0].start_ns if members else rec.start_ns,
             end_ns=max((m.end_ns for m in members), default=rec.start_ns),
-            attributes=base([
+            attributes=base(group, [
                 otlp.attr("tracely.observation.type", _CHAIN),
-                otlp.attr("tracely.step.name", group.name),
                 otlp.attr("tracely.input", group.input),
                 otlp.attr("tracely.output", group.output),
             ]),
             error=group.error or "; ".join(m.error for m in members if m.error),
         ))
 
+    by_name = {g.name: g for g in rec.groups}
     for step in rec.steps:
         spans.append(otlp.span(
             trace_id=trace_id, span_id=uuid.uuid4().bytes[:8],
             parent_span_id=group_ids.get(step.group, root_id),
             name=step.name, start_ns=step.start_ns, end_ns=step.end_ns,
-            attributes=base([
+            attributes=base(by_name.get(step.group), [
                 otlp.attr("tracely.observation.type", step.obs_type),
                 otlp.attr("tracely.input", step.input),
                 otlp.attr("tracely.output", step.output),

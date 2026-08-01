@@ -136,6 +136,12 @@ function agentSpanLabel(span: SpanOut): string {
 }
 
 export function nearestAgentLabel(span: SpanOut, allSpans: SpanOut[]): string {
+  // Inside a recording of Tracely's own work there is no agent — the useful answer to "whose work
+  // is this row?" is the evaluator column that produced it, which the backend stamps as
+  // `step_name` on every span of the recording. Without this the column is simply blank on the
+  // rows where knowing the column matters most.
+  const column = span.metadata?.["tracely.metadata.evaluator"];
+  if (column) return column;
   const own = ownAgentSlug(span);
   if (own) return own;
   if (span.type === "AGENT") return agentSpanLabel(span);

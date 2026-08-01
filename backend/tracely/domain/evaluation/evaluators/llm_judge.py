@@ -54,6 +54,7 @@ from tracely.domain.evaluation.template_resolver import (
     format_agent_catalog,
     template_resolver,
 )
+from tracely.domain import introspection
 from tracely.domain.evaluation.text import answer_for, content_text, first_io
 from tracely.domain.traces.spans import root_span
 from tracely.infrastructure.llm import provider
@@ -298,6 +299,12 @@ class LLMJudgeEvaluator(Evaluator):
         previous = _previous_from_config(config)
         out: list[EvalResult] = []
         for i, s in enumerate(candidates):
+            # Name the recorded call for the span it judges. Without this a step-level column
+            # grading 10 spans records 10 identical rows named after the model, and "which step
+            # did it fail on?" is unanswerable — the one question step-level grading exists for.
+            rec = introspection.active()
+            if rec:
+                rec.target = f"{s.get('type')} {s.get('name') or s.get('step_id') or i + 1}"
             body = (
                 f"User request (the goal of the whole run):\n{_clip(user_in, 1200)}\n\n"
                 f"Step {i + 1} of {len(candidates)} — {s.get('type')} `{s.get('name') or s.get('step_id') or ''}`\n"

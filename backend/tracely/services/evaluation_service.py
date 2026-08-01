@@ -60,6 +60,12 @@ def _spec_label(spec: dict) -> str:
     return " · ".join(bits)
 
 
+def _scope(ctx) -> str:
+    """Which level this dispatch is grading, for the run's title. A conversation-level pass has no
+    `trace_id` — it grades the thread as a whole, and reads very differently from a turn."""
+    return "conversation" if not ctx.trace_id else "turn"
+
+
 def _subject_label(ctx) -> str:
     """What is being graded, in words — the recording's title line. Falls back to the id, but the
     id alone was the whole complaint: a row reading `0000…1f1ffee` tells you nothing."""
@@ -370,10 +376,15 @@ class EvaluationService:
         # THE chokepoint every eval path funnels through (on-ingest, on-demand run, gate quality
         # grading) — scoping here once covers every llm_judge call this dispatch makes, and the
         # recording captures each of those calls' prompt and reply without per-evaluator wiring.
+        # The three eval levels land on the traces table's three levels: every recording about
+        # one conversation shares a namespaced conversation id, so a 3-turn thread shows as ONE
+        # row with 4 runs (turn 1, 2, 3, and the conversation-level pass) rather than 4 orphans.
+        thread = ctx.thread_id or ctx.trace_id
         with provider.use_project_key(ctx.project_id), record(
             introspection.EVAL, subject,
-            f"eval · {len(specs)} evaluator(s)", project_id=ctx.project_id,
+            f"eval · {_scope(ctx)} · {len(specs)} column(s)", project_id=ctx.project_id,
             subject_label=_subject_label(ctx),
+            conversation_id=f"eval:{thread}" if thread else "",
         ) as rec:
             for spec in specs:
                 spec = _inject_dependencies(spec, completed)
@@ -381,7 +392,11 @@ class EvaluationService:
                     # One span per evaluator, named for the column, describing WHICH kind at
                     # WHAT level — "why did this column say that" starts with knowing what it is.
                     rec.label = spec.get("score_name") or spec.get("kind") or "evaluator"
-                    rec.describe(input=_spec_label(spec))
+                    rec.describe(input=_spec_label(spec), meta={
+                        "evaluator": spec.get("score_name", ""),
+                        "level": spec.get("level", ""),
+                        "kind": spec.get("kind", ""),
+                    })
                 try:
                     new_results = self.registry.dispatch(
                         spec["kind"], spec["config"], spec["score_name"], spec["level"], ctx

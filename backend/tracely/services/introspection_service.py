@@ -43,6 +43,8 @@ def record(
     agent_slug: str = "",
     env: str = "prod",
     subject_label: str = "",
+    conversation_id: str = "",
+    turn_index: int = 0,
 ) -> Iterator[Recording | None]:
     """Record everything Tracely does inside this block as a trace about `subject_id`.
 
@@ -58,6 +60,7 @@ def record(
         kind=kind, subject_id=subject_id, name=name,
         project_id=project_id, agent_slug=agent_slug, env=env,
         subject_label=subject_label,
+        conversation_id=conversation_id, turn_index=turn_index,
     )
     token = introspection._active.set(rec)
     try:

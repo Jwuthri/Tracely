@@ -413,7 +413,7 @@ class GateService:
             # prompt and the attack judge's evidence quote included.
             with record(
                 introspection.SIM, o.conversation_id, "sim · grading",
-                project_id=project_id,
+                project_id=project_id, conversation_id=f"sim:{o.conversation_id}",
             ):
                 self._grade_expectations(
                     project_id, o, (turns_by_scenario or {}).get(o.scenario_id)

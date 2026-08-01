@@ -242,3 +242,28 @@ describe("nearestAgentLabel", () => {
     expect(nearestAgentLabel(a, [a])).toBe("support-agent");
   });
 });
+
+describe("nearestAgentLabel inside an eval recording", () => {
+  const span = (over: Partial<SpanOut>): SpanOut =>
+    ({
+      span_id: "s1", parent_span_id: "", name: "openai/gpt-5", type: "GENERATION",
+      level: "DEFAULT", status_message: "", start_time: "", end_time: null, latency_ms: null,
+      agent_id: "", agent_run_id: "", turn_id: "", step_name: "", model_id: "",
+      tokens: 0, cost: 0, metadata: {}, input: null, output: null, ...over,
+    }) as SpanOut;
+
+  it("names the evaluator column, since a recording has no agent", () => {
+    const s = span({
+      metadata: {
+        "tracely.metadata.evaluator": "tracely.run.quality",
+        "tracely.metadata.level": "AGENT_RUN",
+      },
+    });
+    expect(nearestAgentLabel(s, [s])).toBe("tracely.run.quality");
+  });
+
+  it("leaves a real agent span alone", () => {
+    const s = span({ metadata: { "tracely.agent.id": "planner" } });
+    expect(nearestAgentLabel(s, [s])).toBe("planner");
+  });
+});

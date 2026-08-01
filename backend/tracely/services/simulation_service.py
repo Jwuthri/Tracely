@@ -91,6 +91,7 @@ class SimulationService:
             introspection.SIM, conversation_id,
             f"sim · {scenario.title or scenario.kind}",
             project_id=project_id, agent_slug=agent_slug, env=env,
+            conversation_id=f"sim:{conversation_id}",
         ) as rec:
             for index in range(planned):
                 if rec:

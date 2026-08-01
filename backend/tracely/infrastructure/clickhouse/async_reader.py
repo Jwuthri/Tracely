@@ -463,21 +463,33 @@ async def session_turns(
     client = await get_async_client()
     res = await client.query(
         f"""
-        SELECT trace_id, input, output, tokens, input_tokens, output_tokens, model, cost, latency_ms, ts, failing FROM (
+        SELECT trace_id,
+               -- An internal run's "message" is what it did, not the judge's raw prompt: the root
+               -- span already says `eval · turn · 5 column(s)` and carries the verdict summary.
+               -- Same reason the list title is derived this way (see `sessions_overview`).
+               -- The inner aliases are t_* so these names don't resolve back into the aggregates.
+               if(internal != '', root_in, t_input)   AS input,
+               if(internal != '', root_out, t_output) AS output,
+               tokens, input_tokens, output_tokens, model, cost, latency_ms, ts, failing
+        FROM (
           SELECT trace_id,
             max(conversation_id)                                          AS conv,
+            max(internal_kind)                                            AS internal,
+            concat(anyIf(name, parent_span_id = ''), '\n\n',
+                   coalesce(anyIf(input, parent_span_id = ''), ''))       AS root_in,
+            coalesce(anyIf(output, parent_span_id = ''), '')              AS root_out,
             -- Prefer the EARLIEST GENERATION input (the actual user message) over framework
             -- internals (CrewAI agent-config payload, LlamaIndex workflow state, etc.).
             if(argMinIf(input, start_time, input != '' AND type = 'GENERATION') != '',
                argMinIf(input, start_time, input != '' AND type = 'GENERATION'),
-               argMinIf(input, start_time, input != ''))                    AS input,
+               argMinIf(input, start_time, input != ''))                    AS t_input,
             -- Prefer the latest GENERATION output (skip TOOL + CHAIN router signals like
             -- LangGraph's `__end__`); fall back to root output, then any non-TOOL/non-CHAIN.
             if(argMaxIf(output, start_time, output != '' AND type = 'GENERATION') != '',
                argMaxIf(output, start_time, output != '' AND type = 'GENERATION'),
                if(anyIf(output, parent_span_id = '' AND output != '') != '',
                   anyIf(output, parent_span_id = '' AND output != ''),
-                  argMaxIf(output, start_time, output != '' AND type NOT IN ('TOOL','CHAIN')))) AS output,
+                  argMaxIf(output, start_time, output != '' AND type NOT IN ('TOOL','CHAIN')))) AS t_output,
             toUInt64(sum(arraySum(mapValues(usage_details))))             AS tokens,
             toUInt64(sum(usage_details['input']))                         AS input_tokens,
             toUInt64(sum(usage_details['output']))                        AS output_tokens,
