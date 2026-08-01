@@ -122,6 +122,25 @@ class Membership(Base):
     project: Mapped[Project] = relationship(back_populates="memberships")
 
 
+class PasswordReset(Base):
+    """A single-use password-reset grant (local mode only; Clerk owns resets in hosted mode).
+
+    Mirrors `Invitation`: only the sha256 of the raw token is stored, so a database dump cannot be
+    replayed into account takeover. Rows are consumed (`used_at`) rather than deleted, so a
+    reused link is rejected loudly instead of silently minting a second reset.
+    """
+
+    __tablename__ = "password_resets"
+    __table_args__ = (UniqueConstraint("token_hash", name="uq_password_resets_token_hash"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Invitation(Base):
     """A pending invite to join a project (local mode only; Clerk owns invites in hosted mode).
     Only the sha256 of the raw token is stored; the raw token is shown once at creation."""
@@ -259,14 +278,81 @@ class GateRun(Base):
 
 
 class GateCase(Base):
+    """One graded unit inside a gate run — either a promoted regression case replayed against a
+    candidate trace, or an emulated conversation driven against the agent's endpoint. Exactly one
+    of `evaluation_case_id` / `scenario_id` is set; for a scenario, `candidate_trace_id` holds the
+    conversation (thread) id and `detail["trace_ids"]` the per-turn traces."""
+
     __tablename__ = "gate_cases"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     gate_run_id: Mapped[str] = mapped_column(ForeignKey("gate_runs.id"), index=True)
-    evaluation_case_id: Mapped[str] = mapped_column(ForeignKey("evaluation_cases.id"))
+    evaluation_case_id: Mapped[str | None] = mapped_column(
+        ForeignKey("evaluation_cases.id"), nullable=True
+    )
+    scenario_id: Mapped[str | None] = mapped_column(ForeignKey("scenarios.id"), nullable=True)
     candidate_trace_id: Mapped[str] = mapped_column(String(64), default="")
-    verdict: Mapped[str] = mapped_column(String(8))
+    verdict: Mapped[str] = mapped_column(String(12))
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class AgentEndpoint(Base):
+    """How Tracely reaches a customer's agent over HTTP to drive an emulated conversation.
+
+    One row per agent. The bearer token is Fernet-encrypted at rest with the same
+    `SECRETS_ENCRYPTION_KEY` machinery as a workspace's own OpenRouter key — it is a customer
+    credential for a system we call out to, and must never be readable from a DB dump or echoed
+    back by the API.
+    """
+
+    __tablename__ = "agent_endpoints"
+
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    url: Mapped[str] = mapped_column(String(1000))
+    auth_header: Mapped[str] = mapped_column(String(64), default="Authorization")
+    auth_scheme: Mapped[str] = mapped_column(String(32), default="Bearer")
+    token_encrypted: Mapped[str] = mapped_column(String(2000), default="")
+    extra_headers: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Merged into every request body — the fields a real API needs alongside the message
+    # (tenant_id, user_id, locale, channel). Query params need no equivalent: they ride along in
+    # `url`, which is posted verbatim.
+    extra_body: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Dotted path to the assistant's text in the response body. Empty = try the common shapes
+    # (see SimulationService._extract_reply), which covers OpenAI-compatible and most bespoke APIs.
+    reply_path: Mapped[str] = mapped_column(String(200), default="")
+    # Body key echoing the conversation id back so the agent keeps server-side state per scenario.
+    session_key: Mapped[str] = mapped_column(String(120), default="conversation_id")
+    timeout_s: Mapped[int] = mapped_column(Integer, default=60)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Scenario(Base):
+    """A multi-turn conversation to run against the agent's endpoint.
+
+    `SCRIPTED` replays `turns` verbatim — authored by hand, or imported from a real production
+    thread (`source_thread_id`), which is the interesting case: the conversation that broke in
+    production becomes the conversation that gates the PR claiming to fix it.
+
+    `ADVERSARIAL` has no fixed turns. An attacker LLM is given `goal` and improvises up to
+    `max_turns`, so the suite probes for the failure instead of re-checking a known one.
+    """
+
+    __tablename__ = "scenarios"
+    __table_args__ = (Index("ix_scenario_project_agent", "project_id", "agent_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    title: Mapped[str] = mapped_column(String(512), default="")
+    kind: Mapped[str] = mapped_column(String(16), default="SCRIPTED")
+    turns: Mapped[list] = mapped_column(JSON, default=list)
+    goal: Mapped[str] = mapped_column(Text, default="")
+    max_turns: Mapped[int] = mapped_column(Integer, default=6)
+    source_thread_id: Mapped[str] = mapped_column(String(64), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str] = mapped_column(String(128), default="ui")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Evaluator(Base):

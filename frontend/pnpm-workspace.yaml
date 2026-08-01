@@ -1,3 +1,7 @@
+# pnpm >=10 requires this file to declare `packages` even for a single-package repo;
+# without it `pnpm install` fails with "packages field missing or empty".
+packages:
+  - .
 allowBuilds:
-  esbuild: set this to true or false
+  esbuild: true
   sharp: true

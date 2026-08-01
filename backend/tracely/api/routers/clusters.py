@@ -133,13 +133,27 @@ async def promote_cluster(cluster_id: str, project_id: str = Depends(get_project
             cl = repo.cluster_get(s, project_id, cluster_id)
             if not cl:
                 return ("err", "cluster not found")
-            med = repo.cluster_medoid(s, cl.id)
-            if not med:
+            members = repo.cluster_members(s, cl.id)  # medoid first, then by added_at
+            if not members:
                 return ("err", "cluster has no members")
-            try:
-                case = RegressionService(s).promote_trace(project_id, med.trace_id, title=cl.label)
-            except NotFound as e:
-                return ("err", str(e))
+            # Promote the first member whose trace is STILL in ClickHouse. The medoid is the
+            # oldest member, so it's the first to be deleted or aged out by the 90-day TTL —
+            # keying only on it made promote 404 on clusters that had perfectly good newer
+            # traces. `promote_trace` raises before it writes anything, so retrying is safe.
+            svc = RegressionService(s)
+            case = None
+            for m in members:
+                try:
+                    case = svc.promote_trace(project_id, m.trace_id, title=cl.label)
+                    break
+                except NotFound:
+                    continue
+            if case is None:
+                return (
+                    "err",
+                    f"none of this cluster's {len(members)} traces are still stored — they were "
+                    "deleted or aged out by the events TTL, so there is nothing to record",
+                )
             cl.status = "PROMOTED"
             cl.candidate_case_id = case.id
             s.commit()

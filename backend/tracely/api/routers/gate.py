@@ -5,6 +5,7 @@ Pure HTTP shaping — Postgres queries live in `infrastructure.db.repositories`.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -15,6 +16,7 @@ from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.db.models import Agent, GateRun
 from tracely.services.gate_service import GateService
+from tracely.workers.tasks import run_scenario_gate_task
 
 router = APIRouter(prefix="/api")
 
@@ -38,6 +40,8 @@ def _gate_dict(
         "total_tokens": g.total_tokens,
         "warnings": g.warnings or [],
         "created_at": g.created_at.isoformat() if g.created_at else None,
+        # CI polls a simulated gate until this is set — RUNNING with no finish means keep waiting.
+        "finished_at": g.finished_at.isoformat() if g.finished_at else None,
     }
     if cases is not None:
         d["cases"] = cases
@@ -52,6 +56,7 @@ def _cases(session, gate_id: str) -> list[dict]:
             "candidate_trace_id": gc.candidate_trace_id,
             "detail": gc.detail,
             "evaluation_case_id": gc.evaluation_case_id,
+            "scenario_id": gc.scenario_id,
         }
         for gc, title in repo.gate_cases_with_titles(session, gate_id)
     ]
@@ -86,6 +91,47 @@ async def run_gate(
     if status == "err":
         raise HTTPException(status_code=404, detail=payload)
     return payload
+
+
+@router.post("/gate/simulate")
+async def run_simulated_gate(
+    project_id: str = Depends(get_project_id), body: dict = Body(default={})
+) -> dict:
+    """Start a gate that drives the agent's enabled scenarios against its registered endpoint.
+
+    Returns immediately with a RUNNING gate id: emulated conversations make real HTTP calls and
+    then wait on the eval pipeline, so this is minutes of work. CI polls `GET /api/gates/{id}`
+    until `finished_at` is set.
+    """
+    agent_ref = body.get("agent")
+    if not agent_ref:
+        raise HTTPException(status_code=400, detail="agent required")
+    min_pass_rate = body.get("min_pass_rate")
+
+    def work():
+        with SyncSessionLocal() as s:
+            aid = GateService(s).resolve_agent_id(project_id, agent_ref)
+            if not aid:
+                return ("err", f"agent '{agent_ref}' not found")
+            gate = GateRun(
+                id=str(uuid.uuid4()), project_id=project_id, agent_id=aid,
+                env=body.get("env") or "ci", git_ref=body.get("git_ref") or "",
+                pr_number=body.get("pr_number"), status="RUNNING",
+            )
+            s.add(gate)
+            s.commit()
+            return ("ok", (gate.id, aid, gate.env, gate.git_ref, gate.pr_number))
+
+    status, payload = await run_in_threadpool(work)
+    if status == "err":
+        raise HTTPException(status_code=404, detail=payload)
+
+    gate_id, aid, env, git_ref, pr_number = payload
+    run_scenario_gate_task.delay(
+        project_id, aid, gate_id, env, git_ref, pr_number,
+        float(min_pass_rate) if min_pass_rate is not None else None,
+    )
+    return {"id": gate_id, "status": "RUNNING", "agent": agent_ref, "env": env}
 
 
 @router.get("/gate/suite")

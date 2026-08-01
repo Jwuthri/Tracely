@@ -52,6 +52,11 @@ export default function LoginPage() {
         <FormError>{err}</FormError>
         <Field label="Email" type="email" value={email} onChange={setEmail} autoFocus autoComplete="email" placeholder="you@company.com" />
         <Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password" placeholder="••••••••" />
+        <div className="-mt-1 text-right">
+          <a href="/forgot-password" className="text-[12.5px] text-fg-faint hover:text-signal">
+            Forgot password?
+          </a>
+        </div>
         <Submit loading={loading}>Sign in</Submit>
       </form>
     </AuthShell>

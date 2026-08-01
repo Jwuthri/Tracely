@@ -12,6 +12,9 @@ const PUBLIC = [
   /^\/login/,
   /^\/register/,
   /^\/accept-invite/,
+  // Password recovery has to be reachable while signed OUT — that is the entire point of it.
+  /^\/forgot-password/,
+  /^\/reset-password/,
   /^\/sign-in/,
   /^\/sign-up/,
   /^\/share\//, // public conversation links — the token in the path is the credential

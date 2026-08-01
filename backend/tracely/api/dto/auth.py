@@ -28,6 +28,15 @@ class ChangePasswordIn(BaseModel):
     new_password: str = Field(min_length=8)
 
 
+class ForgotPasswordIn(BaseModel):
+    email: str
+
+
+class ResetPasswordIn(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8)
+
+
 class InviteIn(BaseModel):
     email: str
     role: str = "MEMBER"

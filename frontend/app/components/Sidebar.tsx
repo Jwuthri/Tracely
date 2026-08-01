@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { usePathname } from "next/navigation";
 import type { Me } from "@/app/lib/auth/types";
 import { AccountMenu } from "./AccountMenu";
-import { IconActivity, IconDatabase, IconGate, IconGrid, IconLayers, IconScale, IconSettings, IconShield, IconTrend } from "./icons";
+import { IconActivity, IconBolt, IconDatabase, IconGate, IconGrid, IconLayers, IconScale, IconSettings, IconShield, IconTrend } from "./icons";
 
 const NAV = [
   {
@@ -23,6 +23,7 @@ const NAV = [
     group: "Test",
     items: [
       { href: "/cases", label: "Regression cases", Icon: IconShield },
+      { href: "/scenarios", label: "Scenarios", Icon: IconBolt },
       { href: "/calibration", label: "Judge calibration", Icon: IconScale },
     ],
   },

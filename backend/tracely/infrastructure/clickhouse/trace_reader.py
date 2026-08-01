@@ -126,6 +126,41 @@ class TraceReader:
             by_tid[tid].append((name, comment))
         return by_tid
 
+    def scores_by_trace(
+        self, project_id: str, trace_ids: Iterable[str]
+    ) -> dict[str, list[dict]]:
+        """`{trace_id: [{name, verdict, value, comment}, ...]}` — the sync twin of the async
+        reader's per-trace score fetch, for workers. Used by the gate to roll an emulated
+        conversation's turns up into one verdict; the advisory filtering is applied by
+        `domain.evaluation.verdict`, not here, so the one policy stays in one place."""
+        uniq = sorted({t for t in trace_ids if t})
+        if not uniq:
+            return {}
+        rows = self.client.query(
+            "SELECT trace_id, name, verdict, value, comment FROM scores FINAL "
+            "WHERE project_id = {p:String} AND trace_id IN {t:Array(String)} AND is_deleted = 0",
+            parameters={"p": project_id, "t": uniq},
+        ).result_rows
+        by_tid: dict[str, list[dict]] = defaultdict(list)
+        for tid, name, verdict, value, comment in rows:
+            by_tid[tid].append(
+                {"name": name, "verdict": verdict, "value": value, "comment": comment}
+            )
+        return dict(by_tid)
+
+    def span_count(self, project_id: str, trace_ids: Iterable[str]) -> int:
+        """Total spans across `trace_ids`. The gate samples this to tell when a customer's own
+        spans have finished arriving on an emulated conversation (count stops growing)."""
+        uniq = sorted({t for t in trace_ids if t})
+        if not uniq:
+            return 0
+        rows = self.client.query(
+            "SELECT count() FROM events WHERE project_id = {p:String} "
+            "AND trace_id IN {t:Array(String)}",
+            parameters={"p": project_id, "t": uniq},
+        ).result_rows
+        return int(rows[0][0]) if rows else 0
+
     # ── ui helpers ────────────────────────────────────────────────────────────
 
     def member_meta(

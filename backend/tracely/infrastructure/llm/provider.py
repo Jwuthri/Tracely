@@ -162,24 +162,33 @@ def _fernet():
     return Fernet(urlsafe_b64encode(sha256(settings.secrets_encryption_key.encode()).digest()))
 
 
-def encrypt_project_key(plain: str) -> str:
-    """Encrypt a customer-supplied OpenRouter key for storage
-    (`Project.openrouter_api_key_encrypted`). Raises RuntimeError if the server has no
-    `SECRETS_ENCRYPTION_KEY` — the save endpoint surfaces that directly rather than storing
+def encrypt_secret(plain: str) -> str:
+    """Encrypt any workspace-supplied secret for storage. Raises RuntimeError if the server has no
+    `SECRETS_ENCRYPTION_KEY` — save endpoints surface that directly rather than storing
     plaintext."""
     return _fernet().encrypt(plain.strip().encode()).decode()
 
 
-def _decrypt_project_key(token: str) -> str | None:
+def decrypt_secret(token: str) -> str | None:
     """None on any failure (bad/rotated encryption key, corrupt row) — a broken decrypt must
-    degrade to 'no project key configured', never crash the eval pipeline."""
+    degrade to 'no secret configured', never crash the caller."""
     from cryptography.fernet import InvalidToken
 
     try:
         return _fernet().decrypt(token.encode()).decode()
     except (InvalidToken, RuntimeError, ValueError) as exc:
-        log.warning("project_key_decrypt_failed", error=str(exc))
+        log.warning("secret_decrypt_failed", error=str(exc))
         return None
+
+
+def encrypt_project_key(plain: str) -> str:
+    """Encrypt a customer-supplied OpenRouter key for storage
+    (`Project.openrouter_api_key_encrypted`)."""
+    return encrypt_secret(plain)
+
+
+def _decrypt_project_key(token: str) -> str | None:
+    return decrypt_secret(token)
 
 
 def effective_openrouter_key() -> str:

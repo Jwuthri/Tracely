@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from uuid import uuid4
 
-from sqlalchemy import delete, desc, func, or_, select
+from sqlalchemy import delete, desc, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -33,6 +33,7 @@ from tracely.infrastructure.db.models import (
     Monitor,
     Project,
     RollingSummary,
+    Scenario,
     ScoreAnnotation,
 )
 
@@ -366,14 +367,46 @@ def gates_list_with_agent(s: Session, project_id: str) -> list[tuple[GateRun, st
 
 
 def gate_cases_with_titles(s: Session, gate_id: str) -> list[tuple[GateCase, str]]:
+    """Every graded unit in a gate run, with a display title.
+
+    OUTER joins on purpose: a gate case is either a replayed regression case or an emulated
+    conversation, so exactly one side is ever populated. An inner join on `evaluation_cases`
+    (what this used to be) silently dropped every scenario row — the conversations would run,
+    block the merge, and then be invisible in the gate detail and the PR comment.
+    """
     return [
-        (gc, title)
-        for gc, title in s.execute(
-            select(GateCase, EvaluationCase.title)
-            .join(EvaluationCase, GateCase.evaluation_case_id == EvaluationCase.id)
+        (gc, case_title or scenario_title or "(untitled)")
+        for gc, case_title, scenario_title in s.execute(
+            select(GateCase, EvaluationCase.title, Scenario.title)
+            .outerjoin(EvaluationCase, GateCase.evaluation_case_id == EvaluationCase.id)
+            .outerjoin(Scenario, GateCase.scenario_id == Scenario.id)
             .where(GateCase.gate_run_id == gate_id)
         ).all()
     ]
+
+
+# ── scenarios (emulated conversations) ────────────────────────────────────────
+
+
+def scenarios_list(s: Session, project_id: str, agent_id: str | None = None) -> list[Scenario]:
+    q = select(Scenario).where(Scenario.project_id == project_id)
+    if agent_id:
+        q = q.where(Scenario.agent_id == agent_id)
+    return list(s.execute(q.order_by(Scenario.created_at.desc())).scalars())
+
+
+def scenario_delete(s: Session, project_id: str, scenario_id: str) -> bool:
+    sc = s.get(Scenario, scenario_id)
+    if sc is None or sc.project_id != project_id:
+        return False
+    # Detach from any gate case that recorded it — a past gate result stays readable after the
+    # scenario itself is deleted (the verdict and trace ids live on the GateCase row).
+    s.execute(
+        update(GateCase).where(GateCase.scenario_id == scenario_id).values(scenario_id=None)
+    )
+    s.delete(sc)
+    s.commit()
+    return True
 
 
 # ── search (⌘K registry side) ─────────────────────────────────────────────────

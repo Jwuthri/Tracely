@@ -2,7 +2,8 @@ import clsx from "clsx";
 import { getGate } from "@/app/lib/api";
 import { Badge, verdictVariant } from "@/app/components/ui";
 import { CopyId } from "@/app/components/CopyId";
-import { IconArrowLeft, IconCheck, IconX } from "@/app/components/icons";
+import { GateAutoRefresh } from "@/app/components/GateAutoRefresh";
+import { IconArrowLeft, IconBolt, IconCheck, IconX } from "@/app/components/icons";
 
 export default async function GatePage({ params }: { params: Promise<{ gateId: string }> }) {
   const { gateId } = await params;
@@ -17,11 +18,14 @@ export default async function GatePage({ params }: { params: Promise<{ gateId: s
   }
   const pass = g.status === "PASS";
   const nocov = g.status === "NO_COVERAGE";
+  const running = g.status === "RUNNING" || (!g.finished_at && g.status !== "ERROR");
   const tone = pass
     ? { box: "border-ok/30 bg-ok/[0.04]", chip: "border-ok/40 bg-ok/10 text-ok", text: "text-ok" }
-    : nocov
-      ? { box: "border-warn/30 bg-warn/[0.05]", chip: "border-warn/40 bg-warn/10 text-warn", text: "text-warn" }
-      : { box: "border-fail/30 bg-fail/[0.05]", chip: "border-fail/40 bg-fail/10 text-fail", text: "text-fail" };
+    : running
+      ? { box: "border-info/30 bg-info/[0.04]", chip: "border-info/40 bg-info/10 text-info", text: "text-info" }
+      : nocov
+        ? { box: "border-warn/30 bg-warn/[0.05]", chip: "border-warn/40 bg-warn/10 text-warn", text: "text-warn" }
+        : { box: "border-fail/30 bg-fail/[0.05]", chip: "border-fail/40 bg-fail/10 text-fail", text: "text-fail" };
   const cases = g.cases ?? [];
 
   return (
@@ -41,7 +45,7 @@ export default async function GatePage({ params }: { params: Promise<{ gateId: s
       >
         <div className="flex items-center gap-4">
           <div className={clsx("grid h-12 w-12 place-items-center rounded-xl border", tone.chip)}>
-            {pass ? <IconCheck className="h-6 w-6" /> : <IconX className="h-6 w-6" />}
+            {pass ? <IconCheck className="h-6 w-6" /> : running ? <IconBolt className="h-6 w-6" /> : <IconX className="h-6 w-6" />}
           </div>
           <div>
             <div className={clsx("font-display text-[30px] font-extrabold leading-none", tone.text)}>
@@ -51,6 +55,11 @@ export default async function GatePage({ params }: { params: Promise<{ gateId: s
               {g.agent} · {g.env}
               {g.git_ref && ` · ${g.git_ref.slice(0, 8)}`}
             </div>
+            {running && (
+              <div className="mt-2">
+                <GateAutoRefresh />
+              </div>
+            )}
             {nocov && (
               <div className="mt-2 max-w-md text-[12px] leading-snug text-warn/90">
                 Exercised 0 of {g.total} promoted case(s) — no CI trace matched (misconfigured
@@ -92,7 +101,9 @@ export default async function GatePage({ params }: { params: Promise<{ gateId: s
         <div className="border-b border-line px-4 py-3 text-[13px] font-semibold text-fg">Cases</div>
         {cases.length === 0 ? (
           <div className="px-4 py-10 text-center text-[13px] text-fg-faint">
-            No promoted cases for this agent yet.
+            {running
+              ? "Driving the conversations — results appear as each one is graded."
+              : "No promoted cases or scenarios for this agent yet."}
           </div>
         ) : (
           cases.map((c, i) => {
@@ -101,14 +112,55 @@ export default async function GatePage({ params }: { params: Promise<{ gateId: s
               : [];
             const reason = (c.detail as { reason?: string })?.reason;
             const quality = c.detail as { quality_pass?: boolean; quality_reason?: string };
+            // An emulated conversation: `candidate_trace_id` is the thread id, and the detail
+            // carries per-turn traces + how many scores actually graded it.
+            const sim = c.scenario_id
+              ? (c.detail as {
+                  turns?: number;
+                  scores?: number;
+                  error?: string;
+                  expectations?: number;
+                  failed_expectations?: string[];
+                  failed_scores?: string[];
+                })
+              : null;
             return (
               <div
                 key={i}
-                className="grid grid-cols-[70px_1fr_auto] items-center gap-3 border-b border-line/50 px-4 py-3 text-[12.5px] last:border-0"
+                className="grid grid-cols-[92px_1fr_auto] items-center gap-3 border-b border-line/50 px-4 py-3 text-[12.5px] last:border-0"
               >
                 <Badge variant={verdictVariant(c.verdict)}>{c.verdict}</Badge>
                 <span className="min-w-0">
                   <span className="text-fg">{c.title}</span>
+                  {sim && (
+                    <span className="ml-2 font-mono text-[11px] text-fg-faint">
+                      {sim.turns ?? 0} turn{sim.turns === 1 ? "" : "s"} · {sim.scores ?? 0} score
+                      {sim.scores === 1 ? "" : "s"}
+                      {sim.expectations
+                        ? ` · ${sim.expectations} expectation${sim.expectations === 1 ? "" : "s"} checked`
+                        : ""}
+                    </span>
+                  )}
+                  {sim?.error && (
+                    <span className="ml-2 font-mono text-[11px] text-fail">{sim.error}</span>
+                  )}
+                  {(sim?.failed_expectations ?? []).map((f, j) => (
+                    <span key={j} className="mt-1 block font-mono text-[11px] text-fail">
+                      ✗ {f}
+                    </span>
+                  ))}
+                  {/* Evaluator FAILs — the cause when a conversation sank on the project's own
+                      evaluators rather than an authored expectation. */}
+                  {(sim?.failed_scores ?? []).map((f, j) => (
+                    <span key={j} className="mt-1 block font-mono text-[11px] text-fail">
+                      ✗ {f}
+                    </span>
+                  ))}
+                  {c.verdict === "UNGRADED" && (
+                    <span className="ml-2 font-mono text-[11px] text-warn">
+                      ran but nothing scored it — counts against the pass rate, never as a pass
+                    </span>
+                  )}
                   {errs.length > 0 && <span className="ml-2 font-mono text-[11px] text-fail">errors: {errs.join(", ")}</span>}
                   {quality?.quality_pass === false && (
                     <span className="ml-2 font-mono text-[11px] text-fail">
@@ -118,9 +170,18 @@ export default async function GatePage({ params }: { params: Promise<{ gateId: s
                   {c.verdict === "SKIP" && reason && <span className="ml-2 font-mono text-[11px] text-fg-faint">{reason}</span>}
                 </span>
                 {c.candidate_trace_id ? (
-                  <span className="flex items-center gap-1.5 font-mono text-[11px] text-fg-faint">
-                    candidate <CopyId value={c.candidate_trace_id} label="candidate trace" />
-                  </span>
+                  sim ? (
+                    <a
+                      href={`/sessions/${c.candidate_trace_id}`}
+                      className="font-mono text-[11px] text-fg-muted transition-colors hover:text-signal"
+                    >
+                      view conversation →
+                    </a>
+                  ) : (
+                    <span className="flex items-center gap-1.5 font-mono text-[11px] text-fg-faint">
+                      candidate <CopyId value={c.candidate_trace_id} label="candidate trace" />
+                    </span>
+                  )
                 ) : (
                   <span className="font-mono text-[11px] text-fg-faint">—</span>
                 )}

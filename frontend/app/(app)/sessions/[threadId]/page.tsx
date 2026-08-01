@@ -1,6 +1,7 @@
 import { getSession, getTrace, type ConvNode, type FullTurn } from "@/app/lib/api";
 import { convUsage, fmtUsd } from "@/app/lib/usage";
 import { CopyId } from "@/app/components/CopyId";
+import { SaveAsScenarioButton } from "@/app/components/SaveAsScenarioButton";
 import { SessionView } from "@/app/components/SessionView";
 import { ShareButton } from "@/app/components/ShareButton";
 import { IconArrowLeft } from "@/app/components/icons";
@@ -31,6 +32,10 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
     scores: threadScores ?? [],
   };
   const usage = convUsage(conv);
+  // Importing needs an agent to attach the scenario to. Spans carry the agent id, so read it off
+  // the conversation rather than making the page fetch the registry; no agent → no button.
+  const agentRef = traces.flatMap((t) => t.spans).find((s) => s.agent_id)?.agent_id ?? "";
+  const firstInput = turns[0]?.input ?? "";
 
   return (
     <div className="space-y-6">
@@ -51,7 +56,16 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
             {usage.cost ? <span className="text-amber-300/90">{fmtUsd(usage.cost)}</span> : null}
           </div>
           </div>
-          {turns.length > 0 && <ShareButton threadId={threadId} />}
+          <div className="flex items-center gap-3">
+            {turns.length > 0 && agentRef && (
+              <SaveAsScenarioButton
+                threadId={threadId}
+                agent={agentRef}
+                defaultTitle={firstInput ? `Prod · ${firstInput.slice(0, 70)}` : undefined}
+              />
+            )}
+            {turns.length > 0 && <ShareButton threadId={threadId} />}
+          </div>
         </div>
       </header>
 

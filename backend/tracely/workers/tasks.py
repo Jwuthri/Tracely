@@ -63,6 +63,91 @@ def rebuild_clusters_task(self, project_id: str) -> dict:
     return FailureIntelService().rebuild_clusters(project_id)
 
 
+@celery_app.task(name="tracely.run_scenario_gate", bind=True, max_retries=0)
+def run_scenario_gate_task(
+    self,
+    project_id: str,
+    agent_id: str,
+    gate_run_id: str,
+    env: str = "ci",
+    git_ref: str = "",
+    pr_number: int | None = None,
+    min_pass_rate: float | None = None,
+) -> dict:
+    """Phase 1 of a simulated gate: replay the regression cases, then drive the conversations.
+
+    Async because the scenario half makes real HTTP calls to the customer's agent — minutes, not
+    milliseconds. `POST /api/gate/simulate` pre-creates the `GateRun` row (status RUNNING) so CI
+    gets an id to poll immediately; `max_retries=0` because a half-driven conversation must not be
+    silently re-sent to a live endpoint.
+
+    Grading is a SEPARATE task, scheduled with a countdown. The agent's own spans arrive as
+    ordinary OTLP and are ingested by Celery, so under the default `--pool=solo --concurrency=1`
+    they cannot be processed while this task holds the only slot. Returning first lets that queue
+    drain, so the grader actually sees the agent's tool calls instead of a trace containing only
+    Tracely's turn spans.
+    """
+    from tracely.infrastructure.db.engine import SyncSessionLocal
+    from tracely.services.gate_service import GateService
+
+    with SyncSessionLocal() as s:
+        try:
+            gate = GateService(s).run_gate(
+                project_id, agent_id, env=env, git_ref=git_ref, pr_number=pr_number,
+                with_scenarios=True, min_pass_rate=min_pass_rate, gate_run_id=gate_run_id,
+                finalize=False,
+            )
+        except Exception:
+            s.rollback()
+            log.exception("scenario_gate_drive_failed", gate_run_id=gate_run_id)
+            _mark_gate_error(s, gate_run_id)
+            raise
+
+    grade_scenario_gate_task.apply_async(
+        (project_id, gate_run_id, min_pass_rate),
+        countdown=settings.gate_scenario_span_grace_s,
+    )
+    return {"gate_run_id": gate.id, "status": "RUNNING"}
+
+
+@celery_app.task(name="tracely.grade_scenario_gate", bind=True, max_retries=0)
+def grade_scenario_gate_task(
+    self, project_id: str, gate_run_id: str, min_pass_rate: float | None = None
+) -> dict:
+    """Phase 2: grade the driven conversations and finalize the run.
+
+    Runs after phase 1 released the worker, so the agent's own span-ingest tasks have had a chance
+    to process and its tool calls are actually on the trace by now.
+    """
+    from tracely.infrastructure.db.engine import SyncSessionLocal
+    from tracely.services.gate_service import GateService
+
+    with SyncSessionLocal() as s:
+        try:
+            gate = GateService(s).grade_scenarios(gate_run_id, min_pass_rate)
+        except Exception:
+            s.rollback()
+            log.exception("scenario_gate_grade_failed", gate_run_id=gate_run_id)
+            _mark_gate_error(s, gate_run_id)
+            raise
+        if gate is None:
+            return {"gate_run_id": gate_run_id, "status": "MISSING"}
+        return {"gate_run_id": gate.id, "status": gate.status}
+
+
+def _mark_gate_error(session, gate_run_id: str) -> None:
+    """Leave a terminal record rather than a row stuck on RUNNING that CI polls forever."""
+    from datetime import datetime, timezone
+
+    from tracely.infrastructure.db.models import GateRun
+
+    stuck = session.get(GateRun, gate_run_id)
+    if stuck and stuck.finished_at is None:
+        stuck.status = "ERROR"
+        stuck.finished_at = datetime.now(timezone.utc)
+        session.commit()
+
+
 @celery_app.task(name="tracely.evaluate_monitors", bind=True, max_retries=0)
 def evaluate_monitors_task(self) -> dict:
     """Fire the monitoring engine for every enabled monitor in every project — driven by Celery

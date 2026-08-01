@@ -190,6 +190,57 @@ export async function getCase(caseId: string): Promise<EvalCase | null> {
   return getJsonOrNull<EvalCase>(`/api/cases/${caseId}`);
 }
 
+/** One user turn, plus what the agent is optionally expected to do with it. Both expectation
+ *  fields default to empty: a turn with neither is graded only by the project's own evaluators,
+ *  exactly as production traffic is. `tools` is checked deterministically and needs the agent's
+ *  own spans on the trace; `expect` is LLM-judged and only needs the reply. */
+export type ScenarioTurn = {
+  message: string;
+  expect: string;
+  tools: string[];
+};
+
+/** A multi-turn conversation Tracely drives against the agent's own endpoint. `SCRIPTED` replays
+ *  `turns` (authored, or imported from a real thread); `ADVERSARIAL` improvises toward `goal`. */
+export type Scenario = {
+  id: string;
+  agent_id: string;
+  title: string;
+  kind: "SCRIPTED" | "ADVERSARIAL";
+  turns: ScenarioTurn[];
+  goal: string;
+  max_turns: number;
+  source_thread_id: string;
+  enabled: boolean;
+  created_at: string | null;
+};
+
+/** Where Tracely calls the agent. The token is write-only — the API returns `has_token`, never
+ *  the value, so it can't leak into a server-rendered page. */
+export type AgentEndpoint = {
+  agent_id: string;
+  configured: boolean;
+  url?: string;
+  auth_header?: string;
+  auth_scheme?: string;
+  has_token?: boolean;
+  reply_path?: string;
+  session_key?: string;
+  timeout_s?: number;
+  extra_headers?: Record<string, string>;
+  // Merged into every request body — tenant_id, locale, channel. Query params need no
+  // equivalent: they ride along in `url`, which is posted verbatim.
+  extra_body?: Record<string, unknown>;
+};
+
+export async function getScenarios(agent?: string): Promise<Scenario[]> {
+  return getJson<Scenario[]>(`/api/scenarios${agent ? `?agent=${encodeURIComponent(agent)}` : ""}`);
+}
+
+export async function getAgentEndpoint(agentRef: string): Promise<AgentEndpoint | null> {
+  return getJsonOrNull<AgentEndpoint>(`/api/agents/${encodeURIComponent(agentRef)}/endpoint`);
+}
+
 export type Stats = {
   traces: number;
   spans: number;
@@ -279,11 +330,15 @@ export async function getCluster(id: string): Promise<FailureCluster | null> {
   return getJsonOrNull<FailureCluster>(`/api/clusters/${id}`);
 }
 
+/** One graded unit in a gate run. Exactly one of `evaluation_case_id` / `scenario_id` is set —
+ *  a replayed regression case, or an emulated conversation. For a scenario, `candidate_trace_id`
+ *  holds the conversation (thread) id and `detail.trace_ids` the per-turn traces. */
 export type GateCaseResult = {
   title: string;
   verdict: string;
   candidate_trace_id: string;
-  evaluation_case_id: string;
+  evaluation_case_id: string | null;
+  scenario_id: string | null;
   detail: Record<string, unknown>;
 };
 
@@ -302,6 +357,8 @@ export type GateRun = {
   total_tokens: number;
   warnings: string[];
   created_at: string | null;
+  // A simulated gate is async: CI (and the UI) polls until this is set.
+  finished_at?: string | null;
   cases?: GateCaseResult[];
 };
 

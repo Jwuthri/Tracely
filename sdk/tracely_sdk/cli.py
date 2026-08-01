@@ -1,9 +1,14 @@
 """`tracely` CLI — the CI/CD gate.
 
-Run an agent's PROMOTED regression suite against the traces this CI run emitted
-(tagged tracely.env=ci) and turn the result into a real pull-request check:
+Turn an agent's test suite into a real pull-request check. Three ways in:
 
-    tracely gate --agent planner
+    tracely gate --agent planner       # gate on traces CI already emitted (tracely.env=ci)
+    tracely replay --agent planner …   # re-run promoted cases through your code, then gate
+    tracely simulate --agent planner   # drive the agent's scenarios against its HTTP endpoint
+
+`simulate` needs no agent code in CI at all — Tracely calls the endpoint you registered and
+drives each scenario as a multi-turn conversation, so this works for a TypeScript or Go service
+just as well as a Python one.
 
 Exits 0 on PASS, 1 on FAIL, 2 on error — so it blocks a merge on its own. Inside a
 GitHub Actions run (or with --github) it also posts a commit status + a PR comment,
@@ -23,8 +28,8 @@ import urllib.request
 
 MARKER = "<!-- tracely-gate -->"
 STATUS_CONTEXT = "tracely/regression-gate"
-ICON = {"PASS": "✓", "FAIL": "✗", "SKIP": "–", "NO_COVERAGE": "⚠"}
-EMOJI = {"PASS": "✅", "FAIL": "❌", "SKIP": "⏭️", "NO_COVERAGE": "⚠️"}
+ICON = {"PASS": "✓", "FAIL": "✗", "SKIP": "–", "NO_COVERAGE": "⚠", "UNGRADED": "⚠"}
+EMOJI = {"PASS": "✅", "FAIL": "❌", "SKIP": "⏭️", "NO_COVERAGE": "⚠️", "UNGRADED": "⚠️"}
 
 
 # ── Tracely API ──────────────────────────────────────────────────────────────
@@ -60,9 +65,19 @@ def trigger_gate(
 
 
 def case_reason(detail: dict) -> str:
-    """A short, human reason for a non-PASS case from the gate's detail payload."""
+    """A short, human reason for a non-PASS case from the gate's detail payload.
+
+    Covers both kinds of case: a replayed regression case (tool sequence / errors / quality) and
+    an emulated conversation (transport error, failed expectations, failed evaluators).
+    """
     d = detail or {}
     bits: list[str] = []
+    # ── emulated conversation ────────────────────────────────────────────────
+    if d.get("error"):  # the endpoint never answered — that IS the failure
+        bits.append(str(d["error"]))
+    bits += [f"✗ {f}" for f in (d.get("failed_expectations") or [])]
+    bits += [f"✗ {f}" for f in (d.get("failed_scores") or [])]
+    # ── replayed regression case ─────────────────────────────────────────────
     if d.get("missing_tools"):
         bits.append("missing tools: " + ", ".join(d["missing_tools"]))
     if d.get("run_errors"):  # run-outcome assertion: the agent itself failed
@@ -83,6 +98,20 @@ def case_reason(detail: dict) -> str:
     return "; ".join(bits)
 
 
+def ungraded_note(verdict: str, detail: dict) -> str:
+    """UNGRADED has no failing score to point at — it means nothing graded the conversation at
+    all, which counts against the pass rate. Say so explicitly or the row reads as unexplained."""
+    if verdict != "UNGRADED":
+        return ""
+    turns = (detail or {}).get("turns")
+    return (
+        f"ran {turns} turn(s) but nothing scored it — no evaluator matched, or the judge was "
+        "unavailable. Counts against the pass rate, never as a pass."
+        if turns
+        else "nothing scored this conversation"
+    )
+
+
 # ── console + markdown rendering ─────────────────────────────────────────────
 
 
@@ -90,15 +119,18 @@ def render_console(data: dict, sha: str) -> None:
     print(f"\nTracely gate · agent={data.get('agent')} · env={data.get('env')} · {sha[:8]}")
     print(f"  {data['passed']} passed · {data['failed']} failed · {data['skipped']} skipped\n")
     for c in data.get("cases", []):
-        reason = case_reason(c.get("detail") or {})
+        reason = case_reason(c.get("detail") or {}) or ungraded_note(
+            c["verdict"], c.get("detail") or {}
+        )
         extra = f"  ({reason})" if reason else ""
-        print(f"  {ICON.get(c['verdict'], '?')} {c['verdict']:<4} {c['title']}{extra}")
+        print(f"  {ICON.get(c['verdict'], '?')} {c['verdict']:<11} {c['title']}{extra}")
     for w in data.get("warnings") or []:
         print(f"  ⚠️  {w}")
     if data["status"] == "NO_COVERAGE":
         print(
-            f"\n  ⚠ NO COVERAGE — exercised 0 of {data.get('total', 0)} promoted case(s); "
-            "no CI traces matched. Treated as a failure (a gate that tests nothing must not pass)."
+            f"\n  ⚠ NO COVERAGE — 0 of {data.get('total', 0)} case(s) were actually graded. "
+            "Either CI emitted no trace matching a promoted case, or every conversation ran "
+            "ungraded. Treated as a failure (a gate that tests nothing must not pass)."
         )
     print(f"\n  Result: {data['status']}\n")
 
@@ -118,9 +150,16 @@ def render_markdown(data: dict, web_url: str, sha: str) -> str:
         "|---|---|---|---|",
     ]
     for c in data.get("cases", []):
-        reason = case_reason(c.get("detail") or {}).replace("|", "\\|")
+        detail = c.get("detail") or {}
+        reason = (case_reason(detail) or ungraded_note(c["verdict"], detail)).replace("|", "\\|")
+        # An emulated conversation links to the thread, so a reviewer can read what was actually
+        # said instead of taking the verdict's word for it.
+        title = c["title"]
+        if c.get("scenario_id") and c.get("candidate_trace_id") and web_url:
+            thread = f"{web_url.rstrip('/')}/sessions/{c['candidate_trace_id']}"
+            title = f"[{title}]({thread})"
         lines.append(
-            f"| {EMOJI.get(c['verdict'], '❔')} | {c['title']} | {c['verdict']} | {reason} |"
+            f"| {EMOJI.get(c['verdict'], '❔')} | {title} | {c['verdict']} | {reason} |"
         )
     lines.append("")
     warnings = data.get("warnings") or []
@@ -136,8 +175,8 @@ def render_markdown(data: dict, web_url: str, sha: str) -> str:
         lines.append("")
     if status == "NO_COVERAGE":
         lines.append(
-            f"> ⚠️ **No coverage.** This run exercised **0 of {data.get('total', 0)}** promoted "
-            "regression case(s) — CI emitted no trace matching them (a misconfigured replay step, "
+            f"> ⚠️ **No coverage.** This run graded **0 of {data.get('total', 0)}** "
+            "case(s) — CI emitted no trace matching them (a misconfigured replay step, "
             "a renamed agent, or an input-digest mismatch). A gate that tests nothing is **not** a "
             "pass — fix the CI step so the suite actually runs."
         )
@@ -313,6 +352,72 @@ def cmd_gate(args: argparse.Namespace) -> int:
     return 0 if data["status"] == "PASS" else 1
 
 
+def start_simulation(
+    api: str, key: str, agent: str, env: str, git_ref: str, pr: int | None, min_pass_rate=None
+) -> dict:
+    body: dict = {"agent": agent, "env": env, "git_ref": git_ref, "pr_number": pr}
+    if min_pass_rate is not None:
+        body["min_pass_rate"] = min_pass_rate
+    return _post_json(f"{api.rstrip('/')}/api/gate/simulate", key, body)
+
+
+def poll_gate(api: str, key: str, gate_id: str, timeout: int, quiet: bool = False) -> dict:
+    """Block until the gate finishes, or raise TimeoutError.
+
+    A simulated gate drives real conversations against the customer's agent and then waits on the
+    eval pipeline, so it is minutes of work — the API hands back a RUNNING row immediately and CI
+    polls `finished_at`. Timing out is NOT treated as a pass: `cmd_simulate` exits non-zero, since
+    a merge-blocker that gave up must never read as green.
+    """
+    import time
+
+    url = f"{api.rstrip('/')}/api/gates/{gate_id}"
+    deadline = time.time() + timeout
+    waited = 0
+    while time.time() < deadline:
+        data = _get_json(url, key)
+        if data.get("finished_at"):
+            return data
+        if not quiet and waited and waited % 30 == 0:
+            print(f"  … still running ({waited}s)")
+        time.sleep(5)
+        waited += 5
+    raise TimeoutError(f"gate {gate_id} did not finish within {timeout}s")
+
+
+def cmd_simulate(args: argparse.Namespace) -> int:
+    api, key, web_url, agent = _conn(args)
+    if not agent:
+        print("error: --agent (or TRACELY_AGENT) is required")
+        return 2
+
+    repo, sha, pr = gh_context()
+    sha = args.sha or sha
+    if args.pr is not None:
+        pr = args.pr
+
+    try:
+        started = start_simulation(
+            api, key, agent, args.env, sha or "", pr, args.min_pass_rate
+        )
+        print(f"driving scenarios for {agent} (gate {started['id'][:8]}…)")
+        data = poll_gate(api, key, started["id"], args.timeout)
+    except urllib.error.HTTPError as e:
+        print(f"simulate error: {e.code} {e.read().decode()[:300]}")
+        return 2
+    except urllib.error.URLError as e:
+        print(f"simulate error: cannot reach Tracely at {api}: {e.reason}")
+        return 2
+    except TimeoutError as e:
+        print(f"simulate error: {e}")
+        return 2
+
+    render_console(data, sha)
+    write_step_summary(render_markdown(data, web_url, sha))
+    post_pr_check(args, data, web_url, repo, sha, pr)
+    return 0 if data["status"] == "PASS" else 1
+
+
 def _load_entrypoint(spec: str):
     """Import a 'module:function' entrypoint from the current working directory."""
     import importlib
@@ -460,12 +565,33 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_common_gate_flags(r)
 
+    s = sub.add_parser(
+        "simulate", help="drive the agent's scenarios against its endpoint, then gate the PR"
+    )
+    s.add_argument("agent", nargs="?", help="agent slug (or --agent / TRACELY_AGENT)")
+    s.add_argument("--agent", dest="agent_opt", help="agent slug")
+    s.add_argument(
+        "--min-pass-rate",
+        type=float,
+        help="fraction of conversations that must PASS (default: the server's setting, 1.0). "
+        "Lower it for adversarial suites, which land some probes by design.",
+    )
+    s.add_argument(
+        "--timeout",
+        type=int,
+        default=900,
+        help="seconds to wait for the run (default 900). Timing out exits non-zero, never green.",
+    )
+    _add_common_gate_flags(s)
+
     args = p.parse_args(argv)
     args.agent = getattr(args, "agent_opt", None) or args.agent  # allow positional or --agent
     if args.command == "gate":
         return cmd_gate(args)
     if args.command == "replay":
         return cmd_replay(args)
+    if args.command == "simulate":
+        return cmd_simulate(args)
     return 2
 
 

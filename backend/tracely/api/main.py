@@ -26,6 +26,7 @@ from tracely.api.routers import (
     sessions,
     share,
     traces,
+    scenarios,
 )
 from sqlalchemy import select
 
@@ -131,6 +132,7 @@ app.include_router(sessions.router)
 app.include_router(search.router)
 app.include_router(cases.router)
 app.include_router(gate.router)
+app.include_router(scenarios.router)
 app.include_router(clusters.router)
 app.include_router(analytics.router)
 app.include_router(evaluators.router)

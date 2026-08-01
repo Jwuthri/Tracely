@@ -35,6 +35,7 @@ _AUTH_TABLES = [
     models.User.__table__,
     models.Membership.__table__,
     models.Invitation.__table__,
+    models.PasswordReset.__table__,
     models.Evaluator.__table__,
 ]
 

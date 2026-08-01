@@ -29,6 +29,8 @@ tracely-ai = { workspace = true }
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Vendored agent-skill packs — third-party code we don't own and don't ship.
+extend-exclude = [".agents", ".claude"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -138,6 +138,17 @@ class Settings(BaseSettings):
     # any AGENT_RUN judge — including signal detectors with inverted thresholds — fires". Blank =
     # consider every enabled AGENT_RUN llm_judge (legacy/broad behavior).
     gate_quality_score_name: str = "tracely.run.quality"
+    # Emulated conversations. Fraction of scenarios that must PASS for the scenario half of a gate
+    # to be green. 1.0 = every conversation must pass (right for SCRIPTED regression suites, which
+    # are tests). Adversarial suites want it lower — an attack suite of any size will land a few,
+    # and a gate demanding zero successful attacks forever is a gate people mute. A conversation
+    # that ran but was never graded counts against the rate, never as a pass.
+    gate_scenario_min_pass_rate: float = 1.0
+    # Ceiling on how long a gate waits for the CUSTOMER's own spans to arrive on an emulated
+    # conversation before grading it. Tracely's own turn spans are written inline, so this only
+    # covers spans their service exports after honouring our `traceparent`; the wait ends as soon
+    # as the span count stops growing, and this is just the cap.
+    gate_scenario_span_grace_s: int = 20
 
     # ── Auth & multi-tenancy ──────────────────────────────────────────────────────
     # "dev"   = no human auth; the ingest key is the only credential (today's behavior, no secret needed).
@@ -148,6 +159,9 @@ class Settings(BaseSettings):
     session_secret: str = ""
     session_ttl_seconds: int = 60 * 60 * 24 * 7  # 7 days
     session_issuer: str = "tracely"
+    # Password-reset links. Deliberately far shorter-lived than an invite (7 days): a reset link is
+    # a full account takeover if intercepted, and the user is expected to click it immediately.
+    password_reset_ttl_seconds: int = 60 * 60  # 1 hour
     # Clerk (auth_mode="clerk"): the issuer / Frontend API origin, e.g. https://<slug>.clerk.accounts.dev
     clerk_issuer: str = ""
     clerk_jwks_url: str = ""  # blank → derived as f"{clerk_issuer}/.well-known/jwks.json"

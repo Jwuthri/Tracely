@@ -14,6 +14,7 @@ from tracely.api.dto.auth import (
     AcceptInviteIn,
     ChangePasswordIn,
     CreateProjectIn,
+    ForgotPasswordIn,
     InviteIn,
     InviteOut,
     InviteSummary,
@@ -21,9 +22,10 @@ from tracely.api.dto.auth import (
     MeOut,
     ProjectRef,
     RegisterIn,
+    ResetPasswordIn,
     SessionOut,
 )
-from tracely.auth import invitations, passwords, provisioning, queries, tokens
+from tracely.auth import invitations, password_reset, passwords, provisioning, queries, tokens
 from tracely.auth.principal import Principal, select_membership
 from tracely.infrastructure import mailer
 from tracely.infrastructure.db.session import get_session
@@ -127,6 +129,39 @@ async def change_password(
     user.password_hash = passwords.hash_password(body.new_password)
     await session.commit()
     return {"ok": True}
+
+
+@local_router.post("/auth/forgot-password")
+async def forgot_password(
+    body: ForgotPasswordIn, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Request a reset link. **Always** reports the same thing, whether or not the email has an
+    account — an unauthenticated caller does not get to enumerate users. The raw token is only
+    ever delivered by email; it is never in this response.
+
+    With Resend unconfigured (the self-host default) nothing is sent. Recover such an account with
+    `python -m tracely.auth.reset_link <email>` on the server, which prints the link directly.
+    """
+    grant = await password_reset.create_reset(session, body.email)
+    if grant and mailer.email_enabled():
+        raw, user = grant
+        await mailer.send_password_reset_email(to=user.email, raw_token=raw)
+    return {"ok": True, "message": "If that email has an account, a reset link is on its way."}
+
+
+@local_router.post("/auth/reset-password", response_model=SessionOut)
+async def reset_password(
+    body: ResetPasswordIn, session: AsyncSession = Depends(get_session)
+) -> SessionOut:
+    """Consume a reset token and set the new password. Unknown, expired and already-used tokens
+    all return the same 400 — telling them apart only helps someone guessing."""
+    user = await password_reset.consume_reset(session, body.token, body.new_password)
+    if user is None:
+        raise HTTPException(400, "this reset link is invalid or has expired")
+    principal = await select_membership(user.id, None, session, kind="local")
+    return SessionOut(
+        token=tokens.issue_session(user.id), user_id=user.id, project_id=principal.project_id
+    )
 
 
 @local_router.post("/auth/login", response_model=SessionOut)

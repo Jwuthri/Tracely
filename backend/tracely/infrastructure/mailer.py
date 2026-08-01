@@ -68,6 +68,73 @@ async def send_invite_email(
     return True
 
 
+def reset_url(raw_token: str) -> str:
+    """The password-reset link — the frontend route that POSTs /auth/reset-password."""
+    return f"{settings.app_base_url.rstrip('/')}/reset-password?token={raw_token}"
+
+
+async def send_password_reset_email(*, to: str, raw_token: str) -> bool:
+    """Email a reset link via Resend. Best-effort, same contract as `send_invite_email`: returns
+    False when email is disabled or the send fails, and never raises — the caller answers 200
+    regardless, so a delivery problem can't be used to probe which addresses exist."""
+    if not email_enabled():
+        return False
+    url = reset_url(raw_token)
+    minutes = max(1, settings.password_reset_ttl_seconds // 60)
+    text = (
+        "Someone asked to reset the password for your Tracely account.\n\n"
+        f"Set a new password:\n{url}\n\n"
+        f"This link expires in {minutes} minutes and can be used once. "
+        "If you didn't request it, you can ignore this email — nothing has changed."
+    )
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.post(
+                _ENDPOINT,
+                headers={"Authorization": f"Bearer {settings.resend_api_key}"},
+                json={
+                    "from": settings.email_from,
+                    "to": [to],
+                    "subject": "Reset your Tracely password",
+                    "text": text,
+                    "html": _reset_html(url=url, minutes=minutes),
+                },
+            )
+    except Exception as e:
+        log.warning("reset_email_error", to=to, error=str(e))
+        return False
+    if resp.status_code >= 300:
+        log.warning("reset_email_failed", to=to, status=resp.status_code, body=resp.text[:300])
+        return False
+    return True
+
+
+def _reset_html(*, url: str, minutes: int) -> str:
+    return f"""\
+<!doctype html>
+<html>
+  <body style="margin:0;background:#0b0d10;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0b0d10;padding:32px 16px;">
+      <tr><td align="center">
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background:#13161b;border:1px solid #232830;border-radius:12px;padding:32px;">
+          <tr><td style="color:#e6e9ee;font-size:18px;font-weight:600;padding-bottom:12px;">Tracely</td></tr>
+          <tr><td style="color:#aab2bd;font-size:14px;line-height:1.6;padding-bottom:24px;">
+            Someone asked to reset the password for your Tracely account.
+          </td></tr>
+          <tr><td style="padding-bottom:24px;">
+            <a href="{url}" style="display:inline-block;background:#5ec2e0;color:#0b0d10;font-size:14px;font-weight:600;text-decoration:none;padding:12px 22px;border-radius:8px;">Set a new password</a>
+          </td></tr>
+          <tr><td style="color:#6b7480;font-size:12px;line-height:1.6;">
+            This link expires in {minutes} minutes and can be used once.
+            If you didn't request it, ignore this email — nothing has changed.
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>"""
+
+
 def _invite_html(*, project_name: str, url: str, inviter: str | None) -> str:
     safe_project = _html.escape(project_name)
     who = (
