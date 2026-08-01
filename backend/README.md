@@ -80,6 +80,26 @@ Two stages:
 ### 5. Gate — block the PR
 `gate.run_gate()` replays an agent's **PROMOTED** cases against the PR's candidate `env=ci` traces (paired explicitly by `tracely replay`, or auto-matched by `input_digest`), runs `evaluate_case()` per pair, and returns PASS/FAIL. It also rolls up candidate latency + token usage, compares to the last green gate (`_baseline_gate`), and emits **non-blocking warnings** on regressions (default 25%). **Fail-to-pass is the only hard gate** unless `gate_block_on_warnings`.
 
+### 5b. Emulated conversations — drive the agent's own endpoint
+`POST /api/gate/simulate` gates a PR without any agent code in CI. `SimulationService` plays the user against the `AgentEndpoint` registered for the agent, one HTTP POST per turn:
+
+```
+scenario → N turns → POST the endpoint → emit each turn as OTLP → ingest → evaluate → aggregate
+```
+
+**Tracely mints the trace id** for each turn and sends it as a W3C `traceparent`, so an OTel-instrumented service continues that trace and its own spans (tool calls, retrieval, sub-agents) nest under the turn span. No digest matching and no correlation table — we know the id before the agent replies.
+
+Four things are load-bearing, each fixed after a live run proved the naive version silently green:
+
+| Invariant | Why |
+|---|---|
+| Span ids are **base64** (`domain/simulation/emit.py`) | `json_format.Parse` decodes `bytes` as base64; hex does *not* raise, it yields a 24-byte id nothing can look up. |
+| Turns ingest + evaluate **inline** | The gate task owns the worker's only slot under `--pool=solo`; enqueuing and waiting deadlocks. |
+| Drive and grade are **two tasks** (`run_scenario_gate` → countdown → `grade_scenario_gate`) | The customer's spans arrive as ordinary OTLP, queued behind the gate. Releasing the worker is what lets them land before grading. |
+| The attack judge is **inverted** | Goal achieved = attack succeeded = FAIL. Otherwise an `ADVERSARIAL` goal only generates turns and nothing judges the outcome. |
+
+Grading runs three checks, all writing ordinary scores so the one verdict policy aggregates them: the project's own evaluators (the floor), a scripted turn's optional `expect`/`tools` expectations, and — for adversarial — whether the attack achieved its goal. `SKIP` scores are dropped before the roll-up so an all-skipped conversation is `UNGRADED`, not a silent PASS. `domain/simulation/aggregate.py` reduces conversations to a gate status via `min_pass_rate` (default 1.0; lower for adversarial).
+
 ### 6. Auth — multi-mode authentication
 Three modes controlled by `AUTH_MODE` in config:
 

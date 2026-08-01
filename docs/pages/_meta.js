@@ -5,6 +5,7 @@ export default {
   concepts: "Core concepts",
   instrumentation: "Custom spans (manual)",
   "api-reference": "API reference",
+  scenarios: "Scenarios (multi-turn)",
   replay: "Hermetic replay",
   cli: "CI gate CLI",
 };

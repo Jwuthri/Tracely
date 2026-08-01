@@ -1,15 +1,39 @@
 # `tracely-gate` action
 
-Gate a pull request on an agent's **production-derived regression suite**. Tracely promotes
-real production failures into fail-to-pass regression cases; this action replays them against
-the PR and turns the result into a blocking commit status (`tracely/regression-gate`) plus an
-upserted PR comment.
+Gate a pull request on your agent's behaviour and turn the result into a blocking commit status
+(`tracely/regression-gate`) plus an upserted PR comment.
+
+Two modes:
+
+- **`simulate` (default)** — Tracely drives multi-turn [scenarios](../../../docs/pages/scenarios.mdx)
+  against the HTTP endpoint you registered for the agent. **Needs no agent code in CI**, so it
+  works for a TypeScript, Go or Ruby service exactly as it does for Python.
+- **`gate`** — grade the ci-tagged traces your workflow already emitted against the agent's
+  promoted regression suite (production failures turned into fail-to-pass cases).
+
+## Quick start (simulate)
+
+```yaml
+- uses: your-org/tracely/.github/actions/tracely-gate@main
+  with:
+    mode: simulate
+    agent: support-agent
+    api: ${{ secrets.TRACELY_API }}
+    key: ${{ secrets.TRACELY_KEY }}
+    min-pass-rate: "0.9"   # adversarial suites land some probes by design
+```
+
+Register the endpoint first (Scenarios → Agent endpoint), and forward the `traceparent` header
+through your tracer so the gate can see your agent's tool calls, not just its replies.
 
 ## Inputs
 
 | input | required | default | description |
 |---|---|---|---|
-| `agent` | ✅ | — | agent slug whose PROMOTED suite to run |
+| `mode` | | `simulate` | `simulate` (drive scenarios against the endpoint) or `gate` (grade pre-emitted traces) |
+| `agent` | ✅ | — | agent slug to gate |
+| `min-pass-rate` | | server setting (`1.0`) | simulate only. Fraction of conversations that must PASS |
+| `timeout` | | `900` | simulate only. Seconds to wait; timing out fails the job, never passes it |
 | `api` | ✅ | — | Tracely API base URL |
 | `key` | ✅ | — | Tracely API / ingest key (use a secret) |
 | `web-url` | | `""` | Tracely web base URL, for the "view gate run" link |
@@ -17,11 +41,12 @@ upserted PR comment.
 | `github-token` | | `${{ github.token }}` | token used to post the status + comment |
 | `sdk-spec` | | `tracely-ai` | pip spec for the SDK/CLI |
 
-There are two ways to use it. **Replay is the turnkey path:** one CLI step re-runs your agent
-on every promoted case and gates the PR. The composite action is for when your CI already
-emits ci-tagged traces and you just want the gate.
+### Regression suite: `tracely replay`
 
-### Turnkey: `tracely replay` (recommended)
+If you also keep a promoted regression suite, `replay` is the turnkey path for it — one CLI step
+re-runs your agent on every promoted case's recorded input against recorded fixtures (no API keys,
+no model spend) and gates the PR. It needs a Python-importable entrypoint, which is the tradeoff
+`simulate` exists to avoid.
 
 `tracely replay` fetches the promoted suite, re-runs your agent on each recorded input
 (emitting ci traces), pairs each trace to its case, gates, and posts the check — in one step.

@@ -1,12 +1,34 @@
 name: "Tracely regression gate"
 description: >
-  Replay an agent's PROMOTED regression suite (tests promoted from real production
-  failures) against this PR's CI traces and post a pass/fail commit status + PR comment.
+  Gate a PR on an agent's behaviour and post a pass/fail commit status + PR comment.
+  mode=simulate drives multi-turn conversations against the agent's registered HTTP endpoint;
+  mode=gate replays the PROMOTED regression suite against this PR's CI traces.
 
 inputs:
+  mode:
+    description: >
+      "simulate" — Tracely calls the HTTP endpoint you registered for the agent and drives every
+      enabled scenario as a multi-turn conversation. Needs no agent code in CI, so it works for a
+      TypeScript, Go or Ruby service just as well as Python.
+      "gate" — grade the CI traces this workflow already emitted against the agent's promoted
+      regression suite. Use this when a previous step ran your agent and emitted `tracely.env=ci`
+      traces (e.g. via `tracely replay`).
+    required: false
+    default: "simulate"
   agent:
-    description: "Agent slug whose promoted regression suite to run"
+    description: "Agent slug to gate"
     required: true
+  min-pass-rate:
+    description: >
+      simulate only. Fraction of conversations that must PASS, 0-1. Defaults to the server setting
+      (1.0 — every conversation must pass, right for scripted suites). Lower it for adversarial
+      suites, which land some probes by design.
+    required: false
+    default: ""
+  timeout:
+    description: "simulate only. Seconds to wait for the run. Timing out fails the job, never passes it."
+    required: false
+    default: "900"
   api:
     description: "Tracely API base URL (e.g. https://tracely.your-co.dev)"
     required: true
@@ -38,7 +60,7 @@ runs:
       shell: bash
       run: pip install --quiet --disable-pip-version-check "${{ inputs.sdk-spec }}"
 
-    - name: Run regression gate
+    - name: Run gate
       shell: bash
       env:
         TRACELY_API: ${{ inputs.api }}
@@ -46,4 +68,19 @@ runs:
         TRACELY_WEB_URL: ${{ inputs.web-url }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
       # the CLI auto-detects GitHub Actions and posts the status + comment; exit code gates the job
-      run: tracely gate --agent "${{ inputs.agent }}" --env "${{ inputs.env }}"
+      run: |
+        set -euo pipefail
+        if [ "${{ inputs.mode }}" = "simulate" ]; then
+          # `simulate` returns as soon as the run is queued and then polls, because driving real
+          # conversations against your agent takes minutes. A timeout exits non-zero.
+          args=(--agent "${{ inputs.agent }}" --env "${{ inputs.env }}" --timeout "${{ inputs.timeout }}")
+          if [ -n "${{ inputs.min-pass-rate }}" ]; then
+            args+=(--min-pass-rate "${{ inputs.min-pass-rate }}")
+          fi
+          tracely simulate "${args[@]}"
+        elif [ "${{ inputs.mode }}" = "gate" ]; then
+          tracely gate --agent "${{ inputs.agent }}" --env "${{ inputs.env }}"
+        else
+          echo "::error::mode must be 'simulate' or 'gate' (got '${{ inputs.mode }}')"
+          exit 2
+        fi

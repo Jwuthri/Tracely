@@ -62,6 +62,12 @@ Five stores: **ClickHouse** (`events` one row per span + `scores`, `ReplacingMer
 - **One verdict policy.** A trace/turn/session fails iff it has a `FAIL` on a **non-advisory** evaluator. Python: `domain/evaluation/verdict.py`. Its SQL twin lives in `async_reader` (`name NOT IN {adv:Array(String)}`), fed by `api/advisory.py`. Change both together or the badge, threads dot, and trends disagree.
 - **Frontend fetch pattern:** Server Components (pages) call `app/lib/api.ts` directly; Client Components fetch a thin proxy under `app/api/*` which re-issues with the Bearer key server-side. `TRACELY_KEY` / `TRACELY_API` must never reach the browser — do not add an `env:` block to `next.config.mjs`.
 - **New backend env var?** Add it to `config.py` (`Settings`) *and* the `x-app-env` anchor at the top of `docker-compose.yml` — `.env` alone won't reach the containers.
+- **Emulated conversations have four non-obvious invariants.** Break any one and the gate goes quietly green instead of failing loudly:
+  1. **Span ids are base64, never hex.** `parse_otlp_traces_json` runs protobuf's `json_format.Parse`, whose canonical mapping decodes `bytes` as base64 — hex does *not* raise, it silently yields a 24-byte id nothing can look up (`domain/simulation/emit.py`).
+  2. **Turns are ingested and evaluated inline, not via Celery.** The gate task already owns the worker's only slot under `--pool=solo --concurrency=1`; enqueuing work and waiting for it deadlocks.
+  3. **Driving and grading are separate tasks** (`run_scenario_gate` → countdown → `grade_scenario_gate`). The *customer's* spans arrive as ordinary OTLP, so their ingest is queued behind the gate — releasing the worker between phases is the only thing that lets them land before grading.
+  4. **The attack judge is inverted.** For an `ADVERSARIAL` scenario, goal *achieved* = attack succeeded = **FAIL**. Without it the goal only generates turns and nothing judges the outcome, so a fully-successful attack passes.
+- **`SKIP` scores are dropped before the conversation roll-up.** `rollup_verdict` reads any score as evidence a run was graded, so a conversation whose only scores were skipped would report PASS having checked nothing (`domain/simulation/aggregate.py`).
 
 ## Gotchas
 

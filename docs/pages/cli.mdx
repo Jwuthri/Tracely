@@ -6,9 +6,26 @@ The `tracely` CLI (shipped with the SDK) runs an agent's **promoted regression s
 and gates it — exit `0` (PASS) / `1` (FAIL), plus a GitHub commit status + PR comment.
 
 ```bash
-tracely gate   <agent> [--env ci] [--api …] [--key …] [--pr N] [--sha …] [--github]
-tracely replay <agent> (--entrypoint module:func | --cmd "…") [--live] [--github]
+tracely simulate <agent> [--min-pass-rate 0.9] [--timeout 900] [--env ci] [--github]
+tracely gate     <agent> [--env ci] [--api …] [--key …] [--pr N] [--sha …] [--github]
+tracely replay   <agent> (--entrypoint module:func | --cmd "…") [--live] [--github]
 ```
+
+## `tracely simulate <agent>`
+
+Drive the agent's enabled [scenarios](/scenarios) — multi-turn conversations — against the HTTP
+endpoint you registered, then gate the PR on the result.
+
+```bash
+tracely simulate support-agent --min-pass-rate 0.9
+```
+
+**Needs no agent code in CI at all.** Tracely calls your endpoint, so this works for a TypeScript,
+Go or Ruby service exactly as it does for Python — nothing to install, import or shim.
+
+Driving real conversations takes minutes, so the command starts the run, polls until it settles,
+then renders. `--timeout` (default 900s) bounds the wait; **timing out exits non-zero**, never
+green.
 
 ## `tracely gate <agent>`
 
@@ -36,9 +53,11 @@ tracely replay planner --cmd "python my_agent.py"
 ```
 
 <Callout type="info">
-  **`gate` vs `replay`.** Use `gate` when CI already produced traces (just check them). Use `replay`
-  when you want Tracely to *drive* the agent over the suite — the hermetic path, where recorded
-  fixtures make it deterministic and free. See [Hermetic replay](/replay).
+  **Which one?** `simulate` drives multi-turn conversations against your live endpoint — no agent
+  code in CI, any language. `replay` re-runs the *promoted regression suite* against recorded
+  fixtures — deterministic, no API keys, no model spend, but Python-importable and single-turn.
+  `gate` grades traces your CI already emitted. They answer different questions; most teams run
+  `simulate` plus one of the other two. See [Scenarios](/scenarios) and [Hermetic replay](/replay).
 </Callout>
 
 ## What gating checks
