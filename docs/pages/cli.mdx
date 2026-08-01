@@ -2,30 +2,48 @@ import { Callout } from "nextra/components";
 
 # CI gate CLI
 
-The `tracely` CLI (shipped with the SDK) runs an agent's **promoted regression suite** against a PR
-and gates it — exit `0` (PASS) / `1` (FAIL), plus a GitHub commit status + PR comment.
+The `tracely` CLI (shipped with the SDK) turns an agent's behaviour into a pull-request check —
+exit `0` (PASS) / `1` (FAIL) / `2` (never got an answer), plus a GitHub commit status + PR comment.
 
 ```bash
-tracely simulate <agent> [--min-pass-rate 0.9] [--timeout 900] [--env ci] [--github]
+tracely simulate [<agent> | --agent a,b | --all] [--min-pass-rate 0.9] [--timeout 900] [--github]
 tracely gate     <agent> [--env ci] [--api …] [--key …] [--pr N] [--sha …] [--github]
 tracely replay   <agent> (--entrypoint module:func | --cmd "…") [--live] [--github]
 ```
 
-## `tracely simulate <agent>`
+## `tracely simulate`
 
-Drive the agent's enabled [scenarios](/scenarios) — multi-turn conversations — against the HTTP
-endpoint you registered, then gate the PR on the result.
+Drive each agent's enabled [scenarios](/scenarios) — multi-turn conversations — against the HTTP
+endpoint you registered for it, then gate the PR on the result.
 
 ```bash
-tracely simulate support-agent --min-pass-rate 0.9
+tracely simulate support-agent                      # one agent
+tracely simulate --agent support-agent --agent planner   # a subset (or --agent support-agent,planner)
+tracely simulate --all                              # every agent that has an enabled scenario
 ```
 
 **Needs no agent code in CI at all.** Tracely calls your endpoint, so this works for a TypeScript,
 Go or Ruby service exactly as it does for Python — nothing to install, import or shim.
 
-Driving real conversations takes minutes, so the command starts the run, polls until it settles,
-then renders. `--timeout` (default 900s) bounds the wait; **timing out exits non-zero**, never
-green.
+### Gating many agents at once
+
+Scenarios belong to an agent, so a multi-agent repo has a suite per agent. `--all` discovers them
+from the scenario list rather than the agent list: an agent with **no enabled scenario is skipped**,
+so switching a suite off is enough to take it out of CI, and a new agent joins the gate the day
+someone writes its first scenario — no workflow edit.
+
+Every agent gets its own gate run, but they share **one** commit status and **one** PR comment
+(GitHub keys both, so separate posts would overwrite each other — a red agent could vanish behind
+a green one that finished later). The comment leads with a roll-up table and puts each agent's
+cases in a collapsible section.
+
+The result is **worst-wins**: one red agent fails the job. `--timeout` (default 900s) is a budget
+for the whole command, not per agent, and **timing out exits non-zero** — never green.
+
+<Callout type="warning">
+  An agent with enabled scenarios but **no registered endpoint** reports `NO_COVERAGE` and blocks,
+  rather than passing a suite that never ran.
+</Callout>
 
 ## `tracely gate <agent>`
 
@@ -75,29 +93,26 @@ at [`.github/actions/tracely-gate/`](https://github.com/Jwuthri/Tracely/tree/mas
 
 ```yaml
 # .github/workflows/tracely-gate.yml
-name: Tracely regression gate
+name: Tracely gate
 on: pull_request
 permissions: { contents: read, statuses: write, pull-requests: write }
 jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - name: Tracely replay + gate
-        env:
-          TRACELY_API: ${{ secrets.TRACELY_API }}
-          TRACELY_KEY: ${{ secrets.TRACELY_KEY }}
-          TRACELY_WEB_URL: ${{ secrets.TRACELY_WEB_URL }}
-          PYTHONPATH: sdk/examples
-        run: |
-          pip install ./sdk
-          tracely replay planner --entrypoint weather_agent:run
+      - uses: your-org/tracely/.github/actions/tracely-gate@main
+        with:
+          api: ${{ secrets.TRACELY_API }}
+          key: ${{ secrets.TRACELY_KEY }}
+          web-url: ${{ secrets.TRACELY_WEB_URL }}
+          # agent: support-agent,planner   ← a subset; omit it to gate every agent with scenarios
 ```
+
+No checkout, no Python setup, no agent code — the action installs the CLI and Tracely calls your
+endpoints. `mode: gate` switches it to grading CI traces you already emitted, and needs an `agent`.
 
 ## Configuration
 
-Flags or environment: `TRACELY_API`, `TRACELY_KEY`, `TRACELY_AGENT`, `TRACELY_GATE_ENV`,
-`TRACELY_WEB_URL`, `GITHUB_TOKEN`. `--dry-run` prints the GitHub calls instead of sending them;
-`--no-github` never touches GitHub even inside Actions.
+Flags or environment: `TRACELY_API`, `TRACELY_KEY`, `TRACELY_AGENT` (comma-separated for
+`simulate`), `TRACELY_GATE_ENV`, `TRACELY_WEB_URL`, `GITHUB_TOKEN`. `--dry-run` prints the GitHub
+calls instead of sending them; `--no-github` never touches GitHub even inside Actions.

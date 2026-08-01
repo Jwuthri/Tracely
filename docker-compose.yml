@@ -43,6 +43,10 @@ x-app-env: &app-env
   META_ANALYSIS_MODEL: ${META_ANALYSIS_MODEL:-openai/gpt-5-mini}
   ROLLING_SUMMARY_MODEL: ${ROLLING_SUMMARY_MODEL:-openai/gpt-5.4-nano}
   ROLLING_SUMMARY_STEP_MAX_TOKENS: ${ROLLING_SUMMARY_STEP_MAX_TOKENS:-512}
+  # Record what Tracely itself did — the judge's prompt and reply, the attacker's move, the call
+  # to the customer's endpoint — as a trace, behind the "Show eval" toggle. Costs one small extra
+  # trace per evaluation; set false on a high-volume project that doesn't need the audit trail.
+  INTROSPECTION_ENABLED: ${INTROSPECTION_ENABLED:-true}
   ROLLING_SUMMARY_MAX_TOKENS: ${ROLLING_SUMMARY_MAX_TOKENS:-20000}
   # Failure clustering. CLUSTER_MERGE_SIMILARITY: token overlap at which a new failure joins an
   # existing cluster instead of starting one (higher = tighter/more clusters, >1 = exact-signature

@@ -65,6 +65,7 @@ All are **Server Components** unless noted; each lists the `lib/api.ts` calls it
 | `/clusters` | `getClusters` | Failure-cluster table + `RebuildButton` ("Analyze failures"). |
 | `/clusters/[clusterId]` | `getCluster` | Issue detail — histogram, description, proposed fix, suggested evaluator (`CodeBlock`), member traces, `ClusterActions`. |
 | `/cases` | `getCases` | Regression cases — title, status, fail→pass contract, last verdict, source trace. |
+| `/traces` | `getSessions` | Conversation list. `TracesExplorer`'s **Evals** filter chip re-queries with `evals=1` and shows ONLY Tracely's own runs (the judge's prompt and reply, the attacker's move, the POST to your endpoint), tagged `EVAL`/`SIM`; they open like any trace. It is the one filter that hits the server — the rest refine the loaded rows. |
 | `/scenarios` | `getAgents`, `getScenarios` | Multi-turn conversations driven against the agent's HTTP endpoint — `ScenariosManager` (agent picker ranked by scenario count, `EndpointPanel`, list, inline create/edit via `ScenarioForm` + `TurnEditor`). |
 | `/cases/[caseId]` | `getCase` | Case detail — assertions, reference trajectory, `ReplayControls` + replay history. |
 | `/gates` | `getGates`, `getAgents`, `getCases` | Gate runs — result, agent/env/ref, passed/failed/skipped, plus `RunGateButton` (agent picker, ranked by promoted-case count — no hardcoded slug). |

@@ -570,11 +570,27 @@ function useCtrlCount(): number {
   return 3 + (useContext(SelectContext).enabled ? 1 : 0);
 }
 
+// Tracely's own runs, listed alongside real ones while the Evals toggle is on. They get a tag
+// rather than a colour-only hint: "this row is the product grading something" is not something a
+// reader should have to infer, and eval must never be mistaken for sim (one is how a run was
+// judged, the other is how a conversation was driven).
+const INTERNAL_TAG: Record<string, string> = {
+  eval: "border-info/30 bg-info/10 text-info",
+  sim: "border-signal/30 bg-signal/10 text-signal",
+};
+
 function ConvTitleCell({ conv }: { conv: ConvNode }) {
   const href = conv.turns > 1 ? `/sessions/${conv.thread}` : `/traces/${conv.last_trace_id}`;
+  const kind = conv.internal_kind;
   return (
-    <a href={href} className="flex max-w-full items-center gap-2 text-sm font-medium text-fg transition-colors hover:text-fg" title={conv.thread}>
-      <span className={clsx("h-1.5 w-1.5 shrink-0 rounded-full", conv.failing ? "bg-fail" : "bg-ok/70")} />
+    <a href={href} className="flex max-w-full items-center gap-2 text-sm font-medium text-fg transition-colors hover:text-fg" title={conv.subject_id ? `${kind} of ${conv.subject_id}` : conv.thread}>
+      {kind ? (
+        <span className={clsx("shrink-0 rounded border px-1.5 py-[1px] font-mono text-[9.5px] font-semibold uppercase tracking-wide", INTERNAL_TAG[kind] ?? INTERNAL_TAG.eval)}>
+          {kind}
+        </span>
+      ) : (
+        <span className={clsx("h-1.5 w-1.5 shrink-0 rounded-full", conv.failing ? "bg-fail" : "bg-ok/70")} />
+      )}
       <span className="truncate hover:underline">{deriveTitle(conv.first_input)}</span>
     </a>
   );

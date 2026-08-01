@@ -18,6 +18,7 @@ EVENT_COLUMNS: list[str] = [
     "turn_id", "turn_index", "step_id", "step_name",
     "tool_call_id", "caller_agent_id", "callee_agent_id", "edge_type",
     "evaluation_case_id", "gate_run_id", "failure_cluster_id",
+    "internal_kind", "subject_id",
     "model_id", "model_parameters", "usage_details", "cost_details",
     "tool_definitions", "tool_calls", "tool_call_names",
     "input", "output", "metadata",

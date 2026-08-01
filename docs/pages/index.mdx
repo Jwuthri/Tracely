@@ -17,7 +17,7 @@ clusters, regression gates) instead of treating everything as opaque spans.
 It's two things in one small package:
 
 1. an **instrumentation SDK** — `tracely.agent(...)`, `tracely.llm(...)`, `tracely.tool(...)`, … (this guide), and
-2. the **`tracely` CLI** — `tracely gate` / `tracely replay`, which run an agent's promoted regression suite in CI and gate the PR ([CI gate CLI](/cli)).
+2. the **`tracely` CLI** — `tracely simulate` / `gate` / `replay`, which turn an agent's behaviour into a pull-request check ([CI gate CLI](/cli)).
 
 ## How it works
 
@@ -64,5 +64,6 @@ makes per-agent evaluation, conversation threading, and PR gating possible.
 - [**Core concepts**](/concepts) — observation types, conversations, the trace tree.
 - [**Instrumenting an agent**](/instrumentation) — every helper, with examples.
 - [**API reference**](/api-reference) — the full surface.
+- [**Scenarios**](/scenarios) — multi-turn conversations and red-team runs against your endpoint.
 - [**Hermetic replay**](/replay) — record in prod, replay in CI.
-- [**CI gate CLI**](/cli) — `tracely gate` / `tracely replay` + the GitHub Action.
+- [**CI gate CLI**](/cli) — `tracely simulate` / `gate` / `replay` + the GitHub Action.

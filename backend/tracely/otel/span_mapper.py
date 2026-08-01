@@ -99,6 +99,11 @@ def _map_span(
         "caller_agent_id": str(_first(a, ["tracely.handoff.caller_agent_id"]) or ""),
         "callee_agent_id": str(_first(a, ["tracely.handoff.callee_agent_id"]) or ""),
         "edge_type": str(_first(a, ["tracely.edge.type"]) or ""),
+        # Tracely's own work recorded as a trace (see domain/introspection.py). Non-empty here is
+        # what keeps the span out of every list AND out of the evaluator's reach — grading an eval
+        # run would record another eval run, forever.
+        "internal_kind": str(_first(a, ["tracely.internal.kind"]) or ""),
+        "subject_id": str(_first(a, ["tracely.internal.subject_id"]) or ""),
         # model / usage — only meaningful for spans that *are* an LLM call. Non-LLM spans
         # (AGENT, CHAIN, TOOL, ...) get a polluted `model_id` when a framework callback (LiteLLM,
         # etc.) accidentally stamps `llm.openai.model` on the enclosing span; strip it.

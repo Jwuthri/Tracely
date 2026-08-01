@@ -53,7 +53,7 @@ Evaluators are **DB-backed, editable per project, and rendered as TurnWise-style
 | Latency | `tracely.run.latency_ms` | AGENT_RUN | run duration > budget |
 | Required tools | `tracely.run.required_tools` | AGENT_RUN | a configured required tool is missing (off by default) |
 
-**LLM-as-judge (`kind: llm_judge`):** routes every call through LangChain `create_agent` on OpenRouter (`OPENROUTER_API_KEY`; falls back to OpenAI if `OPENAI_API_KEY` is set; skipped gracefully if neither is configured). Three granularity levels:
+**LLM-as-judge (`kind: llm_judge`):** a basic judge is also told the conversation's **declared agent/tool catalog** (`tracely.trace(agents=[...])`, via `_capabilities`) — without it a judge can call an answer unhelpful but can never say the agent should have called `issue_refund` and didn't, since it has no idea the tool exists. Routes every call through LangChain `create_agent` on OpenRouter (`OPENROUTER_API_KEY`; falls back to OpenAI if `OPENAI_API_KEY` is set; skipped gracefully if neither is configured). Three granularity levels:
 
 - **CONVERSATION** — one grade for the whole multi-turn thread (transcript).
 - **AGENT_RUN** — one grade per trace (user request vs final answer + tool grounding).
@@ -114,6 +114,22 @@ All modes share `GET /auth/me`, `POST /auth/logout`, and `POST /auth/projects` (
 
 ### 8. Meta-analysis — cross-metric "Analyze"
 `MetaAnalysisService.analyze_and_save()` runs a cross-metric analysis over **one agent's** evaluator score rows (table `meta_analyses`, migration `0009`). The async ClickHouse gather (`async_reader.agent_score_rows`) happens in the router; the service computes **deterministic** statistics in `domain/analysis/statistics.py` — Spearman correlations (tie-averaged ranks, no scipy dependency; reports the shared-sample `n`, not a fabricated p-value) and z-score outliers — then `infrastructure/llm/meta_analysis_agent.py` synthesizes patterns / recommendations / a summary **on top**, and the precomputed numbers are **merged back in** so the model can never lose or hallucinate them. With no LLM credential the run still succeeds (stats + a templated summary). Surfaced on the Trends page.
+
+### 8b. Internal runs — the Traces tab's "Evals" filter
+`services/introspection_service.record(kind, subject_id, name, …)` wraps a piece of Tracely's own work and, on exit, ships it down the ordinary ingest path as a trace (`domain/introspection.py` builds the OTLP; `domain/otlp_payload.py` holds the shared span builders). Two kinds — `eval` (one recording per `_dispatch_specs`, **one span per evaluator column**: named for the column, input `llm_judge · AGENT_RUN · basic · advisory`, output the verdict, with the LLM call nested underneath) and `sim` (one per scenario phase: driving, then grading). A column that makes no LLM call still gets its span, or the recording would show only the judges and read as "these are the ones that ran". They are listed by `GET /api/sessions?evals=true` as ordinary conversation rows carrying `internal_kind` + `subject_id`, and open like any trace — the **Evals** filter chip on `/traces` is the only thing that asks for them. A recording is titled by its root span (`eval · 5 evaluator(s)`) rather than its first input, which for a recording is the judge's raw system prompt.
+
+The capture point is `infrastructure/llm/provider.py`: because **every** LLM call funnels through `run_structured_agent` / `run_text_agent`, one contextvar there records the resolved prompt (system + user), the raw reply, the model and the token usage for the judge, the attacker and the graders alike — no per-caller wiring. Non-LLM steps (the HTTP POST to a customer endpoint, an evaluator's verdict, an attacker's chosen technique) are added explicitly with `rec.add(...)`.
+
+Four properties this depends on:
+
+| Property | Why it matters |
+|---|---|
+| Every span carries `internal_kind` | It is the loop guard *and* the hide-by-default axis. See the hard rule in `CLAUDE.md`. |
+| Recordings never nest | An inner `record()` is a no-op that keeps filing into the outer one — otherwise grading inside a scenario run splits one story across two unlinked traces. |
+| Emit failures are swallowed | Recording is observability. A judge that graded correctly must not report failure because its recording could not be saved. |
+| Ingest is inline, not queued | Same reason as emulated turns: the caller often holds the worker's only slot under `--pool=solo`. |
+
+`subject_id` (not `conversation_id`/`session_id`) links a recording to what it is about — the session views group by those, so reusing them would make eval spans render as turns of the conversation they graded. Switch the whole thing off with `INTROSPECTION_ENABLED=false`.
 
 ### 9. Conversation agents — declared vs derived
 `ConversationAgentsService.for_thread()` reads the user-declared agent/tool catalog a conversation sent via the SDK (`tracely.trace(agents=[...])` → table `conversation_agents`, migration `0011`). A tiny guarded sync seam: it never raises, so a lookup failure degrades to the spans-derived agent view. The catalog feeds both the UI's Conversation Agents panel and the judge's `@LIST_AGENT` variable.
@@ -227,6 +243,7 @@ Three Celery tasks, each a thin dispatch into a service class: `ingest_otlp_blob
 |---|---|---|
 | `POST /v1/traces` | `otlp.py` | OTLP/HTTP ingest (protobuf or JSON) → blob + enqueue. |
 | `GET /api/traces`, `/api/traces/{id}` | `traces.py` | trace list; trace detail (spans + scores + verdict). |
+| `GET /api/sessions?evals=true` | `sessions.py` | the thread list, **plus** Tracely's own runs as rows (`internal_kind`, `subject_id`). The one list reader that opts out of the `_REAL` filter. |
 | `GET /api/sessions`, `/api/sessions/{thread}` | `sessions.py` | conversations (grouped by `conversation_id`) + per-turn rollups (tokens, input/output split, model, cost, verdict). |
 | `GET /api/sessions/{thread}/agents` | `sessions.py` | the conversation's agents — declared (SDK catalog) or derived from spans. |
 | `GET …/{thread}/rolling-summary` · `…/by-level` · `POST …/generate` | `sessions.py` | the accumulated conversation summary (whole / per-level) + on-demand rebuild. |

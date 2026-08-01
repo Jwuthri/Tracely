@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 
 from tracely.api.routers.sessions import _shape_declared_agent
-from tracely.domain.evaluation.template_resolver import _format_agent_catalog, build_context
+from tracely.domain.evaluation.template_resolver import format_agent_catalog, build_context
 from tracely.domain.traces.spans import system_prompt
 from tracely.infrastructure.clickhouse import async_reader
 
@@ -25,8 +25,8 @@ _CATALOG = [
 ]
 
 
-def test_format_agent_catalog_includes_desc_and_params():
-    out = _format_agent_catalog(_CATALOG)
+def testformat_agent_catalog_includes_desc_and_params():
+    out = format_agent_catalog(_CATALOG)
     assert "Support Agent: Handles customer inquiries" in out
     assert "lookup_order" in out
     assert "Look up order by ID" in out
@@ -138,3 +138,60 @@ async def test_thread_agents_empty(monkeypatch):
 
     monkeypatch.setattr(async_reader, "thread_spans_full", fake_spans)
     assert await async_reader.thread_agents("p", "t") == []
+
+
+# ── the catalog in the judge's prompt ─────────────────────────────────────────
+
+
+def test_tool_params_unwrap_the_json_schema():
+    """`parameters` is a JSON Schema, so its top-level keys are `type`/`properties`/`required`.
+    Rendering those as the tool's arguments actively misleads the judge — it would be told
+    `get_weather` takes a parameter called "required"."""
+    rendered = format_agent_catalog([{
+        "name": "Weather Agent",
+        "tools": [{
+            "name": "get_weather",
+            "description": "Current conditions.",
+            "parameters": {
+                "type": "object",
+                "properties": {"city": {}, "units": {}},
+                "required": ["city"],
+            },
+        }],
+    }])
+    assert "(params: city, units)" in rendered
+    assert "properties" not in rendered
+
+
+def test_a_plain_param_dict_still_renders():
+    """Not every SDK sends a JSON Schema; a bare {name: spec} map must survive unchanged."""
+    rendered = format_agent_catalog([
+        {"name": "A", "tools": [{"name": "t", "parameters": {"city": {}, "units": {}}}]}
+    ])
+    assert "(params: city, units)" in rendered
+
+
+def test_the_basic_judge_is_told_which_tools_exist(monkeypatch):
+    """A judge that only sees the transcript can say an answer was unhelpful; it cannot say the
+    agent should have called `issue_refund` and didn't, because it has no idea the tool exists."""
+    from tracely.domain.evaluation.evaluators import llm_judge as mod
+
+    judge = mod.LLMJudgeEvaluator()
+    import tracely.services.conversation_agents_service as cas
+
+    monkeypatch.setattr(
+        cas.ConversationAgentsService, "for_thread",
+        staticmethod(lambda p, t: [{"name": "Support", "tools": [{"name": "issue_refund"}]}]),
+    )
+    ctx = mod.RunContext("p", "t1", "t1", [], {}, thread_id="th1")
+    assert "issue_refund" in judge._capabilities(ctx)
+
+
+def test_a_missing_catalog_adds_nothing(monkeypatch):
+    """Most threads declare no catalog. That must cost the prompt zero characters."""
+    from tracely.domain.evaluation.evaluators import llm_judge as mod
+    import tracely.services.conversation_agents_service as cas
+
+    monkeypatch.setattr(cas.ConversationAgentsService, "for_thread", staticmethod(lambda p, t: None))
+    judge = mod.LLMJudgeEvaluator()
+    assert judge._capabilities(mod.RunContext("p", "t1", "t1", [], {})) == ""

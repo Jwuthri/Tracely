@@ -101,7 +101,7 @@ def _args(**over):
     import argparse
 
     base = dict(
-        agent="planner", agent_opt=None, env="ci", api="http://api.test", key="k",
+        agent="planner", agents=None, all_agents=False, env="ci", api="http://api.test", key="k",
         web_url="", pr=None, sha="deadbeef", github=False, no_github=True, token="",
         dry_run=True, min_pass_rate=None, timeout=30,
     )
@@ -160,6 +160,106 @@ def test_a_timeout_exits_non_zero(monkeypatch):
 def test_missing_agent_is_a_usage_error(monkeypatch):
     monkeypatch.delenv("TRACELY_AGENT", raising=False)
     assert cli.cmd_simulate(_args(agent=None)) == 2
+
+
+# ── choosing which agents to gate ────────────────────────────────────────────
+
+
+def test_agents_can_be_repeated_or_comma_separated(monkeypatch):
+    monkeypatch.delenv("TRACELY_AGENT", raising=False)
+    assert cli.agent_list(_args(agent=None, agents=["a", "b,c"])) == ["a", "b", "c"]
+
+
+def test_the_same_agent_is_never_gated_twice(monkeypatch):
+    """Positional plus --agent naming the same slug must not start two runs for it."""
+    monkeypatch.delenv("TRACELY_AGENT", raising=False)
+    assert cli.agent_list(_args(agent="planner", agents=["planner", "support"])) == [
+        "planner", "support"
+    ]
+
+
+def test_discover_skips_agents_whose_scenarios_are_all_disabled(monkeypatch):
+    """A disabled suite has nothing to run — gating it would report NO_COVERAGE and block the PR
+    for a test nobody wrote."""
+    monkeypatch.setattr(cli, "_get_json", lambda url, key: [
+        {"agent": "planner", "enabled": True},
+        {"agent": "planner", "enabled": True},   # deduped
+        {"agent": "muted", "enabled": False},
+        {"agent": "support", "enabled": True},
+    ])
+    assert cli.discover_agents("http://api.test", "k") == ["planner", "support"]
+
+
+def test_all_with_nothing_to_run_is_an_error_not_a_pass(monkeypatch):
+    monkeypatch.delenv("TRACELY_AGENT", raising=False)
+    monkeypatch.setattr(cli, "_get_json", lambda url, key: [])
+    assert cli.cmd_simulate(_args(agent=None, all_agents=True)) == 2
+
+
+def test_all_gates_every_discovered_agent(monkeypatch):
+    monkeypatch.delenv("TRACELY_AGENT", raising=False)
+    monkeypatch.setattr(cli, "discover_agents", lambda api, key: ["planner", "support"])
+    started = []
+    monkeypatch.setattr(
+        cli, "start_simulation",
+        lambda api, key, agent, *a, **k: started.append(agent) or {"id": f"g-{agent}"},
+    )
+    monkeypatch.setattr(cli, "poll_gate", lambda api, key, gid, *a, **k: _data(status="PASS"))
+    monkeypatch.setattr(cli, "gh_context", lambda: ("", "", None))
+
+    assert cli.cmd_simulate(_args(agent=None, all_agents=True)) == 0
+    assert started == ["planner", "support"]
+
+
+def test_one_red_agent_blocks_the_whole_run(monkeypatch):
+    """The merge gate is the worst result across agents — a green one must never mask a red one."""
+    monkeypatch.delenv("TRACELY_AGENT", raising=False)
+    verdicts = iter(["PASS", "FAIL"])
+    monkeypatch.setattr(cli, "start_simulation", lambda *a, **k: {"id": "g1"})
+    monkeypatch.setattr(cli, "poll_gate", lambda *a, **k: _data(status=next(verdicts)))
+    monkeypatch.setattr(cli, "gh_context", lambda: ("", "", None))
+
+    assert cli.cmd_simulate(_args(agent=None, agents=["good", "bad"])) == 1
+
+
+def test_a_timed_out_agent_does_not_abandon_the_others(monkeypatch):
+    """One agent hanging must still leave the rest reported — and must still block."""
+    monkeypatch.delenv("TRACELY_AGENT", raising=False)
+    polled = []
+
+    def poll(api, key, gate_id, timeout, **k):
+        polled.append(gate_id)
+        if gate_id == "g-slow":
+            raise TimeoutError("nope")
+        return _data(status="PASS")
+
+    monkeypatch.setattr(
+        cli, "start_simulation", lambda api, key, agent, *a, **k: {"id": f"g-{agent}"}
+    )
+    monkeypatch.setattr(cli, "poll_gate", poll)
+    monkeypatch.setattr(cli, "gh_context", lambda: ("", "", None))
+
+    assert cli.cmd_simulate(_args(agent=None, agents=["slow", "quick"])) == 2
+    assert polled == ["g-slow", "g-quick"]
+
+
+def test_one_comment_covers_every_agent():
+    """GitHub keys our comment by a hidden marker, so N comments would overwrite each other —
+    a red agent could vanish behind a green one that finished later."""
+    md = cli.render_markdown_all(
+        [_data(status="PASS", agent="planner"), _data(status="FAIL", agent="support")],
+        "https://tracely.test", "abc1234",
+    )
+    assert md.count(cli.MARKER) == 1
+    assert "planner" in md and "support" in md
+    assert "**FAIL**" in md  # the headline is the worst agent, not the first
+
+
+def test_single_agent_markdown_is_unchanged():
+    one = _data()
+    assert cli.render_markdown_all([one], "https://tracely.test", "abc1234") == cli.render_markdown(
+        one, "https://tracely.test", "abc1234"
+    )
 
 
 def test_min_pass_rate_is_forwarded(monkeypatch):

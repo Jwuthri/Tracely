@@ -51,6 +51,7 @@ from tracely.domain.evaluation.results import EvalResult, RunContext
 from tracely.domain.evaluation.template_resolver import (
     build_context,
     extract_template_variables,
+    format_agent_catalog,
     template_resolver,
 )
 from tracely.domain.evaluation.text import answer_for, content_text, first_io
@@ -211,6 +212,32 @@ class LLMJudgeEvaluator(Evaluator):
 
     # ── per-level context builders ───────────────────────────────────────────
 
+    def _capabilities(self, ctx: RunContext) -> str:
+        """The agents and tools this conversation DECLARED (SDK `tracely.trace(agents=[...])`),
+        rendered for the prompt.
+
+        A judge that only sees the transcript can say the answer was unhelpful; it cannot say the
+        agent should have called `issue_refund` and didn't, because it has no idea that tool
+        exists. The catalog carries descriptions and parameter names the spans never do. Advanced
+        templates already reach it via `@LIST_AGENT` — this is the same data for basic judges,
+        which is most of them. Guarded: no catalog (or a lookup hiccup) simply omits the section.
+        """
+        try:
+            from tracely.services.conversation_agents_service import ConversationAgentsService
+
+            agents = ConversationAgentsService.for_thread(
+                ctx.project_id, ctx.thread_id or ctx.trace_id
+            )
+        except Exception:
+            return ""
+        rendered = format_agent_catalog(agents) if agents else None
+        if not rendered:
+            return ""
+        return (
+            "\n\nAgents and tools available to this agent (declared, not necessarily used) — "
+            "judge whether the right ones were used:\n" + _clip(rendered, 2000)
+        )
+
     def _run_trace(self, ctx: RunContext, config: dict) -> list[EvalResult]:
         """One grade for the trace: user request vs final answer, grounded in tool results."""
         user_in = content_text(ctx.root.get("input")) or first_io(ctx.spans, "input")
@@ -227,7 +254,7 @@ class LLMJudgeEvaluator(Evaluator):
             grounding = "\n\nTool results the answer must be consistent with:\n" + "\n".join(tool_outputs)
         body = (
             f"User request:\n{_clip(user_in, 2000)}\n\n"
-            f"Agent answer:\n{_clip(answer, 2000)}{grounding}"
+            f"Agent answer:\n{_clip(answer, 2000)}{grounding}{self._capabilities(ctx)}"
         )
         result = self._grade(config, body, previous=_previous_from_config(config))
         return [result] if result else []
@@ -313,7 +340,10 @@ class LLMJudgeEvaluator(Evaluator):
         if not lines:
             return []
         transcript = _clip("\n".join(lines), 8000)
-        body = f"Full conversation ({len(order)} turn{'s' if len(order) != 1 else ''}):\n{transcript}"
+        body = (
+            f"Full conversation ({len(order)} turn{'s' if len(order) != 1 else ''}):\n{transcript}"
+            f"{self._capabilities(ctx)}"
+        )
         result = self._grade(config, body)
         return [result] if result else []
 

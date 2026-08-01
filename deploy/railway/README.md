@@ -79,6 +79,10 @@ ClickHouse DDL  →  alembic upgrade head  →  seed default project/key  →  e
 All four steps are idempotent. On the very first deploy the `worker` may restart a few times until the
 backend finishes creating the schema — that's expected and self-heals.
 
+The chain **must** be wrapped in `sh -c "…"` (as must the `startCommand`). Railway execs these
+commands directly, not through a shell: unwrapped, `a && b` runs only `a`, with `&&` and `b` passed to
+it as ignored argv — so the deploy goes green while migrations silently never run.
+
 A pre-deploy command **is never retried** — if it exits non-zero the deploy stops — and its container
 gets the private network only *after* a short initialization, so an instant connection can see
 `Failed to resolve 'clickhouse.railway.internal' ([Errno -2] Name or service not known)`. The first

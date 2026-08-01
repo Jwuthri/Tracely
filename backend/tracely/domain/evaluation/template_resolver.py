@@ -236,7 +236,7 @@ def _group_turns(thread_spans: list[dict]) -> list[tuple[str, list[dict]]]:
     return [(tid, by_trace[tid]) for tid in order]
 
 
-def _format_agent_catalog(agents: list[dict]) -> str | None:
+def format_agent_catalog(agents: list[dict]) -> str | None:
     """Render the user-declared agent catalog (name / description / tools + params) for @LIST_AGENT —
     richer than the spans-derived view (`_format_agents`), since it carries descriptions and tool
     parameters the traces don't. `tools` may be a dict-of-tools or a list."""
@@ -261,7 +261,12 @@ def _format_agent_catalog(agents: list[dict]) -> str | None:
             tdef = tdef if isinstance(tdef, dict) else {}
             tname = tdef.get("name") or key
             tdesc = tdef.get("description") or ""
+            # `parameters` is usually a JSON Schema, so its top-level keys are `type`/`properties`/
+            # `required` — schema plumbing, not parameter names. Unwrap to the real argument names;
+            # a judge told a tool takes "type, properties, required" is being actively misled.
             params = tdef.get("parameters")
+            if isinstance(params, dict) and isinstance(params.get("properties"), dict):
+                params = params["properties"]
             pstr = (
                 " (params: " + ", ".join(map(str, params.keys())) + ")"
                 if isinstance(params, dict) and params
@@ -473,7 +478,7 @@ def build_context(
         ctx.last_assistant_msg = _clip(answers[-1], _MSG_CLIP) if answers else None
     if need("LIST_AGENT"):
         # prefer the user-declared catalog (richer) when present, else derive from spans
-        ctx.agents = _format_agent_catalog(declared_agents) if declared_agents else _format_agents(thread_spans)
+        ctx.agents = format_agent_catalog(declared_agents) if declared_agents else _format_agents(thread_spans)
 
     if cl == CL_CONVERSATION:
         return ctx

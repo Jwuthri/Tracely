@@ -87,15 +87,29 @@ A pre-defined deployment for the whole stack — the three app services plus Pos
 
 ## Ingest from your agent
 
-Point any OTLP/HTTP exporter at `POST {endpoint}/v1/traces` with `Authorization: Bearer tracely_dev_key`. Tracely reads standard `gen_ai.*` / OpenInference attributes plus first-class hints — `tracely.agent.id` (auto-registered), `tracely.agent.version`, `tracely.conversation.id` / `turn.*` / `step.*`, `tracely.observation.type`, and `tracely.env` (`prod|staging|ci|dev`, the gating axis). The [`tracely-ai`](sdk/README.md) is the ergonomic path and also ships the `tracely gate` / `tracely replay` CI commands.
+Point any OTLP/HTTP exporter at `POST {endpoint}/v1/traces` with `Authorization: Bearer tracely_dev_key`. Tracely reads standard `gen_ai.*` / OpenInference attributes plus first-class hints — `tracely.agent.id` (auto-registered), `tracely.agent.version`, `tracely.conversation.id` / `turn.*` / `step.*`, `tracely.observation.type`, and `tracely.env` (`prod|staging|ci|dev`, the gating axis). The [`tracely-ai`](sdk/README.md) is the ergonomic path and also ships the `tracely simulate` / `gate` / `replay` CI commands.
 
 ## Gate your PRs (CI/CD)
 
-The differentiated half: a promoted production failure becomes a regression test that **blocks the PR** that reintroduces it. The gate **exits non-zero on failure** (so it blocks the check) and posts a commit status + PR comment. All you need is a **`key`** (your ingest key — it identifies your workspace), your Tracely **`api`** URL, and the **`agent`** slug. Wire it one of two ways, depending on how your CI runs your agent.
+The differentiated half: a promoted production failure becomes a regression test that **blocks the PR** that reintroduces it. The gate **exits non-zero on failure** (so it blocks the check) and posts a commit status + PR comment. All you need is a **`key`** (your ingest key — it identifies your workspace) and your Tracely **`api`** URL. Wire it one of three ways, depending on how your CI can reach your agent.
 
-### Option A — gate the traces your CI already emits (lightest)
+### Option A — let Tracely call your agent (no agent code in CI)
 
-If your pipeline already runs your agent instrumented with `tracely.env=ci`, the gate just matches those traces to your promoted cases (by input) and returns PASS/FAIL — no agent code wiring. Use the bundled composite action:
+Register your agent's HTTP endpoint once, author [scenarios](docs/pages/scenarios.mdx) — multi-turn conversations, or an adversarial goal a red-team model improvises against — and Tracely drives them itself. **Nothing to install, import or shim**, so a TypeScript or Go service gates exactly like a Python one:
+
+```yaml
+      - uses: Jwuthri/Tracely/.github/actions/tracely-gate@master
+        with:
+          api:   https://tracely.your-co.dev
+          key:   ${{ secrets.TRACELY_KEY }}
+          # agent: planner,support-agent   ← a subset; omit it to gate EVERY agent with scenarios
+```
+
+Scenarios belong to an agent, so leaving `agent` blank gates each one in its own run and fails the job if any of them fails — a new agent is covered the day someone writes its first scenario.
+
+### Option B — gate the traces your CI already emits
+
+If your pipeline already runs your agent instrumented with `tracely.env=ci`, the gate just matches those traces to your promoted cases (by input) and returns PASS/FAIL. Use the bundled composite action with `mode: gate`:
 
 ```yaml
 # .github/workflows/tracely.yml
@@ -113,12 +127,13 @@ jobs:
       # → your existing step(s) that run the agent and emit env=ci traces go here ←
       - uses: Jwuthri/Tracely/.github/actions/tracely-gate@master
         with:
+          mode:  gate                          # grade the ci traces this workflow emitted
           agent: planner                       # which agent's promoted suite to run
           api:   https://tracely.your-co.dev   # your Tracely backend (TRACELY_API)
           key:   ${{ secrets.TRACELY_KEY }}    # your ingest key = your workspace
 ```
 
-### Option B — replay the recorded cases against your code (hermetic)
+### Option C — replay the recorded cases against your code (hermetic)
 
 This re-runs your agent on each promoted case's *recorded input*, serving the recorded tool/LLM outputs as fixtures — deterministic, offline, **no API keys, no cost** — then gates. It guarantees the exact failing inputs are tested. Run the CLI directly:
 
@@ -156,7 +171,7 @@ The core **trace → detect → cluster → regression → gate** loop is end-to
 - **Auth:** three modes — `dev` (open), `local` (email/password + invite flow + change-password, self-host), `clerk` (hosted SaaS). Team management, API keys, invitations, account settings.
 - **Triage:** structural + semantic failure clustering, a creatable suggested-evaluator draft, promote-to-case.
 - **Regression:** hermetic fixture bundles, fail-to-pass contracts, CI replay.
-- **Gate:** PR blocking via `tracely replay` / `tracely gate`, GitHub status + comment.
+- **Gate:** PR blocking via `tracely simulate` (scenarios against your live endpoint, all agents or a subset) / `tracely replay` / `tracely gate`, GitHub status + comment.
 - **Insights:** daily traces/failures/gate pass-rate **Trends** + per-agent cross-metric **meta-analysis** (Spearman correlations + z-score outliers, LLM-synthesized).
 - **Conversation intelligence:** real-time **rolling summary** (accumulating per-turn memory backing the judge's `@HISTORY`) + a **conversation-agents** panel (declared via the SDK, or derived from spans).
 - **CI:** the repo's own GitHub Actions pipeline (ruff + pytest + `next build` + prod Docker images) and Dependabot, alongside the regression-gate dogfood.

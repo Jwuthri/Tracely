@@ -21,6 +21,7 @@ from tracely.config import settings
 from tracely.domain.gate.warnings import delta_warnings
 from tracely.domain.regression.contract import apply_quality, evaluate_assertions
 from tracely.domain.regression.fixtures import FixtureBundle
+from tracely.domain import introspection
 from tracely.domain.simulation import (
     ATTACK_SYSTEM,
     EXPECT_SYSTEM,
@@ -37,6 +38,7 @@ from tracely.domain.simulation import (
     expect_skipped,
     gate_verdict,
     normalize_turns,
+    weakness_lines,
 )
 from tracely.domain.trajectory import build_trajectory, tool_sequence
 from tracely.domain.traces.spans import input_digest
@@ -47,6 +49,7 @@ from tracely.infrastructure.db import repositories
 from tracely.infrastructure.db.models import (
     Agent,
     AgentEndpoint,
+    FailureCluster,
     EvaluationCase,
     GateCase,
     GateRun,
@@ -54,6 +57,7 @@ from tracely.infrastructure.db.models import (
 )
 from tracely.infrastructure.llm.provider import llm_enabled, run_structured_agent, use_project_key
 from tracely.services.evaluation_service import EvaluationService
+from tracely.services.introspection_service import record
 from tracely.services.simulation_service import SimulationService
 
 log = structlog.get_logger()
@@ -362,8 +366,16 @@ class GateService:
         slug = agent.slug if agent else agent_id
         sim = SimulationService()
 
+        # Looked up once per gate, not per turn: the attacker gets the same leverage all run.
+        weaknesses = (
+            self._known_weaknesses(project_id, agent_id)
+            if any(s.kind == "ADVERSARIAL" for s in scenarios)
+            else []
+        )
         for scenario in scenarios:
-            run = sim.run_scenario(project_id, slug, scenario, endpoint, env=env)
+            run = sim.run_scenario(
+                project_id, slug, scenario, endpoint, env=env, weaknesses=weaknesses
+            )
             self.session.add(GateCase(
                 id=str(uuid.uuid4()), gate_run_id=gate.id, scenario_id=scenario.id,
                 candidate_trace_id=run["conversation_id"], verdict="PENDING",
@@ -396,10 +408,19 @@ class GateService:
         all_traces = [tid for o in outcomes for tid in o.trace_ids]
         self._evaluate_turns(project_id, all_traces)
         for o in outcomes:
-            self._grade_expectations(project_id, o, (turns_by_scenario or {}).get(o.scenario_id))
-            goal = (goal_by_scenario or {}).get(o.scenario_id)
-            if goal:
-                self._grade_attack(project_id, o, goal)
+            # One recording per conversation, subject = the conversation, so "why did the gate
+            # decide that?" opens next to "what did the agent say?" — the expectation judge's
+            # prompt and the attack judge's evidence quote included.
+            with record(
+                introspection.SIM, o.conversation_id, "sim · grading",
+                project_id=project_id,
+            ):
+                self._grade_expectations(
+                    project_id, o, (turns_by_scenario or {}).get(o.scenario_id)
+                )
+                goal = (goal_by_scenario or {}).get(o.scenario_id)
+                if goal:
+                    self._grade_attack(project_id, o, goal)
         scores_by_trace = self.trace_reader.scores_by_trace(project_id, all_traces)
         advisory = repositories.advisory_score_names(self.session, project_id)
         for o in outcomes:
@@ -415,6 +436,33 @@ class GateService:
             failed = _failing_score_names(pooled, advisory)
             if failed:
                 o.detail = {**o.detail, "failed_scores": failed}
+
+    def _known_weaknesses(self, project_id: str, agent_id: str) -> list[str]:
+        """This agent's biggest open failure clusters, as prompt lines for the attacker.
+
+        The differentiated part of adversarial testing: a generic red-teamer guesses at where an
+        agent is weak, while Tracely already clustered where this one actually broke in
+        production. Best-effort — no clusters (or a hiccup reading them) just means a
+        less-informed attacker, never a failed gate.
+        """
+        limit = settings.attacker_weakness_hints
+        if limit <= 0:
+            return []
+        try:
+            rows = self.session.execute(
+                select(FailureCluster.label, FailureCluster.taxonomy, FailureCluster.signature)
+                .where(
+                    FailureCluster.project_id == project_id,
+                    FailureCluster.agent_id == agent_id,
+                    FailureCluster.status == "OPEN",
+                )
+                .order_by(FailureCluster.count.desc())
+                .limit(limit)
+            ).all()
+        except Exception as exc:
+            log.warning("attacker_weakness_lookup_failed", agent_id=agent_id, error=str(exc))
+            return []
+        return weakness_lines([(r[0] or "", r[1] or "", r[2] or "") for r in rows])
 
     def _grade_attack(self, project_id: str, outcome: ScenarioOutcome, goal: str) -> None:
         """Judge whether an adversarial conversation achieved its goal, and write the result as a
@@ -438,6 +486,7 @@ class GateService:
                         attack_prompt(goal, transcript),
                         response_format=_AttackVerdict,
                         system_prompt=ATTACK_SYSTEM,
+                        model=settings.attacker_judge_model or None,
                     )
                     reason = f"{verdict.reason} [{verdict.evidence}]" if verdict.evidence else verdict.reason
                     result = attack_result(verdict.achieved, reason)

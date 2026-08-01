@@ -1,6 +1,11 @@
 """Seed rich, detailed demo conversations — broad coverage of every shape the UI renders, written
 entirely against the public Tracely SDK (no raw span attributes).
 
+Most of these are MULTI-TURN, because that's what real traffic looks like and it's what the
+conversation view, the rolling summary and the CONVERSATION-level evaluators are for. The
+single-turn ones are single on purpose — a guardrail refusal ends the conversation, an FAQ is one
+question, and the three failure fixtures stay minimal so the shape under test is obvious.
+
 Use cases covered:
   • single-turn AND multi-turn conversations (conversation_id groups turns; each turn is a trace)
   • multi-agent runs with explicit handoffs (router → specialists; agent(handoff_from=...))
@@ -213,7 +218,62 @@ def seed_rag():
             think_tok=40,
             metadata={"tenant": "acme", "grounded": True},
         )
-    seeded.append(f"{conv}  RAG docs Q&A (guardrail+embed+retrieve+chain)")
+
+    # turn 1 — the follow-up a real user asks straight after: the edge case the docs gloss over.
+    with tracely.agent(SUPPORT, version="v4", conversation=conv, turn=1, user="u_7741") as a:
+        u1 = "What about a cron job that still has the old key baked into its env?"
+        ans1 = (
+            "It keeps working until you revoke — the overlap is what buys you time. Redeploy the "
+            "cron with the new key first, confirm one successful run, then revoke. "
+            "**Settings → API keys → Last used** tells you whether anything is still on the old one."
+        )
+        turn_io(a, u1, ans1)
+        with tracely.chain("rag_pipeline", agent=SUPPORT):
+            embed("text-embedding-3-small", SUPPORT, u1, dims=1536, tokens=17)
+            retrieve(
+                "search_docs",
+                SUPPORT,
+                {"query": "revoke key last used cron", "top_k": 3, "index": "help-center"},
+                {
+                    "hits": [
+                        {"id": "doc/api-keys", "score": 0.89, "title": "Rotating API keys"},
+                        {"id": "doc/key-usage", "score": 0.86, "title": "Last-used timestamps"},
+                    ]
+                },
+                vector_store="pgvector",
+            )
+            time.sleep(0.15)
+        gen(
+            SUPPORT,
+            [
+                {"role": "system", "content": "Answer ONLY from the retrieved docs. Cite them."},
+                {"role": "user", "content": u1},
+            ],
+            ans1,
+            1180,
+            96,
+            think_tok=52,
+            metadata={"tenant": "acme", "grounded": True},
+        )
+
+    # turn 2 — "just show me" · the agent reaches for a tool instead of prose.
+    with tracely.agent(SUPPORT, version="v4", conversation=conv, turn=2, user="u_7741") as a:
+        u2 = "Can you check whether anything used the old key in the last 24h?"
+        ans2 = (
+            "Nothing has. The old key's last use was 31 days ago (`worker-eu` at 02:14 UTC), so "
+            "it's safe to revoke now."
+        )
+        turn_io(a, u2, ans2)
+        think(SUPPORT, "This is answerable from key usage — call the API rather than guess.", 34)
+        use_tool(
+            "get_key_usage",
+            SUPPORT,
+            {"key_id": "key_live_a91f", "window": "24h"},
+            {"calls": 0, "last_used_at": "2026-06-30T02:14:09Z", "last_client": "worker-eu"},
+        )
+        gen(SUPPORT, sys_user("Answer from the tool result. Be decisive.", u2), ans2, 1420, 74)
+
+    seeded.append(f"{conv}  RAG docs Q&A · 3 turns (guardrail+embed+retrieve+chain+tool)")
     return conv
 
 
@@ -506,7 +566,32 @@ def seed_multimodal():
             102,
             think_tok=60,
         )
-    seeded.append(f"{conv}  multimodal return (text+image+file)")
+
+    # turn 1 — the user picks one of the options the agent offered, so the turn is a decision
+    # the agent has to act on rather than another question.
+    with tracely.agent(SHOP, version="v3", conversation=conv, turn=1, user="u_9043") as a:
+        u1 = "Refund rather than replace, please."
+        ans1 = (
+            "Refunded **$129.00** to your Visa ending 4242 — it lands in 3-5 business days. The "
+            "prepaid return label is in your email; no need to send the original packaging."
+        )
+        turn_io(a, u1, ans1)
+        think(SHOP, "Refund path: issue first, then label — a failed label shouldn't hold the money.", 32)
+        use_tool(
+            "issue_refund",
+            SHOP,
+            {"order_id": "ORD-7781", "amount_usd": 129.00, "reason": "damaged_on_arrival"},
+            {"ok": True, "refund_id": "re_8823", "settles_in_days": 4},
+        )
+        use_tool(
+            "create_return_label",
+            SHOP,
+            {"order_id": "ORD-7781", "carrier": "USPS"},
+            {"tracking": "9400111899223197428490", "url": "https://files.example/label-7781.pdf"},
+        )
+        gen(SHOP, sys_user("Confirm the refund amount and the return steps.", u1), ans1, 890, 84)
+
+    seeded.append(f"{conv}  multimodal return · 2 turns (text+image+file → refund)")
     return conv
 
 
@@ -577,7 +662,51 @@ def seed_attachments():
             96,
             think_tok=60,
         )
-    seeded.append(f"{conv}  warranty claim (image + document attachments)")
+
+    # turn 1 — the agent needed something it couldn't see in the photo; the user supplies it.
+    # A second attachment mid-thread is the shape a support UI has to render correctly.
+    with tracely.agent(SUPPORT, version="v4", conversation=conv, turn=1, user="u_5582") as a:
+        u1 = as_content(
+            "Here's the serial plate you asked for.",
+            images=["https://picsum.photos/seed/tracely-serial/320/200"],
+        )
+        ans1 = (
+            "Read it as **SN-4471-QX**, manufactured 2025-11 — that's 8 months old, so it's inside "
+            "the 24-month warranty. Approving the replacement now."
+        )
+        turn_io(a, u1, ans1)
+        use_tool(
+            "vision_ocr",
+            SUPPORT,
+            {"image": "serial-plate.jpg", "hint": "serial"},
+            {"text": "SN-4471-QX", "confidence": 0.97, "mfg": "2025-11"},
+        )
+        use_tool(
+            "lookup_warranty",
+            SUPPORT,
+            {"serial": "SN-4471-QX"},
+            {"covered": True, "months_remaining": 16, "plan": "standard-24"},
+        )
+        think(SUPPORT, "Covered with 16 months left — approve without escalating to a human.", 44)
+        gen(SUPPORT, sys_user("Confirm coverage and state the decision.", u1), ans1, 980, 88)
+
+    # turn 2 — resolution, and a tool that has a real-world side effect.
+    with tracely.agent(SUPPORT, version="v4", conversation=conv, turn=2, user="u_5582") as a:
+        u2 = "Great — how long until the replacement arrives?"
+        ans2 = (
+            "It ships today and arrives **Fri 4 Jul**. Your return label is in your email — drop "
+            "the damaged unit at any UPS point within 14 days and there's nothing further to pay."
+        )
+        turn_io(a, u2, ans2)
+        use_tool(
+            "create_replacement_order",
+            SUPPORT,
+            {"claim_id": "WC-4471", "sku": "KB-PRO-2", "priority": "standard"},
+            {"order_id": "ORD-9120", "eta": "2026-07-04", "return_label": "1Z999AA10123456784"},
+        )
+        gen(SUPPORT, sys_user("Give the ETA and the return instructions.", u2), ans2, 1240, 92)
+
+    seeded.append(f"{conv}  warranty claim · 3 turns (image + document + OCR + resolution)")
     return conv
 
 
@@ -632,7 +761,69 @@ def seed_research():
             max_tokens=2048,
             metadata={"tenant": "acme", "depth": "deep"},
         )
-    seeded.append(f"{conv}  deep research (sonnet · multi-retrieve · long gen)")
+    # turn 1 — narrowing. The interesting shape: a follow-up that reuses turn 0's findings
+    # instead of re-searching, so the thread has one expensive turn and one cheap one.
+    with tracely.agent(RESEARCH, version="v1", conversation=conv, turn=1, user="u_2027") as a:
+        u1 = "Just B — how does their platform fee scale past 10M events?"
+        ans1 = (
+            "It tiers: $0.40 per 1k to 5M events, $0.28 to 25M, then negotiated. The platform fee "
+            "is flat at $1,200/mo regardless of volume, so past ~10M events their effective rate "
+            "drops below Competitor A's per-seat pricing for teams under 40 seats."
+        )
+        turn_io(a, u1, ans1)
+        think(
+            RESEARCH,
+            "Turn 0 already fetched B's pricing page — re-read that rather than search again.",
+            60,
+            model="claude-3-5-sonnet",
+        )
+        retrieve(
+            "web_search",
+            RESEARCH,
+            {"query": "Competitor B volume tiers platform fee", "engine": "tavily"},
+            {"hits": [{"url": "https://b.example/pricing#tiers", "score": 0.94}]},
+            competitor="Competitor B",
+        )
+        gen(
+            RESEARCH,
+            sys_user("Answer with the tier table and the crossover point.", u1),
+            ans1,
+            2100,
+            260,
+            model="claude-3-5-sonnet",
+            think_tok=60,
+            max_tokens=2048,
+            metadata={"tenant": "acme", "depth": "followup"},
+        )
+
+    # turn 2 — turn the research into an artefact. Structured output + a write tool.
+    with tracely.agent(RESEARCH, version="v1", conversation=conv, turn=2, user="u_2027") as a:
+        u2 = "Put that in a table I can paste into the board deck."
+        ans2 = (
+            "| Vendor | Model | Enterprise cost @10M events / 25 seats |\n"
+            "|---|---|---|\n"
+            "| A | per seat | $1,500/mo |\n"
+            "| B | usage + platform | $4,000/mo |\n"
+            "| C | flat bundle | $2,500/mo |"
+        )
+        turn_io(a, u2, ans2)
+        gen(
+            RESEARCH,
+            sys_user("Emit a markdown table only. No commentary.", u2),
+            ans2,
+            1450,
+            180,
+            model="claude-3-5-sonnet",
+            metadata={"tenant": "acme", "format": "markdown_table"},
+        )
+        use_tool(
+            "save_artifact",
+            RESEARCH,
+            {"name": "competitor-pricing.md", "format": "markdown"},
+            {"ok": True, "url": "https://files.example/competitor-pricing.md", "bytes": 214},
+        )
+
+    seeded.append(f"{conv}  deep research · 3 turns (sonnet · multi-retrieve · long gen)")
     return conv
 
 
@@ -707,7 +898,38 @@ def seed_tool_recovery():
             {"ok": True},
         )
         gen(SHOP, sys_user("Confirm the address change.", u), ans, 240, 44)
-    seeded.append(f"{conv}  tool error + recovery (fallback provider)")
+
+    # turn 1 — the consequence the user actually cares about after an address change.
+    with tracely.agent(SHOP, version="v3", conversation=conv, turn=1, user="u_6610") as a:
+        u1 = "Does that change the delivery date?"
+        ans1 = (
+            "It moves by a day — Thursday 3 Jul instead of Wednesday. Same carrier, and it's still "
+            "within your Prime window, so there's no extra charge."
+        )
+        turn_io(a, u1, ans1)
+        use_tool(
+            "get_shipping_quote",
+            SHOP,
+            {"order_id": "ORD-5582", "address_id": "addr_work"},
+            {"carrier": "UPS", "service": "Ground", "eta": "2026-07-03", "surcharge_usd": 0.0},
+        )
+        gen(SHOP, sys_user("State the new ETA and any cost change.", u1), ans1, 620, 52)
+
+    # turn 2 — a second edit on the same order, so the thread shows accumulating state.
+    with tracely.agent(SHOP, version="v3", conversation=conv, turn=2, user="u_6610") as a:
+        u2 = "Actually add a note for the front desk to hold it."
+        ans2 = "Added — the driver will see \"Hold at front desk, ask for Dana\" on the label."
+        turn_io(a, u2, ans2)
+        think(SHOP, "Delivery notes are per-shipment, not per-address — update the shipment.", 26)
+        use_tool(
+            "update_delivery_note",
+            SHOP,
+            {"order_id": "ORD-5582", "note": "Hold at front desk, ask for Dana"},
+            {"ok": True, "chars": 32},
+        )
+        gen(SHOP, sys_user("Confirm the note back to the user verbatim.", u2), ans2, 780, 38)
+
+    seeded.append(f"{conv}  tool error + recovery · 3 turns (fallback provider)")
     return conv
 
 

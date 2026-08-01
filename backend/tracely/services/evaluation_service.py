@@ -27,6 +27,7 @@ from typing import Callable
 import structlog
 
 from tracely.config import settings
+from tracely.domain import introspection
 from tracely.domain.evaluation.evaluators import EvalResult, RunContext, default_registry
 from tracely.domain.evaluation.evaluators.base import CONVERSATION, RUN
 from tracely.domain.evaluation.targeting import spec_applies
@@ -37,11 +38,37 @@ from tracely.infrastructure.clickhouse.trace_reader import TraceReader
 from tracely.infrastructure.db import repositories
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.llm import provider
+from tracely.services.introspection_service import record
 from tracely.services.structural_clustering_service import StructuralClusteringService
 
 log = structlog.get_logger()
 
 OnResult = Callable[[dict], None]
+
+
+def _spec_label(spec: dict) -> str:
+    """`llm_judge · AGENT_RUN · basic` — what an evaluator column actually is, for the recording.
+    The column name alone doesn't say whether it graded the run, each step, or the whole thread."""
+    cfg = spec.get("config") or {}
+    bits = [str(spec.get("kind") or "?"), str(spec.get("level") or "?")]
+    if spec.get("kind") == "llm_judge":
+        bits.append("advanced" if cfg.get("is_advanced") else "basic")
+        if cfg.get("model"):
+            bits.append(str(cfg["model"]))
+    if cfg.get("advisory"):
+        bits.append("advisory")
+    return " · ".join(bits)
+
+
+def _subject_label(ctx) -> str:
+    """What is being graded, in words — the recording's title line. Falls back to the id, but the
+    id alone was the whole complaint: a row reading `0000…1f1ffee` tells you nothing."""
+    from tracely.domain.evaluation.text import content_text
+
+    text = (content_text(ctx.root.get("input")) or "").strip()
+    where = "conversation" if not ctx.trace_id else "trace"
+    subject = ctx.trace_id or ctx.thread_id
+    return f"grading {where} {subject}" + (f"\n\n{text[:600]}" if text else "")
 
 
 def _chain_payload(score: dict) -> dict:
@@ -145,6 +172,11 @@ class EvaluationService:
         spans = self.trace_reader.read_spans(project_id, trace_id)
         if not spans:
             return {"scores": 0}
+        # Second guard on the infinite loop (the first is at ingest, which never schedules these).
+        # Both are needed: a monitor, a manual re-run, or a backfill can call this directly, and
+        # grading a recording of a grading would record another one, without end.
+        if any(s.get("internal_kind") for s in spans):
+            return {"scores": 0, "skipped": "internal"}
         root = root_span(spans)
         agent_run_id = root.get("agent_run_id") or trace_id
         thread_id = next((s.get("conversation_id") for s in spans if s.get("conversation_id")), "") or trace_id
@@ -334,15 +366,33 @@ class EvaluationService:
         # under span_id "" — see `_inject_dependencies` / the judge's per-span resolution).
         completed: dict[str, list[dict]] = {}
         results: list[EvalResult] = []
+        subject = ctx.trace_id or ctx.thread_id
         # THE chokepoint every eval path funnels through (on-ingest, on-demand run, gate quality
-        # grading) — scoping here once covers every llm_judge call this dispatch makes.
-        with provider.use_project_key(ctx.project_id):
+        # grading) — scoping here once covers every llm_judge call this dispatch makes, and the
+        # recording captures each of those calls' prompt and reply without per-evaluator wiring.
+        with provider.use_project_key(ctx.project_id), record(
+            introspection.EVAL, subject,
+            f"eval · {len(specs)} evaluator(s)", project_id=ctx.project_id,
+            subject_label=_subject_label(ctx),
+        ) as rec:
             for spec in specs:
                 spec = _inject_dependencies(spec, completed)
+                if rec:
+                    # One span per evaluator, named for the column, describing WHICH kind at
+                    # WHAT level — "why did this column say that" starts with knowing what it is.
+                    rec.label = spec.get("score_name") or spec.get("kind") or "evaluator"
+                    rec.describe(input=_spec_label(spec))
                 try:
                     new_results = self.registry.dispatch(
                         spec["kind"], spec["config"], spec["score_name"], spec["level"], ctx
                     )
+                    if rec:
+                        # The verdict lands ON the evaluator's own span rather than in a child
+                        # "verdict" event — one row per evaluator, not two.
+                        rec.describe(output="; ".join(
+                            f"{r.verdict or r.value}" + (f" — {r.comment}" if r.comment else "")
+                            for r in new_results
+                        ) or "(no result — not applicable to this trace)")
                     results.extend(new_results)
                     if new_results:
                         completed[spec["score_name"]] = [
@@ -356,6 +406,8 @@ class EvaluationService:
                             for r in new_results
                         ]
                 except Exception as exc:  # one bad evaluator must not sink the rest
+                    if rec:
+                        rec.describe(error=str(exc)[:500])
                     log.warning(
                         "evaluator_failed", evaluator=spec.get("score_name", "?"), error=str(exc)
                     )

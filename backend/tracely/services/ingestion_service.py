@@ -62,8 +62,19 @@ class IngestionService:
         insert_rows(client, "events", EVENT_COLUMNS, to_rows(events))
 
         trace_ids = sorted({ev.get("trace_id") for ev in events if ev.get("trace_id")})
+        # Recordings of Tracely's own work (an evaluation, a scenario run) are reported separately
+        # so the caller never schedules evaluation for them: grading an eval run would record
+        # another eval run, and so on without end. See `domain/introspection.py`.
+        internal = sorted({
+            ev.get("trace_id") for ev in events
+            if ev.get("trace_id") and ev.get("internal_kind")
+        })
         log.info("ingested", project_id=project_id, key=key, events=len(events))
-        return {"events": len(events), "trace_ids": list(trace_ids)}
+        return {
+            "events": len(events),
+            "trace_ids": list(trace_ids),
+            "internal_trace_ids": list(internal),
+        }
 
     # ── internals ─────────────────────────────────────────────────────────────
 

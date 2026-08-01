@@ -35,6 +35,14 @@ _FAILING = (
 
 _SCORE_COLS = "name, evaluation_level, observation_id, value, string_value, verdict, comment, data_type"
 
+# Recordings of Tracely's own work (an evaluation, a scenario run — see `domain/introspection.py`)
+# live in `events` like any trace, but they are ABOUT the product rather than produced by the
+# customer's agent. Every list, count and metric excludes them, or a project's trace count would
+# double the day evaluators were switched on. Two deliberate exceptions: fetch-by-id readers (so a
+# recording opens like any trace) and `sessions_overview(include_internal=True)`, which is what the
+# traces list's "Evals" toggle asks for.
+_REAL = "internal_kind = ''"
+
 
 # ── traces ────────────────────────────────────────────────────────────────────
 
@@ -53,7 +61,7 @@ async def traces_overview(
                anyIf(agent_id, parent_span_id = '')  AS agent_id,
                maxIf(1, level = 'ERROR')             AS has_error
         FROM events
-        WHERE project_id = {p:String}
+        WHERE project_id = {p:String} AND internal_kind = ''
         GROUP BY trace_id
         ORDER BY ts DESC
         LIMIT {n:UInt32}
@@ -157,7 +165,7 @@ async def traces_in_window(project_id: str, days: int) -> int:
         "SELECT countDistinct(trace_id) FROM events FINAL "
         "WHERE project_id = {p:String} "
         "AND start_time >= now() - toIntervalDay({d:UInt32}) "
-        "AND env != 'ci'",
+        f"AND env != 'ci' AND {_REAL}",
         parameters={"p": project_id, "d": days},
     )
     rows = res.result_rows
@@ -298,15 +306,21 @@ async def sessions_overview(
     from_ts: str | None = None,
     to_ts: str | None = None,
     advisory: Sequence[str] = (),
+    include_internal: bool = False,
 ) -> list[dict]:
     """Traces grouped into threads by conversation (a trace with no conversation is its own
     1-turn thread), newest-last-activity first, with per-thread rollups + parsed metadata.
+
+    `include_internal` adds Tracely's own runs — an evaluation, a scenario — as ordinary rows,
+    tagged with `internal_kind` so the table can mark them. Off by default: they are about the
+    product, not the customer's agent, and unasked-for they double a project's trace list.
     The optional time window bounds each trace's start_time INSIDE the per-trace subquery so
     ClickHouse can prune by the `toYYYYMM(start_time)` partition. `advisory` excludes those
     evaluators' FAILs from the per-thread `failing` flag (see `_FAILING`). Content-less 1-turn
     threads (no input, no output, not failing) are dropped entirely — see the HAVING clause."""
     client = await get_async_client()
     time_clause = ""
+    internal_clause = "" if include_internal else f" AND {_REAL}"
     params: dict = {"p": project_id, "n": limit, "o": max(offset, 0), "adv": list(advisory)}
     if from_ts:
         time_clause += " AND start_time >= parseDateTimeBestEffort({from:String})"
@@ -319,8 +333,11 @@ async def sessions_overview(
         SELECT
           if(conv != '', conv, trace_id)        AS thread,
           count()                               AS turns,
-          argMin(t_input, ts_min)               AS first_input,
-          argMax(t_output, ts_min)              AS last_output,
+          -- An internal run is titled by its root span ("eval · 5 evaluator(s)"), not by the
+          -- first GENERATION input — which for a recording is the judge's raw system prompt and
+          -- reads as noise in the list. Its "answer" is what it was about.
+          if(max(t_internal) != '', max(t_root_name), argMin(t_input, ts_min))  AS first_input,
+          if(max(t_internal) != '', max(t_subject), argMax(t_output, ts_min))   AS last_output,
           sum(t_tokens)                         AS tokens,
           sum(t_input_tokens)                   AS input_tokens,
           sum(t_output_tokens)                  AS output_tokens,
@@ -330,6 +347,8 @@ async def sessions_overview(
           max(ts_max)                           AS last_ts,
           argMax(trace_id, ts_max)              AS last_trace_id,
           max(t_failing)                        AS failing,
+          max(t_internal)                       AS internal_kind,
+          max(t_subject)                        AS subject_id,
           toJSONString(CAST(
             (groupArrayArray(mapKeys(t_meta)), groupArrayArray(mapValues(t_meta))),
             'Map(String, String)'))             AS metadata
@@ -360,11 +379,14 @@ async def sessions_overview(
             min(start_time)                                               AS ts_min,
             max(coalesce(end_time, start_time))                           AS ts_max,
             maxIf(1, trace_id IN ({_FAILING}))                            AS t_failing,
+            max(internal_kind)                                            AS t_internal,
+            max(subject_id)                                               AS t_subject,
+            anyIf(name, parent_span_id = '')                              AS t_root_name,
             CAST(
               (groupArrayArray(mapKeys(mapFilter((k, v) -> startsWith(k, 'tracely.metadata.'), CAST(metadata, 'Map(String, String)')))),
                groupArrayArray(mapValues(mapFilter((k, v) -> startsWith(k, 'tracely.metadata.'), CAST(metadata, 'Map(String, String)'))))),
               'Map(String, String)')                                      AS t_meta
-          FROM events FINAL WHERE project_id = {{p:String}}{time_clause}
+          FROM events FINAL WHERE project_id = {{p:String}}{time_clause}{internal_clause}
           GROUP BY trace_id
         )
         GROUP BY thread
@@ -540,7 +562,7 @@ async def agent_trace_ids(
                if(max(conversation_id) != '', max(conversation_id), trace_id) AS thread,
                min(start_time) AS ts
         FROM events FINAL
-        WHERE project_id = {{p:String}}
+        WHERE project_id = {{p:String}} AND {_REAL}
         GROUP BY trace_id
         {having}
         ORDER BY ts DESC
@@ -618,7 +640,7 @@ async def search_threads(project_id: str, q: str, limit: int = 8) -> list[dict]:
                  argMinIf(input, start_time, input != '') AS ti,
                  positionCaseInsensitive(argMinIf(input, start_time, input != ''), {q:String}) > 0 AS matched,
                  min(start_time) AS tmin, max(coalesce(end_time, start_time)) AS tmax
-          FROM events FINAL WHERE project_id = {p:String} GROUP BY trace_id
+          FROM events FINAL WHERE project_id = {p:String} AND internal_kind = '' GROUP BY trace_id
         )
         GROUP BY thread HAVING max(matched) > 0
         ORDER BY last_ts DESC LIMIT {n:UInt32}
@@ -637,14 +659,16 @@ async def stats_counts(project_id: str, advisory: Sequence[str] = ()) -> dict:
     client = await get_async_client()
     r = (
         await client.query(
-            "SELECT uniqExact(trace_id), count() FROM events FINAL WHERE project_id = {p:String}",
+            "SELECT uniqExact(trace_id), count() FROM events FINAL "
+            "WHERE project_id = {p:String} AND internal_kind = ''",
             parameters={"p": project_id},
         )
     ).result_rows
     traces, spans = (int(r[0][0]), int(r[0][1])) if r else (0, 0)
     f = (
         await client.query(
-            "SELECT uniqExact(trace_id) FROM events FINAL WHERE project_id = {p:String} AND level = 'ERROR'",
+            "SELECT uniqExact(trace_id) FROM events FINAL "
+            "WHERE project_id = {p:String} AND level = 'ERROR' AND internal_kind = ''",
             parameters={"p": project_id},
         )
     ).result_rows
@@ -692,7 +716,7 @@ async def ops_metrics(project_id: str, days: int) -> dict:
                        sum(arraySum(mapValues(usage_details)))        AS tokens,
                        sum(arraySum(mapValues(cost_details)))         AS cost
                 FROM events FINAL
-                WHERE project_id = {p:String} AND start_time >= subtractDays(now(), {d:UInt32})
+                WHERE project_id = {p:String} AND start_time >= subtractDays(now(), {d:UInt32}) AND internal_kind = ''
                 GROUP BY trace_id
             )
             GROUP BY d WITH ROLLUP ORDER BY d
@@ -723,7 +747,7 @@ async def ops_metrics(project_id: str, days: int) -> dict:
                        usage_details['output']                                           AS out_tokens,
                        arraySum(mapValues(cost_details))                                 AS cost
                 FROM events FINAL
-                WHERE project_id = {{p:String}} AND model_id != ''
+                WHERE project_id = {{p:String}} AND model_id != '' AND {_REAL}
                   AND start_time >= subtractDays(now(), {{d:UInt32}})
             )
             GROUP BY model_id WITH ROLLUP ORDER BY calls DESC
@@ -742,7 +766,7 @@ async def ops_metrics(project_id: str, days: int) -> dict:
                    toUInt32(max(ms))             AS p_max,
                    countIf(level = 'ERROR')      AS errors
             FROM (SELECT name, type, level, {_MS} AS ms FROM events FINAL
-                  WHERE project_id = {{p:String}}
+                  WHERE project_id = {{p:String}} AND {_REAL}
                     AND start_time >= subtractDays(now(), {{d:UInt32}}))
             GROUP BY name, type ORDER BY p95 DESC LIMIT 8
             """,
@@ -801,6 +825,7 @@ async def daily_trace_failures(
             f"  AND {_ONLINE} AND verdict = 'FAIL' AND name NOT IN {{adv:Array(String)}})) AS failures "
             "FROM events FINAL "
             "WHERE project_id = {p:String} AND start_time >= subtractDays(now(), {d:UInt32}) "
+            "AND internal_kind = '' "
             "GROUP BY d ORDER BY d",
             parameters={"p": project_id, "d": days, "adv": list(advisory)},
         )
@@ -821,7 +846,8 @@ async def trace_failure_totals(
         return int(r[0][0]) if r and r[0][0] is not None else 0
 
     total = await _scalar(
-        "SELECT uniqExact(trace_id) FROM events FINAL WHERE project_id = {p:String}"
+        "SELECT uniqExact(trace_id) FROM events FINAL "
+        "WHERE project_id = {p:String} AND internal_kind = ''"
     )
     failures = await _scalar(
         "SELECT uniqExact(trace_id) FROM scores FINAL WHERE project_id = {p:String} "

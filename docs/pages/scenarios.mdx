@@ -105,18 +105,32 @@ to `expect`. Without an LLM key configured the scenario is skipped, never silent
 ```yaml
 - uses: your-org/tracely/.github/actions/tracely-gate@main
   with:
-    mode: simulate
-    agent: support-agent
     api: ${{ secrets.TRACELY_API }}
     key: ${{ secrets.TRACELY_KEY }}
     min-pass-rate: "0.9"   # adversarial suites land some probes by design
+    # agent: support-agent,planner   ← a subset; omit it to gate EVERY agent with scenarios
 ```
 
 or directly:
 
 ```bash
-tracely simulate --agent support-agent --min-pass-rate 0.9
+tracely simulate --all --min-pass-rate 0.9
 ```
+
+### Which agents run
+
+A scenario belongs to one agent, so the suite is per-agent and so is the gate run.
+
+| You want | Pass |
+|---|---|
+| One agent | `agent: support-agent` |
+| A subset | `agent: support-agent,planner` |
+| Everything | omit `agent` (CLI: `--all`) |
+
+`--all` is derived from the scenario list, not the agent list — an agent with **no enabled
+scenario** is skipped rather than reported as untested, so a new agent joins the gate the day
+someone writes its first scenario. Each agent gets its own gate run; they share one commit status
+and one PR comment, and **one red agent fails the job**.
 
 ## How a run is graded
 

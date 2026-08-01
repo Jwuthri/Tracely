@@ -54,4 +54,10 @@ with tracely.fixtures(bundle):     # bundle = the case's recorded tool/LLM outpu
 The reference agent in
 [`sdk/examples/weather_agent.py`](https://github.com/Jwuthri/Tracely/blob/master/sdk/examples/weather_agent.py)
 wires this up (`run`, `run_broken`, `run_handles`, …) and is what `tracely replay --entrypoint
-weather_agent:run` executes. Next: the [CI gate CLI](/cli).
+weather_agent:run` executes.
+
+Replay is single-turn and hermetic: it re-runs *promoted regression cases* through your own code
+against recorded fixtures. To gate **multi-turn** behaviour against a live service — in any
+language, with no agent code in CI — see [Scenarios](/scenarios). Most teams run both.
+
+Next: the [CI gate CLI](/cli).

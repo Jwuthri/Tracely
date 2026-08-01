@@ -3,7 +3,7 @@
 Two things in one small package:
 
 1. an **instrumentation SDK** — `tracely.init()` activates the OpenAI/Anthropic/LangChain/LiteLLM auto-instrumentors so your existing code is traced with **zero span code** (the default path); a custom `SpanProcessor` stamps the active `tracely.trace()` run context onto every span — including the zero-touch provider spans. Manual context managers remain the escape hatch. Everything emits standard `gen_ai.*` / OpenInference attributes **plus** Tracely's first-class `tracely.*` hints, so the backend can populate its agent-semantic columns; and
-2. the **`tracely` CLI** — `tracely gate` and `tracely replay`, which run an agent's promoted regression suite in CI and gate the PR (exit 0/1 + GitHub status/comment).
+2. the **`tracely` CLI** — `tracely simulate`, `tracely gate` and `tracely replay`, which turn an agent's behaviour into a pull-request check (exit 0/1 + GitHub status/comment).
 
 The core depends only on `opentelemetry-sdk` + the OTLP HTTP exporter (Python ≥ 3.10); a provider extra adds that provider's auto-instrumentor.
 
@@ -147,14 +147,18 @@ This is what makes replay deterministic, offline, and free (no API keys, no cost
 ## 3. The CI gate CLI
 
 ```bash
-tracely gate   <agent> [--env ci] [--api …] [--key …] [--pr N] [--sha …] [--github]
-tracely replay <agent> (--entrypoint module:func | --cmd "…") [--live] [--github]
+tracely simulate [<agent> | --agent a,b | --all] [--min-pass-rate 0.9] [--timeout 900] [--github]
+tracely gate     <agent> [--env ci] [--api …] [--key …] [--pr N] [--sha …] [--github]
+tracely replay   <agent> (--entrypoint module:func | --cmd "…") [--live] [--github]
 ```
 
+- **`tracely simulate`** — drive each agent's enabled **scenarios** (multi-turn conversations, or adversarial goals an attacker model improvises against) at the HTTP endpoint you registered for it, then gate on the result. **No agent code in CI** — Tracely makes the calls, so a TypeScript or Go service gates the same way a Python one does.
 - **`tracely gate <agent>`** — gate a PR against **pre-emitted** `env=ci` traces (your CI already ran the agent and emitted traces); cases are matched to candidates by `input_digest`.
 - **`tracely replay <agent>`** — re-run the agent **on each promoted case's recorded input** (fetched from `GET /api/gate/suite`), then gate. `--entrypoint module:func` calls a Python function per case; `--cmd "…"` runs a shell command per case (gets `TRACELY_INPUT`) that emits its own trace. Hermetic by default; `--live` makes real tool/LLM calls.
 
-Both **exit 0 (PASS) / 1 (FAIL)** and, inside GitHub Actions (or with `--github`), post a **commit status + PR comment** with per-case results and soft warnings (latency/token deltas vs the last green gate). `--dry-run` prints the GitHub calls instead of sending; `--no-github` never touches GitHub. Config via flags or env (`TRACELY_API`, `TRACELY_KEY`, `TRACELY_AGENT`, `TRACELY_GATE_ENV`, `TRACELY_WEB_URL`, `GITHUB_TOKEN`). A reusable composite action lives at `.github/actions/tracely-gate/`.
+Scenarios belong to an agent, so `simulate` gates one agent, a comma-separated subset, or — with `--all` — every agent that has at least one **enabled** scenario (an agent whose suite is switched off is skipped, not reported untested). Each agent gets its own gate run but they share one commit status and one PR comment, and the job fails if any agent does. `--timeout` budgets the whole command.
+
+All three **exit 0 (PASS) / 1 (FAIL) / 2 (no answer — timeout or unreachable API)** and, inside GitHub Actions (or with `--github`), post a **commit status + PR comment** with per-case results and soft warnings (latency/token deltas vs the last green gate). `--dry-run` prints the GitHub calls instead of sending; `--no-github` never touches GitHub. Config via flags or env (`TRACELY_API`, `TRACELY_KEY`, `TRACELY_AGENT`, `TRACELY_GATE_ENV`, `TRACELY_WEB_URL`, `GITHUB_TOKEN`). A reusable composite action lives at `.github/actions/tracely-gate/`.
 
 ---
 

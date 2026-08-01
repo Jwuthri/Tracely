@@ -17,17 +17,20 @@ from tracely.domain.simulation import Turn, normalize_turns, serialize_turns, us
 from tracely.infrastructure.clickhouse import async_reader
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
-from tracely.infrastructure.db.models import AgentEndpoint, Scenario
+from tracely.infrastructure.db.models import Agent, AgentEndpoint, Scenario
 from tracely.infrastructure.llm.provider import encrypt_secret
 from tracely.services.gate_service import GateService
 
 router = APIRouter(prefix="/api")
 
 
-def _scenario_dict(sc: Scenario) -> dict[str, Any]:
+def _scenario_dict(sc: Scenario, agent_slug: str | None = None) -> dict[str, Any]:
     return {
         "id": sc.id,
         "agent_id": sc.agent_id,
+        # `tracely simulate --all` gates every agent that has an enabled scenario, and it discovers
+        # them from this list — so the slug has to travel with the row, not just the opaque id.
+        "agent": agent_slug,
         "title": sc.title,
         "kind": sc.kind,
         # Always the normalized `{message, expect, tools}` shape, so the UI has one thing to
@@ -39,6 +42,11 @@ def _scenario_dict(sc: Scenario) -> dict[str, Any]:
         "enabled": sc.enabled,
         "created_at": sc.created_at.isoformat() if sc.created_at else None,
     }
+
+
+def _slug(s, agent_id: str) -> str | None:
+    a = s.get(Agent, agent_id)
+    return a.slug if a else None
 
 
 def _resolve_agent(s, project_id: str, agent_ref: str) -> str:
@@ -56,7 +64,11 @@ async def list_scenarios(agent: str | None = None, project_id: str = Depends(get
     def work():
         with SyncSessionLocal() as s:
             aid = _resolve_agent(s, project_id, agent) if agent else None
-            return [_scenario_dict(sc) for sc in repo.scenarios_list(s, project_id, aid)]
+            slugs = {a.id: a.slug for a in repo.agents_list(s, project_id)}
+            return [
+                _scenario_dict(sc, slugs.get(sc.agent_id))
+                for sc in repo.scenarios_list(s, project_id, aid)
+            ]
 
     return await run_in_threadpool(work)
 
@@ -87,7 +99,7 @@ async def create_scenario(project_id: str = Depends(get_project_id), body: dict 
             )
             s.add(sc)
             s.commit()
-            return _scenario_dict(sc)
+            return _scenario_dict(sc, _slug(s, sc.agent_id))
 
     return await run_in_threadpool(work)
 
@@ -119,7 +131,7 @@ async def import_scenario(project_id: str = Depends(get_project_id), body: dict 
             )
             s.add(sc)
             s.commit()
-            return _scenario_dict(sc)
+            return _scenario_dict(sc, _slug(s, sc.agent_id))
 
     return await run_in_threadpool(work)
 
@@ -161,7 +173,7 @@ async def update_scenario(
                 return ("bad", "an ADVERSARIAL scenario needs a goal")
 
             s.commit()
-            return ("ok", _scenario_dict(sc))
+            return ("ok", _scenario_dict(sc, _slug(s, sc.agent_id)))
 
     status, payload = await run_in_threadpool(work)
     if status == "missing":

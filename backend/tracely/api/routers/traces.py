@@ -22,6 +22,36 @@ async def list_traces(limit: int = 20, project_id: str = Depends(get_project_id)
     return await async_reader.traces_overview(project_id, limit, advisory)
 
 
+def _span_out(d: dict) -> SpanOut:
+    """One reader row → the wire shape. Shared by the trace detail and the internal-run readers,
+    so a recording's spans carry the same derived fields (latency above all) as any other span —
+    the alternative was a second, quietly different shape behind the same TypeScript type."""
+    latency = None
+    if d.get("end_time") and d.get("start_time"):
+        latency = (d["end_time"] - d["start_time"]).total_seconds() * 1000.0
+    return SpanOut(
+        span_id=d["span_id"],
+        parent_span_id=d["parent_span_id"],
+        name=d["name"],
+        type=d["type"],
+        level=d["level"],
+        status_message=d["status_message"],
+        start_time=d["start_time"],
+        end_time=d["end_time"],
+        latency_ms=latency,
+        agent_id=d["agent_id"],
+        agent_run_id=d["agent_run_id"],
+        turn_id=d["turn_id"],
+        step_name=d["step_name"],
+        model_id=d["model_id"],
+        tokens=int(d.get("tokens") or 0),
+        cost=float(d.get("cost") or 0.0),
+        metadata={str(k): str(v) for k, v in (d.get("metadata") or {}).items()},
+        input=d["input"],
+        output=d["output"],
+    )
+
+
 @router.get("/traces/{trace_id}")
 async def get_trace(
     trace_id: str, project_id: str = Depends(get_project_id)
@@ -32,32 +62,7 @@ async def get_trace(
     for d in raw_spans:
         if d.get("conversation_id"):
             thread_id = d["conversation_id"]
-        latency = None
-        if d.get("end_time") and d.get("start_time"):
-            latency = (d["end_time"] - d["start_time"]).total_seconds() * 1000.0
-        spans.append(
-            SpanOut(
-                span_id=d["span_id"],
-                parent_span_id=d["parent_span_id"],
-                name=d["name"],
-                type=d["type"],
-                level=d["level"],
-                status_message=d["status_message"],
-                start_time=d["start_time"],
-                end_time=d["end_time"],
-                latency_ms=latency,
-                agent_id=d["agent_id"],
-                agent_run_id=d["agent_run_id"],
-                turn_id=d["turn_id"],
-                step_name=d["step_name"],
-                model_id=d["model_id"],
-                tokens=int(d.get("tokens") or 0),
-                cost=float(d.get("cost") or 0.0),
-                metadata={str(k): str(v) for k, v in (d.get("metadata") or {}).items()},
-                input=d["input"],
-                output=d["output"],
-            )
-        )
+        spans.append(_span_out(d))
     scores = await async_reader.trace_scores(project_id, trace_id, thread_id)
     eval_verdict = rollup_verdict(scores, await advisory_score_names(project_id))
     return TraceDetail(

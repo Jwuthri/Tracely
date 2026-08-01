@@ -16,8 +16,6 @@ Two modes:
 ```yaml
 - uses: your-org/tracely/.github/actions/tracely-gate@main
   with:
-    mode: simulate
-    agent: support-agent
     api: ${{ secrets.TRACELY_API }}
     key: ${{ secrets.TRACELY_KEY }}
     min-pass-rate: "0.9"   # adversarial suites land some probes by design
@@ -26,12 +24,31 @@ Two modes:
 Register the endpoint first (Scenarios → Agent endpoint), and forward the `traceparent` header
 through your tracer so the gate can see your agent's tool calls, not just its replies.
 
+### Which agents get gated
+
+A scenario belongs to one agent, so `agent` chooses the suites to run:
+
+| You want | Pass |
+|---|---|
+| One agent | `agent: support-agent` |
+| A subset | `agent: support-agent,planner` |
+| Everything | **omit `agent`** |
+
+Omitting it gates every agent with at least one *enabled* scenario — derived from the scenario
+list, so switching a suite off removes it from CI and a new agent joins the day someone writes its
+first scenario, with no workflow edit. Each agent runs as its own gate but they share one commit
+status and one PR comment (GitHub keys both, so separate posts would overwrite each other). **One
+red agent fails the job**, and `timeout` budgets the whole step rather than each agent.
+
+An agent with enabled scenarios but no registered endpoint reports `NO_COVERAGE` and blocks —
+never a green pass for a suite that never ran.
+
 ## Inputs
 
 | input | required | default | description |
 |---|---|---|---|
 | `mode` | | `simulate` | `simulate` (drive scenarios against the endpoint) or `gate` (grade pre-emitted traces) |
-| `agent` | ✅ | — | agent slug to gate |
+| `agent` | for `gate` | `""` | agent slug, or several comma-separated. Blank + `simulate` = every agent with an enabled scenario |
 | `min-pass-rate` | | server setting (`1.0`) | simulate only. Fraction of conversations that must PASS |
 | `timeout` | | `900` | simulate only. Seconds to wait; timing out fails the job, never passes it |
 | `api` | ✅ | — | Tracely API base URL |
@@ -96,6 +113,7 @@ use the composite action to gate them:
         run: python ci/run_agent.py      # your harness
       - uses: your-org/tracely/.github/actions/tracely-gate@main
         with:
+          mode: gate          # grade the traces the step above emitted
           agent: planner
           api: ${{ secrets.TRACELY_API }}
           key: ${{ secrets.TRACELY_KEY }}
@@ -107,10 +125,12 @@ block merges on a red gate.
 
 ## Run it locally
 
-Both commands run outside CI — they just skip the GitHub posting (or use `--dry-run` to preview it):
+All three commands run outside CI — they just skip the GitHub posting (or use `--dry-run` to preview it):
 
 ```bash
 pip install ./sdk                                          # provides the `tracely` CLI
-TRACELY_API=http://localhost:8000 tracely replay planner --entrypoint my_agent:run
-TRACELY_API=http://localhost:8000 tracely gate planner --env ci
+export TRACELY_API=http://localhost:8000
+tracely simulate --all                    # or: --agent support-agent,planner
+tracely replay planner --entrypoint my_agent:run
+tracely gate planner --env ci
 ```

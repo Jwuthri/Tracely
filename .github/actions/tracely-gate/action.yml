@@ -16,8 +16,13 @@ inputs:
     required: false
     default: "simulate"
   agent:
-    description: "Agent slug to gate"
-    required: true
+    description: >
+      Which agents to gate. One slug, or several comma-separated ("support-agent,planner").
+      simulate only: leave it BLANK to gate every agent that has at least one enabled scenario —
+      new agents are then covered the day someone writes their first scenario, with no workflow
+      edit. Required for mode=gate, which grades one agent's promoted suite.
+    required: false
+    default: ""
   min-pass-rate:
     description: >
       simulate only. Fraction of conversations that must PASS, 0-1. Defaults to the server setting
@@ -62,25 +67,41 @@ runs:
 
     - name: Run gate
       shell: bash
+      # Inputs come in as env vars, never interpolated into the script: `${{ }}` would paste an
+      # attacker-controlled agent name straight into the shell.
       env:
         TRACELY_API: ${{ inputs.api }}
         TRACELY_KEY: ${{ inputs.key }}
         TRACELY_WEB_URL: ${{ inputs.web-url }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
+        MODE: ${{ inputs.mode }}
+        AGENT: ${{ inputs.agent }}
+        GATE_ENV: ${{ inputs.env }}
+        MIN_PASS_RATE: ${{ inputs.min-pass-rate }}
+        TIMEOUT: ${{ inputs.timeout }}
       # the CLI auto-detects GitHub Actions and posts the status + comment; exit code gates the job
       run: |
         set -euo pipefail
-        if [ "${{ inputs.mode }}" = "simulate" ]; then
+        if [ "$MODE" = "simulate" ]; then
           # `simulate` returns as soon as the run is queued and then polls, because driving real
           # conversations against your agent takes minutes. A timeout exits non-zero.
-          args=(--agent "${{ inputs.agent }}" --env "${{ inputs.env }}" --timeout "${{ inputs.timeout }}")
-          if [ -n "${{ inputs.min-pass-rate }}" ]; then
-            args+=(--min-pass-rate "${{ inputs.min-pass-rate }}")
+          args=(--env "$GATE_ENV" --timeout "$TIMEOUT")
+          if [ -n "$AGENT" ]; then
+            args+=(--agent "$AGENT")
+          else
+            args+=(--all)   # every agent with an enabled scenario
+          fi
+          if [ -n "$MIN_PASS_RATE" ]; then
+            args+=(--min-pass-rate "$MIN_PASS_RATE")
           fi
           tracely simulate "${args[@]}"
-        elif [ "${{ inputs.mode }}" = "gate" ]; then
-          tracely gate --agent "${{ inputs.agent }}" --env "${{ inputs.env }}"
+        elif [ "$MODE" = "gate" ]; then
+          if [ -z "$AGENT" ]; then
+            echo "::error::mode=gate needs 'agent' — it grades one agent's promoted suite. Use mode=simulate to gate every agent."
+            exit 2
+          fi
+          tracely gate --agent "$AGENT" --env "$GATE_ENV"
         else
-          echo "::error::mode must be 'simulate' or 'gate' (got '${{ inputs.mode }}')"
+          echo "::error::mode must be 'simulate' or 'gate' (got '$MODE')"
           exit 2
         fi

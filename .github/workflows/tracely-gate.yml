@@ -8,17 +8,16 @@ name: Tracely regression gate
 # What it does: gate every PR on the agent's regression suite — a PR that changes the agent must not
 # reproduce any promoted production failure (fail-to-pass), or the check fails.
 #
-# 👉 Most teams want `mode: simulate` instead, which needs NO agent code in CI — Tracely calls the
-#    HTTP endpoint you registered and drives multi-turn scenarios against it, so it works for a
-#    TypeScript or Go service too. See docs/pages/scenarios.mdx. This repo can't dogfood that: the
-#    example agent isn't deployed anywhere for CI to call.
+# 👉 Most teams want the action's default `mode: simulate` instead, which needs NO agent code in CI
+#    — Tracely calls the HTTP endpoint you registered and drives multi-turn scenarios against it,
+#    so it works for a TypeScript or Go service too. See docs/pages/scenarios.mdx. This repo can't
+#    dogfood that: the example agent isn't deployed anywhere for CI to call.
 #
 #      - uses: <repo>/.github/actions/tracely-gate@<ref>
 #        with:
-#          mode: simulate
-#          agent: support-agent
 #          api: ${{ secrets.TRACELY_API }}
 #          key: ${{ secrets.TRACELY_KEY }}
+#          # agent: support-agent,planner   ← a subset; omit it to gate every agent with scenarios
 
 on:
   pull_request:

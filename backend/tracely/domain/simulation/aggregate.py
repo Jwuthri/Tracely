@@ -51,17 +51,45 @@ def user_text(recorded_input: str) -> str:
         return text
     if isinstance(data, str):
         return data.strip()
+    # A BARE message array — `[{"role": "system", …}, {"role": "user", …}]` — is as common as the
+    # `{"messages": […]}` wrapper, and missing it imported the system prompt as the user's line.
+    if isinstance(data, list):
+        return _last_user_message(data) or text
     if isinstance(data, dict):
         messages = data.get("messages")
         if isinstance(messages, list):
-            for m in reversed(messages):  # the last user turn is what this trace responded to
-                if isinstance(m, dict) and m.get("role") == "user":
-                    return str(m.get("content") or "").strip()
+            found = _last_user_message(messages)
+            if found:
+                return found
         for key in ("prompt", "input", "content", "message", "text", "query", "question"):
             value = data.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return text
+
+
+def _last_user_message(messages: list) -> str:
+    """The last `role: user` message's text — what the trace was actually responding to.
+
+    Content may be a plain string or the typed-block form (`[{"type": "text", "text": …}]`), so
+    the text blocks are joined and non-text blocks (images, files) ignored.
+    """
+    for m in reversed(messages):
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts = [
+                str(b.get("text") or "")
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            ]
+            joined = "\n".join(p for p in parts if p).strip()
+            if joined:
+                return joined
+    return ""
 
 
 @dataclass

@@ -16,6 +16,8 @@ export async function GET(req: NextRequest) {
   const to = sp.get("to");
   if (from) qs.set("from_ts", from);
   if (to) qs.set("to_ts", to);
+  // The Evals toggle: also list Tracely's own runs (evaluations, scenarios) as rows.
+  if (sp.get("evals") === "1") qs.set("evals", "true");
   const r = await fetch(`${API}/api/sessions?${qs.toString()}`, {
     headers: await authHeaders(),
     cache: "no-store",

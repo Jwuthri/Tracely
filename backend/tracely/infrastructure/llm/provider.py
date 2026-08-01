@@ -438,6 +438,45 @@ def _invoke(agent, prompt: str) -> dict[str, Any]:
         raise
 
 
+@contextlib.contextmanager
+def _recorded(prompt: str, system_prompt: str | None, model: str | None) -> Iterator[list]:
+    """Log this call into the active introspection Recording, if one is open.
+
+    This is the whole reason every LLM call is funnelled through this module: hooking here means
+    the judge's prompt, the attacker's reasoning and the grader's verdict are all captured with no
+    per-caller wiring. Yields a one-slot list the caller fills with `(text, usage)`; an exception
+    is recorded as the step's error and re-raised untouched.
+    """
+    from tracely.domain import introspection
+
+    rec = introspection.active()
+    if rec is None:
+        yield []
+        return
+    start_ns = time.time_ns()
+    sink: list = []
+    label = model or settings.llm_judge_model
+    try:
+        yield sink
+    except Exception as exc:
+        rec.add(label, input=_prompt_text(system_prompt, prompt), error=str(exc)[:500],
+                model=label, start_ns=start_ns)
+        raise
+    text, usage = (sink[0] if sink else ("", {}))
+    rec.add(
+        label, input=_prompt_text(system_prompt, prompt), output=str(text)[:20000],
+        model=label, tokens=usage or {}, start_ns=start_ns,
+    )
+
+
+def _prompt_text(system_prompt: str | None, prompt: str) -> str:
+    """What actually went to the model — system rubric included, because 'why did the judge say
+    that' is nearly always answered by the system half."""
+    if system_prompt:
+        return f"[system]\n{system_prompt}\n\n[user]\n{prompt}"
+    return prompt
+
+
 def run_structured_agent(
     prompt: str,
     *,
@@ -458,10 +497,25 @@ def run_structured_agent(
         system_prompt=system_prompt,
         response_format=response_format,
     )
-    result = _invoke(agent, prompt)
+    with _recorded(prompt, system_prompt, model) as sink:
+        result = _invoke(agent, prompt)
+        usage = _extract_usage(result, model)
+        structured = result["structured_response"]
+        sink.append((_dump(structured), usage))
     if on_usage is not None:
-        on_usage(_extract_usage(result, model))
-    return result["structured_response"]
+        on_usage(usage)
+    return structured
+
+
+def _dump(value: Any) -> str:
+    """A structured response as readable text for the recording."""
+    dump = getattr(value, "model_dump_json", None)
+    if callable(dump):
+        try:
+            return dump(indent=2)
+        except Exception:
+            pass
+    return str(value)
 
 
 def run_text_agent(
@@ -480,13 +534,15 @@ def run_text_agent(
     agent = create_agent(
         get_chat_model(model, temperature), tools=[], system_prompt=system_prompt
     )
-    result = _invoke(agent, prompt)
+    with _recorded(prompt, system_prompt, model) as sink:
+        result = _invoke(agent, prompt)
+        usage = _extract_usage(result, model)
+        content = result["messages"][-1].content
+        text = content if isinstance(content, str) else "".join(
+            # content blocks ([{type:"text", text}, …]) — join the text parts
+            part.get("text", "") for part in content if isinstance(part, dict)
+        )
+        sink.append((text, usage))
     if on_usage is not None:
-        on_usage(_extract_usage(result, model))
-    content = result["messages"][-1].content
-    if isinstance(content, str):
-        return content
-    # content blocks ([{type:"text", text}, …]) — join the text parts
-    return "".join(
-        part.get("text", "") for part in content if isinstance(part, dict)
-    )
+        on_usage(usage)
+    return text

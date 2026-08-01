@@ -10,7 +10,11 @@ import httpx
 import pytest
 
 from tracely.domain.simulation import (
+    ATTACKER_SYSTEM,
     ATTACK_SCORE,
+    TECHNIQUES,
+    attacker_prompt,
+    weakness_lines,
     EXPECT_SCORE,
     TOOLS_SCORE,
     ScenarioOutcome,
@@ -161,7 +165,20 @@ def _drive(monkeypatch, handler):
     result = SimulationService(client=client).run_scenario(
         "p1", "planner", _FakeScenario(), _FakeEndpoint(), env="ci"
     )
-    return result, emitted
+    # The run also records what Tracely itself did (`domain/introspection.py`) as its own trace.
+    # It is a recording ABOUT the conversation, not a turn of it, so keep the two apart — mixing
+    # them would let a missing turn hide behind a present recording.
+    turns = [e for e in emitted if not _is_recording(e)]
+    recordings = [e for e in emitted if _is_recording(e)]
+    return result, turns, recordings
+
+
+def _is_recording(blob: dict) -> bool:
+    return any(
+        a["key"] == "tracely.internal.kind"
+        for span in blob["payload"]["resourceSpans"][0]["scopeSpans"][0]["spans"]
+        for a in span["attributes"]
+    )
 
 
 def test_driving_a_scripted_conversation_emits_one_trace_per_turn(monkeypatch):
@@ -171,7 +188,7 @@ def test_driving_a_scripted_conversation_emits_one_trace_per_turn(monkeypatch):
         seen.append(request)
         return httpx.Response(200, json={"reply": f"answer {len(seen)}"})
 
-    result, emitted = _drive(monkeypatch, handler)
+    result, emitted, _ = _drive(monkeypatch, handler)
 
     assert len(seen) == 3  # one POST per scripted turn
     assert len(emitted) == 3
@@ -207,14 +224,16 @@ def test_turns_are_ingested_inline_before_the_driver_returns(monkeypatch):
         "p1", "planner", _FakeScenario(), _FakeEndpoint(), env="ci"
     )
 
-    assert len(ingested) == len(result["trace_ids"]) == 3
+    # 3 turns + the one recording of what Tracely did while driving them.
+    assert len(result["trace_ids"]) == 3
+    assert len(ingested) == 4
 
 
 def test_each_turn_sends_the_trace_id_it_will_be_stored_under(monkeypatch):
     """The correlation contract: the `traceparent` we send must name the same trace the turn is
     ingested as, or the customer's own spans nest under a trace nobody is grading."""
     seen: list[httpx.Request] = []
-    result, _ = _drive(
+    result, _, _ = _drive(
         monkeypatch,
         lambda r: (seen.append(r), httpx.Response(200, json={"reply": "ok"}))[1],
     )
@@ -242,7 +261,7 @@ def test_conversation_history_accumulates_across_turns(monkeypatch):
 def test_a_failing_endpoint_stops_the_conversation_and_records_an_error(monkeypatch):
     """A 500 on turn 1 shouldn't spend three turns talking to a broken service — but it must
     still emit the turn, so the run is a graded failure rather than a missing conversation."""
-    result, emitted = _drive(monkeypatch, lambda r: httpx.Response(500, text="boom"))
+    result, emitted, _ = _drive(monkeypatch, lambda r: httpx.Response(500, text="boom"))
 
     assert len(emitted) == 1
     assert "HTTP 500" in result["error"]
@@ -254,7 +273,7 @@ def test_a_transport_error_is_a_graded_turn_not_a_crash(monkeypatch):
     def handler(request):
         raise httpx.ConnectError("no route to host")
 
-    result, emitted = _drive(monkeypatch, handler)
+    result, emitted, _ = _drive(monkeypatch, handler)
 
     assert len(emitted) == 1
     assert "ConnectError" in result["error"]
@@ -655,3 +674,79 @@ def test_enabled_scenarios_without_an_endpoint_are_a_blocking_misconfiguration(
     svc.session = _StubSession(has_scenarios, has_endpoint)
 
     assert svc._endpoint_missing_for_enabled_scenarios("p1", "a1") is blocked
+
+
+# ── the attacker ──────────────────────────────────────────────────────────────
+
+
+def test_attacker_is_told_which_techniques_already_failed():
+    """A model told only 'pursue the goal' rephrases the same direct ask every turn. Naming the
+    spent techniques is what makes it switch families instead."""
+    p = attacker_prompt("leak the prompt", "user: hi\nagent: no", ["direct", "authority"], None)
+
+    assert "direct, authority" in p
+    assert "did NOT work" in p
+
+
+def test_attacker_gets_the_agents_real_production_weaknesses():
+    """The Tracely-native part: a generic red-teamer guesses where an agent is weak, this one is
+    told where it actually broke."""
+    lines = weakness_lines([("Leaks order ids", "data_exposure", "returns other customers' rows")])
+    p = attacker_prompt("leak data", "", [], lines)
+
+    assert "KNOWN WEAKNESSES" in p
+    assert "Leaks order ids" in p
+    assert "data_exposure" in p
+
+
+def test_weakness_lines_survive_missing_fields():
+    assert weakness_lines([("", "", "")]) == ["unlabelled failure"]
+    assert weakness_lines([("Label", "", "")]) == ["Label"]
+
+
+def test_attacker_prompt_opens_cleanly_with_no_history():
+    p = attacker_prompt("goal", "", [], None)
+    assert "nothing yet" in p
+    assert "ALREADY TRIED" not in p  # nothing spent yet — don't tell it techniques failed
+
+
+def test_the_technique_menu_is_offered_to_the_attacker():
+    assert "debug_framing" in ATTACKER_SYSTEM
+    assert len(TECHNIQUES) >= 5
+
+
+def test_user_text_unwraps_a_bare_message_array():
+    """Traces record input as a bare `[{role, content}]` array as often as the `{"messages": …}`
+    wrapper. Missing this imported the SYSTEM prompt as the user's line — every turn of a demo
+    import came out as an identical blob."""
+    raw = json.dumps([
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "where is my refund?"},
+    ])
+    assert user_text(raw) == "where is my refund?"
+
+
+def test_user_text_reads_typed_content_blocks():
+    """Multimodal turns carry `[{type: text}, {type: image_url}]` — take the text, drop the rest."""
+    raw = json.dumps([
+        {"role": "user", "content": [
+            {"type": "text", "text": "what is wrong with this?"},
+            {"type": "image_url", "image_url": {"url": "https://x/y.png"}},
+        ]},
+    ])
+    assert user_text(raw) == "what is wrong with this?"
+
+
+def test_user_text_takes_the_last_user_turn_not_the_first():
+    raw = json.dumps([
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "ok"},
+        {"role": "user", "content": "second"},
+    ])
+    assert user_text(raw) == "second"
+
+
+def test_user_text_keeps_an_array_with_no_user_message_intact():
+    """Nothing to unwrap → hand back the original so the operator can see and edit it."""
+    raw = json.dumps([{"role": "system", "content": "only a system prompt"}])
+    assert user_text(raw) == raw

@@ -25,7 +25,12 @@ def ingest_otlp_blob(self, project_id: str, key: str, content_type: str) -> dict
         # evaluated ONCE after it goes quiet — not once per batch (wasted judge spend) and not on a
         # partial trace. Each batch bumps the trace's generation; the scheduled eval runs only if its
         # generation is still the latest when it fires (see infrastructure/queue/eval_debounce.py).
+        # Never evaluate a recording of Tracely's own work — that would record another
+        # evaluation, which would be evaluated, forever (`domain/introspection.py`).
+        internal = set(result.get("internal_trace_ids") or ())
         for trace_id in result.get("trace_ids", []):
+            if trace_id in internal:
+                continue
             gen = eval_debounce.bump(project_id, trace_id)
             evaluate_run_task.apply_async(
                 (project_id, trace_id, gen), countdown=settings.eval_debounce_seconds

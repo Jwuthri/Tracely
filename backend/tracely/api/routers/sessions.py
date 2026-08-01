@@ -26,6 +26,7 @@ async def list_sessions(
     offset: int = 0,
     from_ts: str | None = None,
     to_ts: str | None = None,
+    evals: bool = False,
     project_id: str = Depends(get_project_id),
 ) -> list[dict]:
     """Traces grouped into threads by conversation/session (a trace with no conversation is its
@@ -34,10 +35,13 @@ async def list_sessions(
 
     `from_ts`/`to_ts` (ISO-8601, treated as UTC) bound the trace's `start_time`; `offset` pages
     the threads (newest first) for the UI's "Load more". Callers derive "has more" from
-    `len(rows) == limit`."""
+    `len(rows) == limit`.
+
+    `evals=true` also lists Tracely's own runs — an evaluation, a scenario — as ordinary rows
+    tagged with `internal_kind`. That is the traces list's "Evals" toggle."""
     advisory = await advisory_score_names(project_id)
     rows = await async_reader.sessions_overview(
-        project_id, limit, offset, from_ts, to_ts, advisory
+        project_id, limit, offset, from_ts, to_ts, advisory, include_internal=evals
     )
     conv_scores = await async_reader.conversation_scores_by_thread(
         project_id, [r["thread"] for r in rows]

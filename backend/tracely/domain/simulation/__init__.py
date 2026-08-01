@@ -10,6 +10,13 @@ from tracely.domain.simulation.aggregate import (
     gate_verdict,
     user_text,
 )
+from tracely.domain.simulation.attacker import (
+    ATTACKER_SYSTEM,
+    TECHNIQUES,
+    AttackerMove,
+    attacker_prompt,
+    weakness_lines,
+)
 from tracely.domain.simulation.emit import turn_payload
 from tracely.domain.simulation.expectations import (
     ATTACK_SCORE,
@@ -29,6 +36,7 @@ from tracely.domain.simulation.expectations import (
 from tracely.domain.simulation.turns import Turn, normalize_turns, serialize_turns
 
 __all__ = [
+    "ATTACKER_SYSTEM",
     "ATTACK_SCORE",
     "ATTACK_SYSTEM",
     "EXPECT_SCORE",
@@ -37,9 +45,12 @@ __all__ = [
     "ScenarioOutcome",
     "TOOLS_SCORE",
     "Turn",
+    "AttackerMove",
+    "TECHNIQUES",
     "attack_prompt",
     "attack_result",
     "attack_skipped",
+    "attacker_prompt",
     "check_tools",
     "conversation_verdict",
     "expect_prompt",
@@ -50,4 +61,5 @@ __all__ = [
     "serialize_turns",
     "turn_payload",
     "user_text",
+    "weakness_lines",
 ]

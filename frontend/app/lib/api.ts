@@ -100,6 +100,10 @@ export type Thread = {
   failing: number;
   metadata?: Record<string, string>;
   scores?: EvalScore[]; // CONVERSATION-level metric results for the C-row columns
+  // "" for a real agent run; "eval" | "sim" when the row is one of Tracely's own runs, listed
+  // only while the Evals toggle is on (see TracesExplorer).
+  internal_kind?: string;
+  subject_id?: string; // what that run was about — the trace or conversation it graded/drove
 };
 
 export type SessionsQuery = {

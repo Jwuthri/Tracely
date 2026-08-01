@@ -233,7 +233,7 @@ The judge gets the **declared** catalog via `@LIST_AGENT` when present, falls ba
 > 🍼 On every PR, the `tracely` CLI re-runs your agent against all the saved failures and **blocks the merge** if any regress — posting a green/red check + comment right on the PR. For free, by replaying recorded tool/LLM outputs so CI never calls a real model.
 
 **What's built ✅**
-- **`tracely` CLI** (ships in the SDK, stdlib-only): `tracely gate` (match pre-emitted ci traces by digest) and `tracely replay` (the turnkey path — re-run your agent on each promoted case, then gate).
+- **`tracely` CLI** (ships in the SDK, stdlib-only): `tracely simulate` (drive each agent's scenarios against its registered HTTP endpoint — one agent, a subset, or `--all`; needs no agent code in CI), `tracely gate` (match pre-emitted ci traces by digest) and `tracely replay` (re-run your agent on each promoted case, then gate).
 - **Explicit pairing** — replay knows which trace ran which case, so it gates with an exact `{case_id: trace_id}` map (no digest guessing).
 - **Hermetic by default** — fixtures served via `call_tool`/`call_llm`; `--live` opts into real calls.
 - **GitHub PR check** — a commit status `tracely/regression-gate` (the blocking check) + an upserted PR comment, exit codes `0/1/2`. A composite **GitHub Action** + example workflow ship in `.github/`.

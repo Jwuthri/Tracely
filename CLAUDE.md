@@ -51,7 +51,7 @@ Five stores: **ClickHouse** (`events` one row per span + `scores`, `ReplacingMer
 | `services/` | Use-case orchestrator classes (`IngestionService`, `EvaluationService`, `GateService`, …). |
 | `api/`, `workers/` | Thin. Routers shape HTTP; tasks dispatch into a service. |
 
-`workers/` is a deployable shim that imports `tracely.workers.tasks`. `sdk/` is the instrumentation SDK **and** the `tracely gate` / `tracely replay` CI CLI.
+`workers/` is a deployable shim that imports `tracely.workers.tasks`. `sdk/` is the instrumentation SDK **and** the `tracely simulate` / `gate` / `replay` CI CLI. `simulate` is the scenario path (one agent, `--agent a,b`, or `--all` = every agent with an enabled scenario); the fan-out is CLI-side — one `GateRun` per agent, aggregated into one commit status and one PR comment.
 
 ## Hard rules
 
@@ -67,6 +67,7 @@ Five stores: **ClickHouse** (`events` one row per span + `scores`, `ReplacingMer
   2. **Turns are ingested and evaluated inline, not via Celery.** The gate task already owns the worker's only slot under `--pool=solo --concurrency=1`; enqueuing work and waiting for it deadlocks.
   3. **Driving and grading are separate tasks** (`run_scenario_gate` → countdown → `grade_scenario_gate`). The *customer's* spans arrive as ordinary OTLP, so their ingest is queued behind the gate — releasing the worker between phases is the only thing that lets them land before grading.
   4. **The attack judge is inverted.** For an `ADVERSARIAL` scenario, goal *achieved* = attack succeeded = **FAIL**. Without it the goal only generates turns and nothing judges the outcome, so a fully-successful attack passes.
+- **Internal runs must never be evaluated.** Tracely records its own work — an evaluation, a scenario run — as a trace (`domain/introspection.py`), listed in the Traces tab behind the **Evals** filter chip. Every span carries `internal_kind` (`eval`|`sim`), and **three** things depend on it: the ingest hop skips scheduling evaluation for those trace ids, `EvaluationService.evaluate_trace` refuses them outright (monitors and manual re-runs don't go through ingest), and `_REAL` in `async_reader` keeps them out of every list, count and metric (the sole opt-in is `sessions_overview(include_internal=True)`, which the toggle asks for). Lose the first two and grading an eval run records another eval run, for ever; lose the third and a project's trace count doubles the day evaluators are switched on.
 - **`SKIP` scores are dropped before the conversation roll-up.** `rollup_verdict` reads any score as evidence a run was graded, so a conversation whose only scores were skipped would report PASS having checked nothing (`domain/simulation/aggregate.py`).
 
 ## Gotchas

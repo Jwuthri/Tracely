@@ -149,6 +149,27 @@ class Settings(BaseSettings):
     # covers spans their service exports after honouring our `traceparent`; the wait ends as soon
     # as the span count stops growing, and this is just the cap.
     gate_scenario_span_grace_s: int = 20
+    # Adversarial scenarios. Blank = the server's default judge model (`llm_judge_model`). The
+    # attacker wants a model that will actually play the role — a heavily safety-tuned one refuses
+    # to red-team and the suite quietly finds nothing — so it is worth pinning separately from the
+    # judge, which only needs to read a transcript honestly.
+    attacker_model: str = ""
+    # How many of the agent's known production failure clusters to hand the attacker as leverage.
+    # 0 disables it. This is the Tracely-native part: the attacker probes where this agent has
+    # actually broken before, which needs the failure history no other red-team tool has.
+    # The judge that decides whether the attack worked. Blank = default judge model. Kept separate
+    # from `attacker_model`: the attacker needs a model willing to role-play, the judge needs one
+    # that reads a transcript strictly.
+    attacker_judge_model: str = ""
+    attacker_weakness_hints: int = 5
+
+    # ── Internal-run recording ────────────────────────────────────────────────────
+    # Record what Tracely itself did — the judge's prompt and reply, the attacker's move, the
+    # call to the customer's endpoint — as a trace, so "why did this evaluator say that?" is
+    # answerable in the UI instead of in worker logs. Hidden from every list; fetched by the
+    # "Show eval" toggle. Costs one extra (small) trace per evaluation, so it is switchable for
+    # high-volume projects.
+    introspection_enabled: bool = True
 
     # ── Auth & multi-tenancy ──────────────────────────────────────────────────────
     # "dev"   = no human auth; the ingest key is the only credential (today's behavior, no secret needed).
