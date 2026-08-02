@@ -272,6 +272,27 @@ def test_sequential_message_sees_the_earlier_turns(monkeypatch):
     assert "Conversation so far" not in prompts[0]
 
 
+def test_the_graded_request_is_the_last_user_message(monkeypatch):
+    """A span's input is the whole message array the model was called with — system prompt, every
+    earlier turn, then the new one. Taking its FIRST readable text graded this message's answer
+    against the system prompt (or turn 1), which is how a correct answer scored 0.05."""
+    prompts: list[str] = []
+    _stub_structured(monkeypatch, {"score": 1.0, "reason": "ok"}, prompts=prompts)
+    messages = json.dumps([
+        {"role": "system", "content": "You are a returns specialist."},
+        {"role": "user", "content": "where is my order?"},
+        {"role": "assistant", "content": "it shipped"},
+        {"role": "user", "content": [{"type": "text", "text": "refund the duplicate charge"}]},
+    ])
+    spans = [
+        _span(span_id="root", type="AGENT", input=None, output="Refund started."),
+        _span(span_id="gen-1", type="GENERATION", parent_span_id="root", input=messages),
+    ]
+    _judge(RUN).run(_ctx(spans), {})
+    assert "User request:\nrefund the duplicate charge" in prompts[0]
+    assert "You are a returns specialist." not in prompts[0].split("Agent answer:")[0]
+
+
 def test_no_key_skips_entirely(monkeypatch):
     monkeypatch.setattr(settings, "openrouter_api_key", "")
     monkeypatch.setattr(settings, "llm_judge_api_key", "")

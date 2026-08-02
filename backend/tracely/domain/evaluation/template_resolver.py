@@ -30,7 +30,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from tracely.domain.evaluation.text import answer_for, content_text, first_io
+from tracely.domain.evaluation.text import answer_for, content_text, request_for
 from tracely.domain.traces.spans import root_span
 
 # Mirrors evaluators/base.py + the ingest vocabulary (otel/types.py). Local copies dodge an
@@ -217,7 +217,7 @@ class ResolvedTemplate:
 def _turn_io(spans: list[dict]) -> tuple[str, str]:
     """A turn's (user request, assistant answer) from its spans."""
     root = root_span(spans)
-    user = content_text(root.get("input")) or first_io(spans, "input")
+    user = request_for(root, spans)
     answer = answer_for(root, spans, TOOL, GENERATION, CHAIN)
     return user, answer
 

@@ -59,7 +59,7 @@ from tracely.domain.evaluation.template_resolver import (
     template_resolver,
 )
 from tracely.domain import introspection
-from tracely.domain.evaluation.text import answer_for, content_text, first_io
+from tracely.domain.evaluation.text import answer_for, content_text, request_for
 from tracely.domain.traces.spans import root_span
 from tracely.infrastructure.llm import provider
 
@@ -153,7 +153,7 @@ def _turn_lines(spans: list[dict], stop_before: str = "") -> list[str]:
             break
         trace_spans = by_trace[tid]
         root = root_span(trace_spans)
-        user_in = content_text(root.get("input")) or first_io(trace_spans, "input")
+        user_in = request_for(root, trace_spans)
         answer = answer_for(root, trace_spans, TOOL, GENERATION, CHAIN)
         if user_in:
             lines.append(f"Turn {n} — user: {_clip(user_in, _TRUNC_TURN)}")
@@ -294,7 +294,7 @@ class LLMJudgeEvaluator(Evaluator):
 
     def _run_trace(self, ctx: RunContext, config: dict) -> list[EvalResult]:
         """One grade for the trace: user request vs final answer, grounded in tool results."""
-        user_in = content_text(ctx.root.get("input")) or first_io(ctx.spans, "input")
+        user_in = request_for(ctx.root, ctx.spans)
         answer = answer_for(ctx.root, ctx.spans, TOOL, GENERATION, CHAIN)
         if not answer:
             return []
@@ -368,7 +368,7 @@ class LLMJudgeEvaluator(Evaluator):
             if eligible > len(candidates)
             else ""
         )
-        user_in = content_text(ctx.root.get("input")) or first_io(ctx.spans, "input")
+        user_in = request_for(ctx.root, ctx.spans)
         sequential = _is_sequential(config)
         previous = _previous_from_config(config)
         capabilities = self._capabilities(ctx)

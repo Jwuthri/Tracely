@@ -37,6 +37,51 @@ def first_io(spans: list[dict], key: str) -> str:
     return ""
 
 
+_USER_ROLES = {"user", "human"}
+
+
+def _chat_messages(value: Any) -> list[dict]:
+    """`value` as a list of chat messages, or [] when it isn't one."""
+    if isinstance(value, str):
+        s = value.strip()
+        if s[:1] not in ("[", "{"):
+            return []
+        try:
+            value = json.loads(s)
+        except (ValueError, TypeError):
+            return []
+    if isinstance(value, dict):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    return [m for m in value if isinstance(m, dict) and (m.get("role") or m.get("type"))]
+
+
+def _last_user_text(value: Any) -> str:
+    for m in reversed(_chat_messages(value)):
+        if str(m.get("role") or m.get("type") or "").lower() in _USER_ROLES:
+            text = content_text(m.get("content"))
+            if text:
+                return text
+    return ""
+
+
+def request_for(root: dict, spans: list[dict]) -> str:
+    """The user's request for THIS message — the LAST user turn in it, not the first.
+
+    A span's stored input is usually the whole message array the model was called with (system +
+    every earlier turn + the new one), and `extract_text` returns the FIRST readable text in it —
+    the system prompt, or turn 1. So a judge graded turn 6's answer against turn 1's question,
+    which is exactly as wrong as it sounds. Symmetric to `answer_for`, which already takes the
+    LAST answer; falls back to the old first-text behavior when nothing carries a role.
+    """
+    for value in (root.get("input"), *(s.get("input") for s in reversed(spans))):
+        text = _last_user_text(value)
+        if text:
+            return text
+    return content_text(root.get("input")) or first_io(spans, "input")
+
+
 def answer_for(root: dict, spans: list[dict], TOOL: str, GENERATION: str, CHAIN: str) -> str:
     """The agent's final answer for judge grading.
 
