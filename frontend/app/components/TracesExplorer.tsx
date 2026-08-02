@@ -7,7 +7,7 @@ import { mergeMeta, metaText } from "../lib/meta";
 import { DateRangePicker } from "./DateRangePicker";
 import { TraceTable } from "./TraceTable";
 
-type Filter = "all" | "failing" | "multi" | "evals";
+type Filter = "all" | "failing" | "multi";
 type Range = { from: string | null; to: string | null }; // ISO-8601 (UTC); null = unbounded
 
 const PRESETS: { key: string; label: string; hours: number | null }[] = [
@@ -38,10 +38,9 @@ export function TracesExplorer({
 
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
-  // "evals" is the one filter the server has to be asked for: Tracely's own runs (an evaluation,
-  // a scenario) are excluded from the thread list unless `evals=1`, so switching in or out of it
-  // re-queries instead of refining the rows already loaded.
-  const evals = filter === "evals";
+  // Tracely's own runs (an evaluation, a scenario) are never listed here — the backend excludes
+  // them unless asked, and they are read from the conversation they graded ("Show evals" on the
+  // conversation page). Listing them alongside real traces turned 12 conversations into 54 rows.
 
   // Re-seed from the server when the page re-renders (e.g. after switching workspace), resetting the
   // window back to the first page.
@@ -54,13 +53,12 @@ export function TracesExplorer({
   }, [initial, initialHasMore]);
 
   const load = useCallback(
-    async (next: Range, offset: number, replace: boolean, limit = pageSize, withEvals = evals) => {
+    async (next: Range, offset: number, replace: boolean, limit = pageSize) => {
       setLoading(true);
       try {
         const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
         if (next.from) qs.set("from", next.from);
         if (next.to) qs.set("to", next.to);
-        if (withEvals) qs.set("evals", "1");
         const r = await fetch(`/api/sessions?${qs.toString()}`, { cache: "no-store" });
         const data: ConvNode[] = r.ok ? await r.json() : [];
         setRows((prev) => (replace ? data : [...prev, ...data]));
@@ -69,7 +67,7 @@ export function TracesExplorer({
         setLoading(false);
       }
     },
-    [pageSize, evals],
+    [pageSize],
   );
 
   // After a delete: drop the rows immediately (instant feedback), then re-read the same-sized
@@ -104,18 +102,14 @@ export function TracesExplorer({
     void load(next, 0, true);
   }
 
-  function applyFilter(next: Filter) {
-    setFilter(next);
-    // Only the evals boundary needs the server; the rest refine what is already loaded.
-    if ((next === "evals") !== evals) void load(range, 0, true, pageSize, next === "evals");
-  }
+  // Every filter refines the rows already loaded — none of them needs the server.
+
 
   const counts = useMemo(
     () => ({
       all: rows.length,
       failing: rows.filter((t) => t.failing === 1).length,
       multi: rows.filter((t) => t.turns > 1).length,
-      evals: rows.filter((t) => t.internal_kind).length,
     }),
     [rows],
   );
@@ -125,8 +119,6 @@ export function TracesExplorer({
     return rows.filter((t) => {
       if (filter === "failing" && t.failing !== 1) return false;
       if (filter === "multi" && t.turns <= 1) return false;
-      // The server sent both kinds; show only Tracely's own runs.
-      if (filter === "evals" && !t.internal_kind) return false;
       if (needle) {
         // user-set metadata comes aggregated from the backend (list); fall back to loaded spans.
         const meta =
@@ -181,33 +173,20 @@ export function TracesExplorer({
         suppressHydrationWarning
       >
         <div className="flex items-center gap-1.5">
-          {(["all", "failing", "multi", "evals"] as const).map((f) => (
+          {(["all", "failing", "multi"] as const).map((f) => (
             <button
               key={f}
-              onClick={() => applyFilter(f)}
+              onClick={() => setFilter(f)}
               disabled={loading}
-              title={
-                f === "evals"
-                  ? "Only what Tracely itself did — the judge's prompt and reply, the attacker's move, the call to your endpoint"
-                  : undefined
-              }
               className={clsx(
                 "rounded-lg border px-3 py-1.5 text-[12px] font-medium transition-colors disabled:opacity-50",
                 filter !== f
                   ? "border-line bg-ink-800 text-fg-muted hover:text-fg"
-                  : f === "evals"
-                    // Its own colour: these rows are the product, not the agent, and the list
-                    // looking identical either way is how you misread a judge run as a real one.
-                    ? "border-info/50 bg-info/15 text-info"
-                    : "border-signal/50 bg-signal/15 text-signal",
+                  : "border-signal/50 bg-signal/15 text-signal",
               )}
             >
-              {f === "all" ? "All" : f === "failing" ? "Failing" : f === "multi" ? "Multi-turn" : "Evals"}
-              {/* No count on an inactive Evals chip: they aren't fetched until it's picked, so
-                  the honest number is unknown — and "Evals 0" reads as "there are none". */}
-              {(f !== "evals" || evals) && (
-                <span className="ml-1.5 font-mono text-[10.5px] opacity-70">{counts[f]}</span>
-              )}
+              {f === "all" ? "All" : f === "failing" ? "Failing" : "Multi-turn"}
+              <span className="ml-1.5 font-mono text-[10.5px] opacity-70">{counts[f]}</span>
             </button>
           ))}
         </div>

@@ -64,6 +64,13 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
                 defaultTitle={firstInput ? `Prod · ${firstInput.slice(0, 70)}` : undefined}
               />
             )}
+            {/* Tracely's own grading of THIS conversation. It lives here rather than as rows in
+                /traces, where every conversation added one list entry per eval level. */}
+            {turns.length > 0 && (
+              <a href={`/sessions/${encodeURIComponent(threadId)}/evals`} className="btn-ghost">
+                Show evals
+              </a>
+            )}
             {turns.length > 0 && <ShareButton threadId={threadId} />}
           </div>
         </div>

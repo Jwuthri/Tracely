@@ -1163,7 +1163,12 @@ function DataRow({
 // memo: a turn's step rows depend only on (turn, spans, cols, hiddenTypes) — all referentially stable
 // across unrelated parent re-renders (busy/prefs/another thread expanding), so they skip re-rendering.
 const SpanRows = memo(function SpanRows({ turn, spans, cols, hiddenTypes }: { turn: FullTurn; spans: SpanOut[]; cols: Col[]; hiddenTypes: Set<string> }) {
-  const visible = sortSpans(spans).filter((s) => !hiddenTypes.has(normalizeType(s.type)));
+  // The type filter exists to hide the CHAIN noise some frameworks emit around real work. Every
+  // span of a Tracely recording IS a CHAIN, so that preference — set once, on a trace, months ago —
+  // silently blanked the whole evals view. Recording rows opt out of it.
+  const visible = sortSpans(spans).filter(
+    (s) => s.metadata?.["tracely.internal.kind"] || !hiddenTypes.has(normalizeType(s.type)),
+  );
   if (visible.length === 0) {
     return <EmptyTr cols={cols} text={spans.length ? "All step types hidden." : "No steps."} />;
   }
