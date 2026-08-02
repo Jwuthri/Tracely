@@ -46,6 +46,12 @@ log = structlog.get_logger()
 OnResult = Callable[[dict], None]
 
 
+def _execution_mode(spec: dict) -> str:
+    """The evaluator's item-ordering mode. Unknown/legacy values are safely batch."""
+    mode = str((spec.get("config") or {}).get("execution_mode") or "batch").lower()
+    return "sequential" if mode == "sequential" else "batch"
+
+
 # The table calls its three levels conversation / message / step, so the recording does too — a
 # recording that says "turn" or "AGENT_RUN" for the row the table labels `M` makes the reader
 # translate between two vocabularies for the same thing.
@@ -151,14 +157,24 @@ def _inject_dependencies(spec: dict, completed: dict[str, list[dict]]) -> dict:
 
 
 def _needs_thread_context(specs: list[dict]) -> bool:
-    """True when an advanced llm_judge spec references a conversation-scoped variable
-    (`@HISTORY`/`@MESSAGES`/`@PREVIOUS_*`/`@GOAL`/`@LIST_AGENT`) — the only case where a
-    trace/step-level eval needs the WHOLE thread fetched. Purely step-local advanced columns
-    (only `@CURRENT_STEP.*` / `@METRIC_PREVIOUS_RESULT`) pay nothing."""
+    """True when a message/step-level eval needs the WHOLE thread fetched (one extra read), which
+    is two cases:
+
+    - an advanced llm_judge referencing a conversation-scoped variable (`@HISTORY`/`@MESSAGES`/
+      `@PREVIOUS_*`/`@GOAL`/`@LIST_AGENT`). Purely step-local advanced columns (only
+      `@CURRENT_STEP.*` / `@METRIC_PREVIOUS_RESULT`) pay nothing;
+    - any SEQUENTIAL judge, which by definition grades this message in the light of the earlier
+      turns — without the thread it would fall back to grading it alone, i.e. batch.
+    """
     return any(
         s.get("kind") == "llm_judge"
-        and (s.get("config") or {}).get("is_advanced")
-        and references_conversation_scope((s.get("config") or {}).get("template_variables"))
+        and (
+            _execution_mode(s) == "sequential"
+            or (
+                (s.get("config") or {}).get("is_advanced")
+                and references_conversation_scope((s.get("config") or {}).get("template_variables"))
+            )
+        )
         for s in specs
     )
 
@@ -185,6 +201,8 @@ class EvaluationService:
         on_result: OnResult | None = None,
         skip_conversation: bool = False,
         thread_spans: list[dict] | None = None,
+        execution_mode: str | None = None,
+        apply_targeting: bool = False,
     ) -> dict:
         spans = self.trace_reader.read_spans(project_id, trace_id)
         if not spans:
@@ -203,7 +221,14 @@ class EvaluationService:
             specs = self._apply_targeting(
                 project_id, self.load_enabled_evaluators(project_id), root, trace_id
             )
+        elif apply_targeting:
+            # `evaluate_thread` reuses an already-loaded list to avoid treating its automatic
+            # settled-thread pass like an on-demand run. Keep the same targeting guarantee that
+            # the ordinary ingest path has, but decide it against this individual trace.
+            specs = self._apply_targeting(project_id, specs, root, trace_id)
         trace_specs = [s for s in specs if s["level"] != CONVERSATION]
+        if execution_mode is not None:
+            trace_specs = [s for s in trace_specs if _execution_mode(s) == execution_mode]
         conv_specs = [] if skip_conversation else [s for s in specs if s["level"] == CONVERSATION]
 
         # Advanced judges that read @HISTORY/@PREVIOUS_* need the whole thread (one extra read,
@@ -245,6 +270,7 @@ class EvaluationService:
         thread_id: str,
         specs: list[dict] | None = None,
         on_result: OnResult | None = None,
+        execution_mode: str | None = None,
     ) -> dict:
         """Evaluate a whole conversation row: every turn with the trace/span-level evaluators,
         then the conversation-level evaluators once across the full thread.
@@ -252,9 +278,12 @@ class EvaluationService:
         Metrics with `config.execution_mode == "sequential"` chain across the turns: each
         trace's run receives the previous turn's result of the SAME metric (injected as
         `config.__previous_result__`; within a turn the judge chains its own steps)."""
+        automatic = specs is None
         if specs is None:
             specs = self.load_enabled_evaluators(project_id)
         trace_specs = [s for s in specs if s["level"] != CONVERSATION]
+        if execution_mode is not None:
+            trace_specs = [s for s in trace_specs if _execution_mode(s) == execution_mode]
         conv_specs = [s for s in specs if s["level"] == CONVERSATION]
         total = failures = 0
         if trace_specs:
@@ -280,12 +309,14 @@ class EvaluationService:
                 staged = [_with_previous(s, chain) for s in trace_specs]
                 r = self.evaluate_trace(
                     project_id, tid, specs=staged, on_result=capture, skip_conversation=True,
-                    thread_spans=thread_spans,
+                    thread_spans=thread_spans, apply_targeting=automatic,
                 )
                 total += r.get("scores", 0)
                 failures += r.get("failures", 0)
         if conv_specs:
-            total += self._evaluate_conversation(project_id, thread_id, conv_specs, on_result)
+            total += self._evaluate_conversation(
+                project_id, thread_id, conv_specs, on_result, apply_targeting=automatic
+            )
         return {"scores": total, "failures": failures}
 
     def _apply_targeting(
@@ -378,14 +409,27 @@ class EvaluationService:
         ]
         if not specs:
             return {"scores": 0}
-        return {"scores": self._evaluate_conversation(project_id, thread_id, specs, on_result)}
+        return {
+            "scores": self._evaluate_conversation(
+                project_id, thread_id, specs, on_result, apply_targeting=True
+            )
+        }
 
     def _evaluate_conversation(
-        self, project_id: str, thread_id: str, specs: list[dict], on_result: OnResult | None
+        self,
+        project_id: str,
+        thread_id: str,
+        specs: list[dict],
+        on_result: OnResult | None,
+        apply_targeting: bool = False,
     ) -> int:
         """Run CONVERSATION-level specs over every span in the thread; persist thread-scoped."""
         spans = self.trace_reader.read_thread_spans(project_id, thread_id)
         if not spans:
+            return 0
+        if apply_targeting:
+            specs = self._apply_conversation_targeting(project_id, specs, spans, thread_id)
+        if not specs:
             return 0
         ctx = RunContext(project_id, "", "", spans, root_span(spans), thread_id=thread_id)
         results = self._dispatch_specs(specs, ctx)
@@ -393,6 +437,54 @@ class EvaluationService:
             self.score_writer.write_eval_scores(project_id, "", "", results, thread_id=thread_id)
             self._emit(on_result, results, trace_id="", thread_id=thread_id)
         return len(results)
+
+    def _apply_conversation_targeting(
+        self, project_id: str, specs: list[dict], spans: list[dict], thread_id: str
+    ) -> list[dict]:
+        """Target a whole-thread evaluator once, deterministically.
+
+        A conversation can include several agent runs. Agent/environment targeting therefore
+        matches when *any* turn belongs to the selected target, while sampling is keyed by the
+        thread id because the conversation — not an arbitrary turn — is the subject being scored.
+        """
+        by_trace: dict[str, list[dict]] = {}
+        for span in spans:
+            by_trace.setdefault(span.get("trace_id") or "", []).append(span)
+        roots = [root_span(trace_spans) for trace_spans in by_trace.values()]
+        slug_by_agent: dict[str, str] = {}
+
+        def slug_for(agent_id: str) -> str:
+            if not agent_id:
+                return ""
+            if agent_id not in slug_by_agent:
+                try:
+                    with SyncSessionLocal() as sess:
+                        slug_by_agent[agent_id] = repositories.agent_slug(sess, project_id, agent_id)
+                except Exception as exc:
+                    log.warning("agent_slug_lookup_failed", agent_id=agent_id, error=str(exc))
+                    slug_by_agent[agent_id] = ""
+            return slug_by_agent[agent_id]
+
+        applicable: list[dict] = []
+        for spec in specs:
+            target_only = {**spec, "sampling": 1.0}
+            target_matches = any(
+                spec_applies(
+                    target_only,
+                    agent_id=root.get("agent_id") or "",
+                    agent_slug=slug_for(root.get("agent_id") or ""),
+                    env=root.get("env") or "",
+                    trace_id=thread_id,
+                )
+                for root in roots
+            )
+            if not target_matches:
+                continue
+            # Reuse the canonical deterministic sampler after separating it from target matching.
+            sample_only = {**spec, "target_agent": "", "target_env": ""}
+            if spec_applies(sample_only, agent_id="", agent_slug="", env="", trace_id=thread_id):
+                applicable.append(spec)
+        return applicable
 
     def _dispatch_specs(self, specs: list[dict], ctx: RunContext) -> list[EvalResult]:
         specs = _topo_sort(specs)

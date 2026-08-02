@@ -7,7 +7,8 @@ answer / tool grounding, thread transcript, or step I/O) is the user message; an
 
 - level CONVERSATION  → one grade for the whole thread (multi-turn transcript)
 - level AGENT_RUN     → one grade per trace/turn (user request vs final answer + tool results)
-- level SPAN/TOOL/GENERATION → one grade per step (the span's own input/output in context)
+- level SPAN/TOOL/GENERATION → one grade per step — every event inside the message (tool call,
+                        thinking, retrieval, agent hand-off), the message root excluded
 
 Output types → persisted score shape:
   score (default) → NUMERIC value 0..1, PASS/FAIL via `threshold`
@@ -21,9 +22,12 @@ Output types → persisted score shape:
                     neither, the column is informational (no value, no verdict).
   category        → LEGACY alias (superseded by json + enum schemas); kept for old rows
 
-Execution mode (`config.execution_mode`, default "batch"): "sequential" chains items of the
-SAME metric — each step's prompt carries the previous step's result, and in thread runs each
-turn carries the previous turn's (`config.__previous_result__`, injected by the service).
+Execution mode (`config.execution_mode`, default "batch"):
+- batch      → every item graded independently, nothing carried between them.
+- sequential → items graded in order, each one seeing what came before: a step sees the steps
+               already taken in its message, a message sees the earlier turns of its
+               conversation, plus the previous result of the SAME metric
+               (`config.__previous_result__`, injected by the service).
 """
 
 from __future__ import annotations
@@ -65,6 +69,8 @@ OUTPUT_TYPES = ("score", "number", "boolean", "category", "text", "json")
 
 _TRUNC_IO = 1500  # per-step input/output excerpt
 _TRUNC_TURN = 800  # per-turn excerpt in the conversation transcript
+_TRUNC_STEP_LINE = 400  # one earlier step, in a sequential judge's trajectory
+_TRUNC_TRAJECTORY = 4000  # the whole run-so-far block (steps, or earlier turns)
 _DEFAULT_MAX_SPANS = 30  # cost guard for per-step judges
 # The declared agent/tool catalog. Generous: a catalog cut mid-list silently hides the last few
 # tools from the judge, which is worse than a long prompt — it can then fault the agent for not
@@ -117,6 +123,43 @@ def _category_model(categories: list[str]) -> type[BaseModel]:
 def _clip(s: str, n: int) -> str:
     s = s or ""
     return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _step_line(span: dict, n: int) -> str:
+    """One earlier event, as a sequential judge sees it: what kind, what it was called, what came
+    back. Output over input — the input is usually the prompt the judge already has."""
+    body = content_text(span.get("output")) or content_text(span.get("input"))
+    return (
+        f"{n}. {span.get('type')} `{span.get('name') or span.get('step_id') or ''}`: "
+        f"{_clip(body, _TRUNC_STEP_LINE)}"
+    )
+
+
+def _turn_lines(spans: list[dict], stop_before: str = "") -> list[str]:
+    """The thread as `Turn n — user/agent` lines, oldest first. `stop_before` cuts it at that
+    trace, so a sequential message judge sees the conversation that LED to the message it grades
+    and not the message itself."""
+    by_trace: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for s in spans:
+        tid = s.get("trace_id") or ""
+        if tid not in by_trace:
+            by_trace[tid] = []
+            order.append(tid)
+        by_trace[tid].append(s)
+    lines: list[str] = []
+    for n, tid in enumerate(order, start=1):
+        if stop_before and tid == stop_before:
+            break
+        trace_spans = by_trace[tid]
+        root = root_span(trace_spans)
+        user_in = content_text(root.get("input")) or first_io(trace_spans, "input")
+        answer = answer_for(root, trace_spans, TOOL, GENERATION, CHAIN)
+        if user_in:
+            lines.append(f"Turn {n} — user: {_clip(user_in, _TRUNC_TURN)}")
+        if answer:
+            lines.append(f"Turn {n} — agent: {_clip(answer, _TRUNC_TURN)}")
+    return lines
 
 
 def _parse_json_object(text: str) -> dict:
@@ -225,8 +268,13 @@ class LLMJudgeEvaluator(Evaluator):
         A judge that only sees the transcript can say the answer was unhelpful; it cannot say the
         agent should have called `issue_refund` and didn't, because it has no idea that tool
         exists. The catalog carries descriptions and parameter names the spans never do. Advanced
-        templates already reach it via `@LIST_AGENT` — this is the same data for basic judges,
-        which is most of them. Guarded: no catalog (or a lookup hiccup) simply omits the section.
+        templates already reach it via `@LIST_AGENT` — this is the same data for basic judges.
+        Guarded: no catalog (or a lookup hiccup) simply omits the section.
+
+        Step and conversation level, NOT message level. Which tool should have been called is a
+        step-level question; pasting a 2 000-token tool catalog under every single message made
+        the prompt about the tools instead of the answer, and marked a plain greeting down for
+        "not calling mock_identify_customer".
         """
         try:
             from tracely.services.conversation_agents_service import ConversationAgentsService
@@ -258,25 +306,46 @@ class LLMJudgeEvaluator(Evaluator):
         ]
         if tool_outputs:
             grounding = "\n\nTool results the answer must be consistent with:\n" + "\n".join(tool_outputs)
+        # Sequential: the earlier turns are the context this message is judged in. Batch grades the
+        # message alone. (The previous VERDICT is appended by `_grade` — useful, but it is not the
+        # conversation, and "did this answer follow from what came before" needs the conversation.)
+        history = ""
+        if _is_sequential(config) and ctx.thread_spans:
+            lines = _turn_lines(ctx.thread_spans, stop_before=ctx.trace_id)
+            if lines:
+                history = (
+                    "Conversation so far (earlier turns, oldest first):\n"
+                    + _clip("\n".join(lines), _TRUNC_TRAJECTORY) + "\n\n"
+                )
         body = (
+            f"{history}"
             f"User request:\n{_clip(user_in, 2000)}\n\n"
-            f"Agent answer:\n{_clip(answer, 2000)}{grounding}{self._capabilities(ctx)}"
+            f"Agent answer:\n{_clip(answer, 2000)}{grounding}"
         )
         result = self._grade(config, body, previous=_previous_from_config(config))
         return [result] if result else []
 
     def _step_candidates(self, ctx: RunContext, config: dict) -> tuple[list[dict], int]:
-        """The spans a step-level judge grades: the level's span type(s) (SPAN ⇒ `config.span_types`,
-        default TOOL+GENERATION; TOOL/GENERATION/CHAIN ⇒ exactly that type), with I/O, capped at
-        `max_spans`. Shared by the basic and advanced step paths. Returns `(candidates, eligible)`
-        where `eligible` is the pre-cap count so callers can surface partial coverage."""
-        if self.level == SPAN:
-            wanted = {str(t).upper() for t in (config.get("span_types") or [TOOL, GENERATION])}
-        else:
-            wanted = {self.level}
+        """The spans a step-level judge grades, with I/O, capped at `max_spans`. Shared by the
+        basic and advanced step paths. Returns `(candidates, eligible)` where `eligible` is the
+        pre-cap count so callers can surface partial coverage.
+
+        A step is EVERY event inside the message — tool calls, thinking, retrieval, the hand-offs
+        between agents. Level SPAN takes them all (narrow it with `config.span_types`);
+        TOOL/GENERATION/CHAIN take exactly that type. The message root is never a step: it is the
+        message, and grading it here would duplicate the message level.
+        """
+        wanted = (
+            {str(t).upper() for t in (config.get("span_types") or [])}
+            if self.level == SPAN
+            else {self.level}
+        )
+        root_id = (ctx.root or {}).get("span_id", "")
         candidates = [
             s for s in ctx.spans
-            if s.get("type") in wanted and (s.get("input") or s.get("output"))
+            if (not wanted or s.get("type") in wanted)
+            and s.get("span_id") != root_id
+            and (s.get("input") or s.get("output"))
         ]
         eligible = len(candidates)
         max_spans = int(config.get("max_spans") or _DEFAULT_MAX_SPANS)
@@ -302,6 +371,7 @@ class LLMJudgeEvaluator(Evaluator):
         user_in = content_text(ctx.root.get("input")) or first_io(ctx.spans, "input")
         sequential = _is_sequential(config)
         previous = _previous_from_config(config)
+        capabilities = self._capabilities(ctx)
         out: list[EvalResult] = []
         for i, s in enumerate(candidates):
             # Name the recorded call for the span it judges. Without this a step-level column
@@ -310,8 +380,19 @@ class LLMJudgeEvaluator(Evaluator):
             rec = introspection.active()
             if rec:
                 rec.target = f"{s.get('type')} {s.get('name') or s.get('step_id') or i + 1}"
+            # Sequential means the run so far is context: the tool call is judged knowing what the
+            # model was thinking when it chose it. Batch grades each step on its own — that is the
+            # whole difference between the two modes, and a previous VERDICT is not the run so far.
+            trajectory = (
+                "\n\nSteps already taken in this message (oldest first):\n"
+                + _clip("\n".join(_step_line(p, n) for n, p in enumerate(candidates[:i], start=1)),
+                        _TRUNC_TRAJECTORY)
+                if sequential and i
+                else ""
+            )
             body = (
-                f"User request (the goal of the whole run):\n{_clip(user_in, 1200)}\n\n"
+                f"User request (the goal of the whole run):\n{_clip(user_in, 1200)}"
+                f"{capabilities}{trajectory}\n\n"
                 f"Step {i + 1} of {len(candidates)} — {s.get('type')} `{s.get('name') or s.get('step_id') or ''}`\n"
                 f"Step input:\n{_clip(content_text(s.get('input')), _TRUNC_IO)}\n\n"
                 f"Step output:\n{_clip(content_text(s.get('output')), _TRUNC_IO)}"
@@ -331,29 +412,13 @@ class LLMJudgeEvaluator(Evaluator):
     def _run_conversation(self, ctx: RunContext, config: dict) -> list[EvalResult]:
         """One grade for the whole thread: a turn-by-turn transcript (ctx.spans spans every
         trace in the thread; each span carries its trace_id)."""
-        by_trace: dict[str, list[dict[str, Any]]] = {}
-        order: list[str] = []
-        for s in ctx.spans:
-            tid = s.get("trace_id") or ctx.trace_id
-            if tid not in by_trace:
-                by_trace[tid] = []
-                order.append(tid)
-            by_trace[tid].append(s)
-        lines: list[str] = []
-        for n, tid in enumerate(order, start=1):
-            spans = by_trace[tid]
-            root = root_span(spans)
-            user_in = content_text(root.get("input")) or first_io(spans, "input")
-            answer = answer_for(root, spans, TOOL, GENERATION, CHAIN)
-            if user_in:
-                lines.append(f"Turn {n} — user: {_clip(user_in, _TRUNC_TURN)}")
-            if answer:
-                lines.append(f"Turn {n} — agent: {_clip(answer, _TRUNC_TURN)}")
+        lines = _turn_lines(ctx.spans)
         if not lines:
             return []
+        turns = sum(1 for line in lines if " — user: " in line) or len(lines)
         transcript = _clip("\n".join(lines), 8000)
         body = (
-            f"Full conversation ({len(order)} turn{'s' if len(order) != 1 else ''}):\n{transcript}"
+            f"Full conversation ({turns} turn{'s' if turns != 1 else ''}):\n{transcript}"
             f"{self._capabilities(ctx)}"
         )
         result = self._grade(config, body)

@@ -53,9 +53,13 @@ def evaluate_run_task(self, project_id: str, trace_id: str, gen: int = 0) -> dic
     if not eval_debounce.is_latest(project_id, trace_id, gen):
         return {"skipped": "superseded", "trace_id": trace_id}
     try:
-        # Turn/step columns only. The conversation-level pass is scheduled below instead of run
-        # inline, so a 60-turn thread grades its conversation ONCE rather than 60 times.
-        result = EvaluationService().evaluate_trace(project_id, trace_id, skip_conversation=True)
+        # Batch turn/step columns run as soon as this trace settles. Sequential message columns
+        # deliberately wait for the debounced whole-thread pass below: they need the preceding
+        # turn's result, so treating each ingest task as an isolated run would silently turn them
+        # into batch evaluators.
+        result = EvaluationService().evaluate_trace(
+            project_id, trace_id, skip_conversation=True, execution_mode="batch"
+        )
     except Exception as exc:
         raise self.retry(exc=exc)
     # Real-time rolling summary: fold this turn into the thread's accumulating summary. Incremental
@@ -81,11 +85,17 @@ def evaluate_run_task(self, project_id: str, trace_id: str, gen: int = 0) -> dic
 
 @celery_app.task(name="tracely.evaluate_conversation", bind=True, max_retries=3, default_retry_delay=3)
 def evaluate_conversation_task(self, project_id: str, thread_id: str, gen: int = 0) -> dict:
-    """Grade a whole thread with its CONVERSATION-level columns, once it has settled."""
+    """Grade a settled thread's CONVERSATION columns and sequential message/step columns.
+
+    The same thread pass gives sequential message evaluators a stable oldest→newest ordering, so
+    turn N receives turn N-1's result. Batch columns already ran on their individual trace tasks.
+    """
     if not eval_debounce.is_latest(project_id, _CONV_KEY.format(thread=thread_id), gen):
         return {"skipped": "superseded", "thread_id": thread_id}
     try:
-        return EvaluationService().evaluate_conversation(project_id, thread_id)
+        return EvaluationService().evaluate_thread(
+            project_id, thread_id, execution_mode="sequential"
+        )
     except Exception as exc:
         raise self.retry(exc=exc)
 
@@ -194,4 +204,3 @@ def evaluate_monitors_task(self) -> dict:
     except Exception as exc:  # CH outage / Redis blip — the next tick will retry
         log.warning("evaluate_monitors_failed", error=str(exc))
         return {"monitors": 0, "fired": 0, "error": str(exc)}
-

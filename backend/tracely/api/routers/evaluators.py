@@ -19,6 +19,7 @@ from starlette.concurrency import run_in_threadpool
 
 from tracely.api.auth import get_project_id
 from tracely.domain.evaluation.evaluators import TEMPLATES
+from tracely.domain.evaluation.evaluators.llm_judge import OUTPUT_TYPES
 from tracely.domain.evaluation.generation import generate_evaluator_config
 from tracely.domain.evaluation.template_resolver import (
     build_context,
@@ -42,6 +43,44 @@ router = APIRouter(prefix="/api")
 
 VALID_LEVELS = {"CONVERSATION", "AGENT_RUN", "SPAN", "TOOL", "GENERATION", "CHAIN"}
 VALID_KINDS = {"structural", "llm_judge"}
+# Structural checks have a real target shape, rather than a generic prompt that can adapt to a
+# level. Letting users pair them arbitrarily created scores whose stated level disagreed with
+# their address (for example a TOOL score with no observation_id), so the table had nowhere to
+# render the result.
+STRUCTURAL_LEVELS = {
+    "run_outcome": "AGENT_RUN",
+    "tool_success": "TOOL",
+    "tool_consistency": "AGENT_RUN",
+    "latency": "AGENT_RUN",
+    "required_tools": "AGENT_RUN",
+}
+
+
+def _validate_evaluator(kind: str, level: str, config: dict[str, Any]) -> None:
+    if kind == "structural":
+        check = str(config.get("check") or "")
+        required_level = STRUCTURAL_LEVELS.get(check)
+        if required_level is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown structural check {check!r}; choose one of {sorted(STRUCTURAL_LEVELS)}",
+            )
+        if level != required_level:
+            raise HTTPException(
+                status_code=400,
+                detail=f"structural check {check!r} must use level {required_level}",
+            )
+        return
+
+    output_type = str(config.get("output_type") or "score").lower()
+    if output_type not in OUTPUT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"output_type must be one of {list(OUTPUT_TYPES)}",
+        )
+    execution_mode = str(config.get("execution_mode") or "batch").lower()
+    if execution_mode not in {"batch", "sequential"}:
+        raise HTTPException(status_code=400, detail="execution_mode must be 'batch' or 'sequential'")
 
 
 def _stamp_advanced(config: dict[str, Any]) -> dict[str, Any]:
@@ -265,6 +304,7 @@ async def create_evaluator(
         raise HTTPException(status_code=400, detail=f"level must be one of {sorted(VALID_LEVELS)}")
 
     config = _stamp_advanced(body.config or {})
+    _validate_evaluator(body.kind, body.level, config)
 
     def work():
         with SyncSessionLocal() as s:
@@ -293,6 +333,14 @@ async def update_evaluator(
             # changed — an untouched config must not be clobbered by exclude_unset.
             if isinstance(patch.get("config"), dict):
                 patch["config"] = _stamp_advanced(patch["config"])
+            existing = repo.evaluator_get(s, project_id, evaluator_id)
+            if existing is None:
+                return None
+            _validate_evaluator(
+                existing.kind,
+                patch.get("level", existing.level),
+                patch.get("config", existing.config or {}),
+            )
             e = repo.evaluator_update(s, project_id, evaluator_id, patch)
             return None if e is None else _evaluator_dict(e)
 

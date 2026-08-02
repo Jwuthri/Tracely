@@ -121,6 +121,40 @@ async def test_create_rejects_bad_level_and_kind(client, sync_db):
     assert bad_kind.status_code == 400
 
 
+async def test_structural_checks_reject_a_level_they_cannot_address(client, sync_db):
+    """A run-level structural check stamped as TOOL has no tool observation id, so it used to
+    persist an invisible score. Reject the invalid pairing before it enters the runner."""
+    tok = await _owner_token(client)
+    bad = await client.post(
+        "/api/evaluators",
+        headers=_bearer(tok),
+        json={
+            "name": "Bad latency column",
+            "kind": "structural",
+            "level": "TOOL",
+            "config": {"check": "latency"},
+        },
+    )
+    assert bad.status_code == 400
+    assert "must use level AGENT_RUN" in bad.json()["detail"]
+
+
+async def test_judge_rejects_unknown_execution_mode_and_output_type(client, sync_db):
+    tok = await _owner_token(client)
+    bad_mode = await client.post(
+        "/api/evaluators",
+        headers=_bearer(tok),
+        json={"name": "Bad mode", "config": {"execution_mode": "parallel"}},
+    )
+    assert bad_mode.status_code == 400
+    bad_type = await client.post(
+        "/api/evaluators",
+        headers=_bearer(tok),
+        json={"name": "Bad type", "config": {"output_type": "matrix"}},
+    )
+    assert bad_type.status_code == 400
+
+
 async def test_templates_listing_marks_installed(client, sync_db):
     tok = await _owner_token(client)
     r = await client.get("/api/evaluators/templates", headers=_bearer(tok))

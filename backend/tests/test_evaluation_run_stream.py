@@ -193,3 +193,50 @@ def test_evaluate_thread_runs_turns_then_conversation():
     assert conv_emit["trace_id"] is None and conv_emit["session_id"] == "th-1"
     run_emit = next(e for e in emitted if e["evaluation_level"] == "AGENT_RUN")
     assert run_emit["trace_id"] == "t1" and run_emit["session_id"] == "th-1"
+
+
+def test_settled_thread_pass_runs_only_sequential_trace_columns():
+    """The worker's settled-thread pass must not re-run batch columns. It exists solely to
+    provide a stable cross-turn chain for sequential metrics, plus the single conversation pass."""
+    reader = _FakeReader({"t1": [_ok_span("t1")], "t2": [_ok_span("t2")]}, ["t1", "t2"])
+
+    class _Registry:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def dispatch(self, kind, config, score_name, level, ctx):
+            self.calls.append(score_name)
+            from tracely.domain.evaluation.results import EvalResult
+
+            return [EvalResult(score_name, level, "PASS", value=1.0)]
+
+    registry = _Registry()
+    svc = EvaluationService(trace_reader=reader, score_writer=_FakeWriter(), registry=registry)  # type: ignore[arg-type]
+    specs = [
+        {"id": "batch", "kind": "llm_judge", "score_name": "batch", "level": "AGENT_RUN", "config": {}},
+        {"id": "seq", "kind": "llm_judge", "score_name": "seq", "level": "AGENT_RUN",
+         "config": {"execution_mode": "sequential"}},
+        {"id": "conv", "kind": "llm_judge", "score_name": "conv", "level": "CONVERSATION", "config": {}},
+    ]
+
+    out = svc.evaluate_thread("p", "th-1", specs=specs, execution_mode="sequential")
+
+    assert out == {"scores": 3, "failures": 0}
+    assert registry.calls == ["seq", "seq", "conv"]
+
+
+def test_conversation_targeting_uses_the_thread_as_the_sampling_subject():
+    """Conversation metrics match any target turn, but their sampling decision stays stable for
+    the conversation itself rather than changing with whichever turn arrived last."""
+    spans = [_ok_span("t1")]
+    spans[0]["env"] = "prod"
+    svc = EvaluationService(trace_reader=_FakeReader({"t1": spans}, ["t1"]), score_writer=_FakeWriter())  # type: ignore[arg-type]
+    specs = [
+        {"score_name": "keep", "target_agent": "", "target_env": "prod", "sampling": 1.0},
+        {"score_name": "wrong-env", "target_agent": "", "target_env": "ci", "sampling": 1.0},
+        {"score_name": "never", "target_agent": "", "target_env": "prod", "sampling": 0.0},
+    ]
+
+    got = svc._apply_conversation_targeting("p", specs, spans, "th-1")
+
+    assert [s["score_name"] for s in got] == ["keep"]

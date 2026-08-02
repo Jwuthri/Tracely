@@ -1,15 +1,15 @@
-"""Keep the SDK test suite off any running Tracely.
+"""Keep SDK tests capable of producing their in-memory spans.
 
-`init()` takes the endpoint as a plain default — `http://localhost:8000`, the developer's own
-stack — so `pytest sdk/tests` pushed a few hundred spans into whatever workspace was running, once
-per run. `OTEL_SDK_DISABLED` is OpenTelemetry's own kill switch: the SDK becomes a no-op, so there
-is no exporter and no background flush thread to race with teardown.
-
-Assigned, not `setdefault`: a dev shell that exports it as "false" is exactly this case.
+The tests install their own in-memory exporters and assert on completed OpenTelemetry spans.
+`OTEL_SDK_DISABLED=true` makes the SDK a no-op, which means every tracing test necessarily sees
+an empty exporter. The batch OTLP processor is not flushed by these tests, so no test span is sent
+to a developer's running Tracely stack during the test process.
 """
 
 from __future__ import annotations
 
 import os
 
-os.environ["OTEL_SDK_DISABLED"] = "true"
+# Assigned rather than setdefault: a shell that disables OTel would otherwise make the suite
+# falsely exercise only non-recording spans.
+os.environ["OTEL_SDK_DISABLED"] = "false"

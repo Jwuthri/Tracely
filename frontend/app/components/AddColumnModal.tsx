@@ -890,7 +890,7 @@ export function AddColumnModal({
                       <p className="mt-1.5 text-[10.5px] text-fg-faint">
                         {form.level === "CONVERSATION"
                           ? "No effect at conversation level — single grade per thread."
-                          : "Steps chain within each run; turns chain across the thread when run at conversation level."}
+                          : "Steps chain within each run; message grades chain across the conversation after it settles."}
                       </p>
                     )}
                   </div>

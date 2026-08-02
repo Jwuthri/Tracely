@@ -112,12 +112,13 @@ def test_span_level_grades_each_step(monkeypatch):
         _span(span_id="root", type="AGENT"),
         _span(span_id="tool-1", type="TOOL", name="lookup", parent_span_id="root"),
         _span(span_id="gen-1", type="GENERATION", parent_span_id="root"),
-        _span(span_id="chain-1", type="CHAIN", parent_span_id="root"),  # not in default span_types
+        _span(span_id="chain-1", type="CHAIN", parent_span_id="root"),
     ]
     results = _judge(SPAN).run(_ctx(spans), {"prompt": "Grade the step."})
-    assert [r.target_span_id for r in results] == ["tool-1", "gen-1"]
+    # a step is every event INSIDE the message — the message root is the message, not a step
+    assert [r.target_span_id for r in results] == ["tool-1", "gen-1", "chain-1"]
     assert all(r.level == SPAN for r in results)
-    assert "Step 1 of 2" in prompts[0]
+    assert "Step 1 of 3" in prompts[0]
 
     # span_types narrows the candidates
     only_tools = _judge(SPAN).run(_ctx(spans), {"span_types": ["TOOL"]})
@@ -196,7 +197,8 @@ def test_json_with_schema_enforces_user_contract(monkeypatch):
 
 
 def test_sequential_steps_chain_previous_result(monkeypatch):
-    """execution_mode=sequential: step i+1's prompt carries step i's result of this metric."""
+    """execution_mode=sequential: step i+1 sees what step i DID (the run so far) and how it was
+    graded. Batch grades each step alone — that is the whole difference between the modes."""
     prompts: list[str] = []
 
     def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None):
@@ -205,20 +207,27 @@ def test_sequential_steps_chain_previous_result(monkeypatch):
 
     monkeypatch.setattr(provider, "run_structured_agent", fake)
     spans = [
-        _span(span_id="tool-1", type="TOOL", name="lookup"),
-        _span(span_id="tool-2", type="TOOL", name="update"),
+        _span(span_id="root", type="AGENT"),
+        _span(span_id="tool-1", type="TOOL", name="lookup", parent_span_id="root",
+              output="found order 42"),
+        _span(span_id="tool-2", type="TOOL", name="update", parent_span_id="root"),
     ]
     results = _judge(SPAN).run(
         _ctx(spans), {"execution_mode": "sequential", "span_types": ["TOOL"], "threshold": 0.6}
     )
     assert len(results) == 2
     assert "Previous result of this metric" not in prompts[0]  # first item has no chain context
+    assert "Steps already taken" not in prompts[0]
     assert "Previous result of this metric" in prompts[1]
     assert "grade 1" in prompts[1]  # the first grade's reason rode along
+    # …and the step itself, not just its verdict: what the agent actually did before this one
+    assert "Steps already taken" in prompts[1]
+    assert "found order 42" in prompts[1]
     # batch mode never chains
     prompts.clear()
     _judge(SPAN).run(_ctx(spans), {"span_types": ["TOOL"]})
     assert all("Previous result of this metric" not in p for p in prompts)
+    assert all("Steps already taken" not in p for p in prompts)
 
 
 def test_trace_level_previous_result_seed(monkeypatch):
@@ -234,6 +243,33 @@ def test_trace_level_previous_result_seed(monkeypatch):
     _judge(RUN).run(_ctx([_span()]), config)
     assert "Previous result of this metric" in prompts[0]
     assert '"verdict": "FAIL"' in prompts[0]
+
+
+def test_sequential_message_sees_the_earlier_turns(monkeypatch):
+    """A sequential message judge grades turn N in the light of turns 1..N-1 — the conversation
+    that led here, not just the previous verdict. Batch grades the message on its own."""
+    prompts: list[str] = []
+
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None):
+        prompts.append(prompt)
+        return response_format(score=1.0, reason="ok")
+
+    monkeypatch.setattr(provider, "run_structured_agent", fake)
+    thread = [
+        _span(trace_id="t0", span_id="r0", input="where is my order?", output="order 42 shipped"),
+        _span(trace_id="t1", span_id="r1", input="when does it arrive?", output="tomorrow"),
+    ]
+    ctx = RunContext(
+        "p", "t1", "run-1", [thread[1]], thread[1], thread_id="c1", thread_spans=thread
+    )
+    _judge(RUN).run(ctx, {"execution_mode": "sequential"})
+    assert "Conversation so far" in prompts[0]
+    assert "where is my order?" in prompts[0]
+    assert "when does it arrive?" not in prompts[0].split("User request:")[0]  # not the turn itself
+
+    prompts.clear()
+    _judge(RUN).run(ctx, {})
+    assert "Conversation so far" not in prompts[0]
 
 
 def test_no_key_skips_entirely(monkeypatch):
