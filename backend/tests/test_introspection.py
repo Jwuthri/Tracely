@@ -357,6 +357,37 @@ def test_ingest_never_schedules_evaluation_for_a_recording(monkeypatch):
     assert scheduled == ["real-1"]
 
 
+def test_a_verdict_is_recorded_as_an_object_for_llm_and_structural_alike():
+    """A structural check has no nested prompt/reply to open, so its row IS its verdict — which
+    means the verdict has to be as readable as a judge's. Same shape for both; a `json` judge's own
+    schema is re-parsed rather than embedded as an escaped string."""
+    import json as _json
+
+    from tracely.domain.evaluation.results import EvalResult
+    from tracely.services.evaluation_service import _results_json, _spec_json
+
+    structural = _json.loads(_results_json([EvalResult("x", "AGENT_RUN", "PASS", value=288.0)]))
+    assert structural == {"verdict": "PASS", "value": 288.0}
+
+    judged = _json.loads(_results_json([
+        EvalResult("y", "AGENT_RUN", "FAIL", value=0.2, comment="rude",
+                   string_value='{"severity": "severe"}'),
+    ]))
+    assert judged["output"] == {"severity": "severe"}  # nested, not a quoted string
+
+    # Several graded steps stay an array so each one keeps its span.
+    many = _json.loads(_results_json([
+        EvalResult("z", "TOOL", "PASS", target_span_id="s1"),
+        EvalResult("z", "TOOL", "FAIL", target_span_id="s2"),
+    ]))
+    assert [r["span_id"] for r in many] == ["s1", "s2"]
+
+    assert _json.loads(_spec_json(
+        {"score_name": "z", "kind": "structural", "level": "TOOL", "config": {"check": "tool_success"}}
+    )) == {"evaluator": "z", "kind": "structural", "level": "step", "mode": "batch",
+           "check": "tool_success"}
+
+
 def test_evaluation_refuses_a_trace_that_is_itself_a_recording(monkeypatch):
     """Layer 2. Ingest is not the only caller — a monitor, a manual re-run or a backfill reaches
     `evaluate_trace` directly, and each is its own way into the same loop."""

@@ -249,6 +249,9 @@ export type AgentEndpoint = {
   has_token?: boolean;
   reply_path?: string;
   session_key?: string;
+  // Dotted path to a session id the endpoint MINTS in its response. Empty = we supply the id
+  // under `session_key`; set = turn 1 sends none and later turns echo what came back.
+  session_path?: string;
   timeout_s?: number;
   extra_headers?: Record<string, string>;
   // Merged into every request body — tenant_id, locale, channel. Query params need no

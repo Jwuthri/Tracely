@@ -58,6 +58,34 @@ export function ScenariosManager({
     setEditingId(id);
   }
 
+  // Scenario id currently being launched — a per-row flag, not a page-wide one, so running one
+  // scenario doesn't freeze the buttons on the others.
+  const [running, setRunning] = useState<string | null>(null);
+
+  async function runScenario(s: Scenario) {
+    setRunning(s.id);
+    setErr(null);
+    try {
+      const r = await fetch(`/api/scenarios/${s.id}/run`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ env: "ci" }),
+      });
+      const d = await r.json().catch(() => null);
+      if (r.ok && d?.conversation_id) {
+        // Straight to the conversation: it exists the moment the run is queued and fills in turn
+        // by turn, which is the thing worth watching.
+        router.push(`/sessions/${encodeURIComponent(d.conversation_id)}`);
+        return;
+      }
+      setErr(d?.detail ?? `Could not run the scenario (HTTP ${r.status})`);
+    } catch {
+      setErr("Could not run the scenario: the server is unreachable.");
+    } finally {
+      setRunning(null);
+    }
+  }
+
   async function remove(s: Scenario) {
     if (!confirm(`Delete scenario "${s.title || s.id}"?`)) return;
     const r = await fetch(`/api/scenarios/${s.id}`, { method: "DELETE" });
@@ -239,6 +267,14 @@ export function ScenariosManager({
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(e) => e.stopPropagation()}
               >
+                <button
+                  onClick={() => runScenario(s)}
+                  disabled={running !== null}
+                  title="Drive this conversation against the agent endpoint now"
+                  className="rounded-md border border-signal/40 bg-signal/10 px-2.5 py-1 text-[12px] font-medium text-signal transition-colors hover:bg-signal/20 disabled:opacity-50"
+                >
+                  {running === s.id ? "Running…" : "Run"}
+                </button>
                 <Toggle
                   checked={s.enabled}
                   onChange={(next) => patch(s.id, { enabled: next })}

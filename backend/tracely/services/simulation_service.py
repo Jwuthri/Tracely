@@ -69,6 +69,7 @@ class SimulationService:
         endpoint: AgentEndpoint,
         env: str = "ci",
         weaknesses: list[str] | None = None,
+        conversation_id: str = "",
     ) -> dict[str, Any]:
         """Drive the whole conversation. Returns
         `{conversation_id, trace_ids, turns, error}` — grading happens later, off the scores the
@@ -76,14 +77,21 @@ class SimulationService:
 
         `weaknesses` (adversarial only) are this agent's known production failure clusters, handed
         to the attacker so it probes where the agent has actually broken before.
+
+        `conversation_id` lets the CALLER name the thread before the driving starts. The one-click
+        run needs that: the button returns a link the moment the work is queued, and the turns fill
+        in underneath it — impossible if the id is only known once the last turn has landed.
         """
-        conversation_id = uuid.uuid4().hex
+        conversation_id = conversation_id or uuid.uuid4().hex
         history: list[dict[str, str]] = []
         trace_ids: list[str] = []
         turns: list[dict] = []
         tried: list[str] = []  # techniques already spent, so the attacker stops repeating them
 
         planned = self._planned_turn_count(scenario)
+        # The session the ENDPOINT named, when it is the kind that names one (`session_path`).
+        # Empty on turn 1 by definition — that call is what creates it.
+        session = ""
         # A recording of the DRIVING: the attacker's reasoning and the raw HTTP exchange with the
         # customer's endpoint. Distinct from the conversation traces themselves — those are what
         # the agent said, this is what Tracely did to make it say that.
@@ -125,8 +133,8 @@ class SimulationService:
 
                 trace_id, span_id = os.urandom(16), os.urandom(8)
                 start_ns = time.time_ns()
-                reply, error = self._call_endpoint(
-                    endpoint, conversation_id, history, message, trace_id, span_id
+                reply, session, error = self._call_endpoint(
+                    endpoint, conversation_id, history, message, trace_id, span_id, session
                 )
                 end_ns = time.time_ns()
                 if rec:
@@ -232,9 +240,15 @@ class SimulationService:
         message: str,
         trace_id: bytes,
         span_id: bytes,
-    ) -> tuple[str, str]:
-        """POST one turn. Returns `(reply, error)` — never raises; a transport failure is a
-        graded ERROR turn, not a crashed gate."""
+        session: str = "",
+    ) -> tuple[str, str, str]:
+        """POST one turn. Returns `(reply, session, error)` — never raises; a transport failure is
+        a graded ERROR turn, not a crashed gate.
+
+        `session` is what the endpoint named on an earlier turn; the returned one is what it names
+        on this one. Threading it through the caller (rather than keeping it on `self`) is what
+        keeps this class stateless per run.
+        """
         body: dict[str, Any] = {
             # `extra_body` first so it can never clobber the fields the conversation depends on
             # (messages/session), only add to them — tenant_id, locale, channel, and whatever
@@ -244,7 +258,15 @@ class SimulationService:
             "message": message,  # bespoke single-message APIs read this instead of `messages`
         }
         if endpoint.session_key:
-            body[endpoint.session_key] = conversation_id
+            # Whose identity is it? With `session_path` the ENDPOINT mints it, so turn 1 sends no
+            # session at all (sending one would either be rejected or silently create a second
+            # conversation) and later turns echo exactly what it returned. Without it, ours wins
+            # and goes on every turn — the long-standing behaviour.
+            if endpoint.session_path:
+                if session:
+                    body[endpoint.session_key] = session
+            else:
+                body[endpoint.session_key] = conversation_id
 
         headers = {
             "content-type": "application/json",
@@ -265,10 +287,14 @@ class SimulationService:
         try:
             resp = client.post(endpoint.url, json=body, headers=headers)
             if resp.status_code >= 400:
-                return "", f"HTTP {resp.status_code}: {resp.text[:200]}"
-            return self._extract_reply(resp, endpoint.reply_path), ""
+                return "", session, f"HTTP {resp.status_code}: {resp.text[:200]}"
+            return (
+                self._extract_reply(resp, endpoint.reply_path),
+                self._extract_session(resp, endpoint.session_path) or session,
+                "",
+            )
         except Exception as exc:
-            return "", f"{type(exc).__name__}: {str(exc)[:200]}"
+            return "", session, f"{type(exc).__name__}: {str(exc)[:200]}"
         finally:
             if self._client is None:
                 client.close()
@@ -294,6 +320,18 @@ class SimulationService:
             if isinstance(found, str) and found.strip():
                 return found
         return json.dumps(data, default=str)[:20000]
+
+    @classmethod
+    def _extract_session(cls, resp: httpx.Response, session_path: str) -> str:
+        """The session id this endpoint just minted, or "" when it doesn't mint one."""
+        if not session_path:
+            return ""
+        try:
+            data = resp.json()
+        except Exception:
+            return ""
+        found = cls._dig(data, session_path)
+        return cls._stringify(found) if found not in (None, "") else ""
 
     @staticmethod
     def _dig(data: Any, path: str) -> Any:

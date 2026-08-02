@@ -8,6 +8,7 @@ from __future__ import annotations
 import structlog
 
 from tracely.config import settings
+from tracely.infrastructure.db import repositories
 from tracely.infrastructure.queue import eval_debounce
 from tracely.infrastructure.queue.celery_app import celery_app
 from tracely.services.evaluation_service import EvaluationService
@@ -208,3 +209,57 @@ def evaluate_monitors_task(self) -> dict:
     except Exception as exc:  # CH outage / Redis blip — the next tick will retry
         log.warning("evaluate_monitors_failed", error=str(exc))
         return {"monitors": 0, "fired": 0, "error": str(exc)}
+
+
+@celery_app.task(name="tracely.run_scenario", bind=True, max_retries=0)
+def run_scenario_task(
+    self, project_id: str, scenario_id: str, conversation_id: str, env: str = "ci"
+) -> dict:
+    """Drive ONE scenario against its agent's endpoint — the Scenarios page's Run button.
+
+    Async for the same reason the gate's phase 1 is: this makes real HTTP calls to the customer's
+    agent, which takes minutes, not milliseconds. `max_retries=0` because a half-driven
+    conversation must never be silently re-sent to a live endpoint.
+
+    Grading is a SEPARATE task on a countdown, exactly as the gate does it. The agent's own spans
+    arrive as ordinary OTLP and are ingested by Celery; under `--pool=solo --concurrency=1` they
+    cannot be processed while this task holds the only slot, so returning first lets that queue
+    drain and the grader sees the agent's tool calls instead of only Tracely's turn spans.
+    """
+    from tracely.infrastructure.db.engine import SyncSessionLocal
+    from tracely.infrastructure.db.models import AgentEndpoint, Scenario
+    from tracely.services.simulation_service import SimulationService
+
+    with SyncSessionLocal() as s:
+        scenario = s.get(Scenario, scenario_id)
+        if scenario is None or scenario.project_id != project_id:
+            return {"error": "scenario not found"}
+        endpoint = s.get(AgentEndpoint, scenario.agent_id)
+        if endpoint is None:
+            return {"error": "no endpoint configured for this agent"}
+        agent_slug = repositories.agent_slug(s, project_id, scenario.agent_id)
+        result = SimulationService().run_scenario(
+            project_id, agent_slug, scenario, endpoint, env=env,
+            conversation_id=conversation_id,
+        )
+
+    grade_scenario_turns_task.apply_async(
+        (project_id, conversation_id), countdown=settings.gate_scenario_span_grace_s
+    )
+    return {"conversation_id": conversation_id, "turns": len(result.get("turns") or []),
+            "error": result.get("error") or ""}
+
+
+@celery_app.task(name="tracely.grade_scenario_turns", bind=True, max_retries=0)
+def grade_scenario_turns_task(self, project_id: str, conversation_id: str) -> dict:
+    """Phase 2 of a one-click run: grade the conversation the drive produced.
+
+    A standalone run has no gate to grade it, and the turns were ingested inline (blob → mapper,
+    NOT via Celery), so nothing scheduled an evaluation for them. Without this the Run button
+    produces a conversation with no scores, which reads as "the evaluators are broken".
+    """
+    try:
+        return EvaluationService().evaluate_thread(project_id, conversation_id)
+    except Exception as exc:
+        log.warning("scenario_grade_failed", conversation_id=conversation_id, error=str(exc))
+        return {"scores": 0, "error": str(exc)}

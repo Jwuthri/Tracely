@@ -143,6 +143,7 @@ class _FakeEndpoint:
     auth_header, auth_scheme, token_encrypted = "Authorization", "Bearer", ""
     extra_headers, extra_body, reply_path = {}, {}, ""
     session_key, timeout_s = "conversation_id", 30
+    session_path = ""  # default: WE supply the session id (see test_a_server_minted_session…)
 
 
 def _drive(monkeypatch, handler):
@@ -751,3 +752,61 @@ def test_user_text_keeps_an_array_with_no_user_message_intact():
     """Nothing to unwrap → hand back the original so the operator can see and edit it."""
     raw = json.dumps([{"role": "system", "content": "only a system prompt"}])
     assert user_text(raw) == raw
+
+
+# ── a server-minted session ───────────────────────────────────────────────────
+
+
+class _SessionEndpoint(_FakeEndpoint):
+    """An endpoint that OWNS the session identity: it mints `session_id` and expects it back."""
+
+    session_key, session_path = "session_id", "session_id"
+
+
+def test_a_server_minted_session_is_captured_and_echoed(monkeypatch):
+    """Turn 1 must carry no session — that call is what creates it — and turns 2..N must send back
+    exactly what the endpoint returned. Push our own id at an endpoint like this and every turn
+    opens a new conversation, so a 3-turn scenario grades three disconnected greetings."""
+    bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"session_id": "sess-a25efba8", "reply": "ok"})
+
+    monkeypatch.setattr(SimulationService, "_endpoint_for", lambda *a, **k: None, raising=False)
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        "tracely.services.simulation_service.blobstore.put_blob",
+        lambda key, raw, content_type: emitted.append(key),
+    )
+    monkeypatch.setattr(
+        "tracely.services.simulation_service.IngestionService.process_blob",
+        lambda self, pid, key, ct: {"events": 1},
+    )
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    SimulationService(client=client).run_scenario(
+        "p1", "planner", _FakeScenario(), _SessionEndpoint(), env="ci"
+    )
+
+    assert "session_id" not in bodies[0]           # turn 1 creates it
+    assert bodies[1]["session_id"] == "sess-a25efba8"
+    assert bodies[2]["session_id"] == "sess-a25efba8"
+
+
+def test_our_own_id_is_still_pushed_when_the_endpoint_does_not_mint_one(monkeypatch):
+    """The default convention is unchanged: no `session_path` ⇒ we supply the id, every turn."""
+    bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"session_id": "ignored", "reply": "ok"})
+
+    result, _, _ = _drive(monkeypatch, handler)
+    assert {b["conversation_id"] for b in bodies} == {result["conversation_id"]}
+
+
+def test_extract_session_is_empty_without_a_path():
+    assert SimulationService._extract_session(_resp({"session_id": "s1"}), "") == ""
+    assert SimulationService._extract_session(_resp({"session_id": "s1"}), "session_id") == "s1"
+    assert SimulationService._extract_session(_resp({"a": {"b": "s2"}}), "a.b") == "s2"
+    assert SimulationService._extract_session(_resp({"reply": "hi"}), "session_id") == ""

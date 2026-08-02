@@ -23,6 +23,8 @@ export function EndpointPanel({
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
   const [replyPath, setReplyPath] = useState("");
+  // Set when the ENDPOINT mints the session id and expects it echoed (see the label).
+  const [sessionPath, setSessionPath] = useState("");
   const [extraBody, setExtraBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -40,6 +42,7 @@ export function EndpointPanel({
         setEp(d);
         setUrl(d.url ?? "");
         setReplyPath(d.reply_path ?? "");
+        setSessionPath(d.session_path ?? "");
         setExtraBody(
           d.extra_body && Object.keys(d.extra_body).length
             ? JSON.stringify(d.extra_body, null, 2)
@@ -82,6 +85,7 @@ export function EndpointPanel({
           url,
           token: token || undefined,
           reply_path: replyPath,
+          session_path: sessionPath,
           extra_body: parsedBody,
         }),
       });
@@ -185,6 +189,23 @@ export function EndpointPanel({
                 className={`${FIELD} mt-1`}
               />
             </div>
+          </div>
+          <div>
+            <label className={LABEL} htmlFor="ep-session">
+              Session path <span className="text-fg-faint">(optional)</span>
+            </label>
+            <input
+              id="ep-session"
+              value={sessionPath}
+              onChange={(e) => setSessionPath(e.target.value)}
+              placeholder="session_id — only if your API mints the session"
+              className={`${FIELD} mt-1`}
+            />
+            <p className="mt-1 text-[11.5px] text-fg-faint">
+              Leave blank if your API accepts a session id we supply. Set it when the API returns
+              its own: turn 1 sends none, and every later turn echoes back what came out of this
+              path — otherwise each turn starts a fresh conversation.
+            </p>
           </div>
           <div>
             <label className={LABEL} htmlFor="ep-body">

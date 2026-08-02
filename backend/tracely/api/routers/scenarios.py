@@ -197,6 +197,41 @@ async def delete_scenario(scenario_id: str, project_id: str = Depends(get_projec
 # ── endpoint config ───────────────────────────────────────────────────────────
 
 
+@router.post("/scenarios/{scenario_id}/run")
+async def run_scenario(
+    scenario_id: str, project_id: str = Depends(get_project_id), body: dict = Body(default={})
+):
+    """Drive this one scenario against its agent's endpoint, now.
+
+    Returns the conversation id immediately — the id is minted HERE rather than inside the driver
+    so the caller gets a link before the first turn is sent, and watches the conversation fill in.
+    The driving itself is a Celery task: it makes real HTTP calls to the customer's agent and takes
+    minutes, which is not a thing to hold an HTTP request open for.
+    """
+    import uuid as _uuid
+
+    from tracely.workers.tasks import run_scenario_task
+
+    def work():
+        with SyncSessionLocal() as s:
+            sc = s.get(Scenario, scenario_id)
+            if sc is None or sc.project_id != project_id:
+                raise HTTPException(status_code=404, detail="scenario not found")
+            if s.get(AgentEndpoint, sc.agent_id) is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="this agent has no endpoint configured — set one above, then run",
+                )
+            return sc.agent_id
+
+    await run_in_threadpool(work)
+    conversation_id = _uuid.uuid4().hex
+    run_scenario_task.apply_async(
+        (project_id, scenario_id, conversation_id, (body.get("env") or "ci"))
+    )
+    return {"conversation_id": conversation_id, "status": "RUNNING"}
+
+
 @router.get("/agents/{agent_ref}/endpoint")
 async def get_endpoint(agent_ref: str, project_id: str = Depends(get_project_id)):
     """The endpoint config. The token is never returned — only whether one is set."""
@@ -210,7 +245,8 @@ async def get_endpoint(agent_ref: str, project_id: str = Depends(get_project_id)
                 "agent_id": aid, "configured": True, "url": ep.url,
                 "auth_header": ep.auth_header, "auth_scheme": ep.auth_scheme,
                 "has_token": bool(ep.token_encrypted), "reply_path": ep.reply_path,
-                "session_key": ep.session_key, "timeout_s": ep.timeout_s,
+                "session_key": ep.session_key, "session_path": ep.session_path,
+                "timeout_s": ep.timeout_s,
                 "extra_headers": ep.extra_headers or {}, "extra_body": ep.extra_body or {},
             }
 
@@ -249,6 +285,7 @@ async def set_endpoint(
             ep.auth_scheme = body.get("auth_scheme", "Bearer")[:32]
             ep.reply_path = (body.get("reply_path") or "")[:200]
             ep.session_key = body.get("session_key", "conversation_id")[:120]
+            ep.session_path = (body.get("session_path") or "")[:200]
             ep.timeout_s = int(body.get("timeout_s") or 60)
             ep.extra_headers = body.get("extra_headers") or {}
             ep.extra_body = body.get("extra_body") or {}

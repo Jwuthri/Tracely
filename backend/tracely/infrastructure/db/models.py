@@ -321,8 +321,19 @@ class AgentEndpoint(Base):
     # Dotted path to the assistant's text in the response body. Empty = try the common shapes
     # (see SimulationService._extract_reply), which covers OpenAI-compatible and most bespoke APIs.
     reply_path: Mapped[str] = mapped_column(String(200), default="")
-    # Body key echoing the conversation id back so the agent keeps server-side state per scenario.
+    # Body key carrying the session id, so the agent keeps server-side state across the turns of
+    # one scenario.
     session_key: Mapped[str] = mapped_column(String(120), default="conversation_id")
+    # Dotted path to a session id the endpoint MINTS in its response (e.g. `session_id`).
+    #
+    # Two conventions exist and they are opposites. Most APIs accept a client-supplied id: we send
+    # ours under `session_key` on every turn and they key their state off it — that is the default,
+    # `session_path` empty. Others own the identity: turn 1 carries no session at all, the response
+    # names one, and every later turn must echo THAT value back. Setting this switches to the
+    # second: turn 1 omits `session_key`, and turns 2..N send what the endpoint returned. Without
+    # it such an endpoint starts a brand-new conversation on every turn and the scenario grades
+    # three disconnected greetings.
+    session_path: Mapped[str] = mapped_column(String(200), default="")
     timeout_s: Mapped[int] = mapped_column(Integer, default=60)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
