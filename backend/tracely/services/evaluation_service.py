@@ -77,12 +77,6 @@ def _spec_label(spec: dict) -> str:
     return " · ".join(bits)
 
 
-def _scope(ctx) -> str:
-    """Which level this dispatch is grading, for the run's title. A conversation-level pass has no
-    `trace_id` — it grades the thread as a whole, and reads very differently from one message."""
-    return "conv" if not ctx.trace_id else "msg"
-
-
 def _subject_label(ctx) -> str:
     """What is being graded, in words — the recording's title line. Falls back to the id, but the
     id alone was the whole complaint: a row reading `0000…1f1ffee` tells you nothing."""
@@ -417,9 +411,15 @@ class EvaluationService:
         thread = ctx.thread_id or ctx.trace_id
         with provider.use_project_key(ctx.project_id), record(
             introspection.EVAL, subject,
-            f"eval · {_scope(ctx)} · {len(specs)} column(s)", project_id=ctx.project_id,
+            # `{level}`/`{n}` are filled per emitted trace: one dispatch grades message columns
+            # AND step columns, and they land as two rows, each titled for what it actually did.
+            "eval · {level} · {n} column(s)", project_id=ctx.project_id,
             subject_label=_subject_label(ctx),
             conversation_id=f"eval:{thread}" if thread else "",
+            # The conversation-level pass re-grades the whole thread every time it grows, so its
+            # recording replaces the last one instead of stacking a near-identical run beside it.
+            # A message pass grades one message, once — nothing to replace.
+            stable=not ctx.trace_id,
         ) as rec:
             for spec in specs:
                 spec = _inject_dependencies(spec, completed)
@@ -429,7 +429,9 @@ class EvaluationService:
                     rec.label = spec.get("score_name") or spec.get("kind") or "evaluator"
                     rec.describe(input=_spec_label(spec), meta={
                         "evaluator": spec.get("score_name", ""),
-                        "level": spec.get("level", ""),
+                        # The table's word for it (msg/step/conv), not the enum — and the key the
+                        # recording splits its traces on, so a row is one level throughout.
+                        "level": level_name(spec.get("level", "")),
                         "kind": spec.get("kind", ""),
                     })
                 try:

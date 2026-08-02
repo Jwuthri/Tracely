@@ -15,8 +15,13 @@ from tracely.domain import introspection
 from tracely.domain.introspection import Recording
 
 
-def _spans(payload):
-    return payload["resourceSpans"][0]["scopeSpans"][0]["spans"]
+def _spans(payloads):
+    """Every span the recording emitted, across its per-level traces (usually one)."""
+    return [
+        span
+        for body in payloads.values()
+        for span in body["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    ]
 
 
 def _attrs(span):
@@ -54,7 +59,7 @@ def test_every_span_is_marked_internal():
 def test_nothing_recorded_means_no_trace():
     """Nothing declared and nothing done — emitting an empty trace for that would bury the real
     recordings."""
-    assert introspection.payload(_rec()) is None
+    assert introspection.payload(_rec()) == {}
 
 
 # ── legibility ────────────────────────────────────────────────────────────────
@@ -119,6 +124,55 @@ def test_groups_keep_declaration_order():
     root = next(s for s in spans if "parentSpanId" not in s)
     groups = [s["name"] for s in spans if s.get("parentSpanId") == root["spanId"]]
     assert groups == ["first", "second", "third"]
+
+
+# ── one trace per level ───────────────────────────────────────────────────────
+
+
+def _level(rec, group, level, **kw):
+    rec.label = group
+    rec.describe(meta={"level": level}, **kw)
+
+
+def test_each_level_gets_its_own_trace():
+    """The traces table groups by conversation id, so a run that mixes a message column with a
+    step column produces a row with no level of its own — a verdict you can't attribute."""
+    rec = _rec(name="eval · {level} · {n} column(s)", conversation_id="eval:t1")
+    _level(rec, "tracely.run.quality", "msg", output="FAIL")
+    _level(rec, "tracely.run.reask", "msg", output="PASS")
+    _level(rec, "tracely.tool.success", "step", output="PASS")
+
+    bodies = introspection.payload(rec)
+    assert len(bodies) == 2
+    roots = {}
+    for body in bodies.values():
+        root = next(s for s in _spans({0: body}) if "parentSpanId" not in s)
+        roots[root["name"]] = _attrs(root)["tracely.conversation.id"]
+    # the title counts the columns THIS trace ran, and the row it lands in is that level's row
+    assert roots == {
+        "eval · msg · 2 column(s)": "eval:t1:msg",
+        "eval · step · 1 column(s)": "eval:t1:step",
+    }
+
+
+def test_a_replaceable_recording_keeps_its_trace_id():
+    """The conversation pass re-grades a thread every time it grows. Without a stable id that is
+    six near-identical runs in the row; with one, the emitter can drop the old spans and the row
+    shows the current verdict."""
+    def graded(verdict):
+        rec = _rec(subject_id="thread-1", stable=True)
+        _level(rec, "tracely.conv.trajectory", "conv", output=verdict)
+        return introspection.payload(rec)
+
+    assert list(graded("PASS")) == list(graded("FAIL"))
+
+    # an ordinary (per-message) recording still gets a fresh id every time — nothing to replace
+    def once():
+        rec = _rec(subject_id="tr1")
+        _level(rec, "tracely.run.quality", "msg", output="PASS")
+        return introspection.payload(rec)
+
+    assert list(once()) != list(once())
 
 
 # ── shape ─────────────────────────────────────────────────────────────────────
@@ -209,6 +263,16 @@ def test_token_usage_is_reported_as_gen_ai_attributes():
 # ── the context manager ───────────────────────────────────────────────────────
 
 
+@pytest.fixture
+def recording_on(monkeypatch):
+    """Recording is hard-OFF for the suite (conftest) so no test writes an internal trace into a
+    developer's own ClickHouse. These tests exercise the mechanism itself, so they turn it back
+    on — with `_emit` stubbed, so still nothing leaves the process."""
+    from tracely.services import introspection_service as svc
+
+    monkeypatch.setattr(svc.settings, "introspection_enabled", True)
+
+
 def test_recording_is_off_when_disabled(monkeypatch):
     from tracely.services import introspection_service as svc
 
@@ -218,7 +282,7 @@ def test_recording_is_off_when_disabled(monkeypatch):
         assert introspection.active() is None
 
 
-def test_recordings_do_not_nest(monkeypatch):
+def test_recordings_do_not_nest(monkeypatch, recording_on):
     """Grading inside a scenario run must keep filing into the scenario's recording. Two open
     recordings would split one story across two traces with nothing linking them."""
     emitted: list = []
@@ -233,7 +297,7 @@ def test_recordings_do_not_nest(monkeypatch):
     assert [r.name for r in emitted] == ["outer"]
 
 
-def test_the_active_recording_is_cleared_even_when_the_work_raises(monkeypatch):
+def test_the_active_recording_is_cleared_even_when_the_work_raises(monkeypatch, recording_on):
     """A leaked contextvar would attach the next unrelated eval to this trace."""
     from tracely.services import introspection_service as svc
 
@@ -244,7 +308,7 @@ def test_the_active_recording_is_cleared_even_when_the_work_raises(monkeypatch):
     assert introspection.active() is None
 
 
-def test_a_broken_emit_never_breaks_the_work(monkeypatch):
+def test_a_broken_emit_never_breaks_the_work(monkeypatch, recording_on):
     """Recording is observability. A judge that graded correctly must not report failure because
     its recording could not be saved."""
     from tracely.services import introspection_service as svc

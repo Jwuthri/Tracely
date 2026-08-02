@@ -10,6 +10,9 @@ Usage (from repo root, with `make infra-up` running):
     uv run python scripts/debug_evaluation.py --thread-id <ID> --break-on-llm
     uv run python scripts/debug_evaluation.py --thread-id <ID> --full    # untruncated prompts
 
+Recording is OFF here: the script prints everything already, so it would only add an internal
+trace per run to the workspace you are debugging. `--record` opts back in.
+
 Granularity — three levels: Conversation, Message, Step (SPAN/TOOL/GENERATION/CHAIN are all
 Step, differing only in which span types get graded). The level lives on the evaluator ROW (the
 UI's level dropdown), so trying another one normally means another column. `--level` overrides
@@ -241,11 +244,23 @@ def main() -> None:
     p.add_argument("--project-id", help="override the default (first) project")
     p.add_argument("--dry-run", action="store_true", help="grade but persist nothing (no scores, no clusters)")
     p.add_argument("--full", action="store_true", help="print prompts untruncated")
+    p.add_argument(
+        "--record", action="store_true",
+        help="also write the run as an internal trace (off by default — debugging should not add "
+             "rows to the workspace you are inspecting)",
+    )
     p.add_argument("--break-before", action="store_true", help="pdb before the run — `s` steps into the service")
     p.add_argument("--break-on-llm", action="store_true", help="pdb at each model call, prompt in scope")
     p.add_argument("--list", action="store_true", help="list recent conversations and exit")
     p.add_argument("--evaluators", action="store_true", help="list the project's enabled columns and exit")
     args = p.parse_args()
+
+    # This script PRINTS every prompt, response and score below. Recording the same run as a trace
+    # too (`domain/introspection.py`) would write one internal trace per invocation into the very
+    # workspace you are debugging — debugging an eval should not add rows to the data you are
+    # looking at. `--record` opts back in if you specifically want to inspect the recording itself.
+    if not args.record:
+        settings.introspection_enabled = False
 
     from tracely.services.evaluation_service import EvaluationService
 

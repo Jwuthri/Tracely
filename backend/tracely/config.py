@@ -171,6 +171,11 @@ class Settings(BaseSettings):
     # high-volume projects.
     introspection_enabled: bool = True
 
+    # Where a worker-side task reaches this API (the Data page's "Seed demo data" runs the seeder
+    # there, and it drives the product through its own HTTP API). Container DNS in compose; the
+    # host port when the worker runs on the host.
+    internal_api_url: str = "http://backend:8000"
+
     # ── Auth & multi-tenancy ──────────────────────────────────────────────────────
     # "dev"   = no human auth; the ingest key is the only credential (today's behavior, no secret needed).
     # "local" = email/password owned by this backend; POST /auth/login issues an HS256 session JWT.

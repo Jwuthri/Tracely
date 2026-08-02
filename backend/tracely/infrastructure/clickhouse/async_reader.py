@@ -465,7 +465,7 @@ async def session_turns(
         f"""
         SELECT trace_id,
                -- An internal run's "message" is what it did, not the judge's raw prompt: the root
-               -- span already says `eval · turn · 5 column(s)` and carries the verdict summary.
+               -- span already says `eval · msg · 5 column(s)` and carries the verdict summary.
                -- Same reason the list title is derived this way (see `sessions_overview`).
                -- The inner aliases are t_* so these names don't resolve back into the aggregates.
                if(internal != '', root_in, t_input)   AS input,

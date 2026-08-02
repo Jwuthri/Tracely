@@ -7,7 +7,20 @@ UI reflects a delete on the next fetch without waiting for a mutation.
 
 from __future__ import annotations
 
-from tracely.infrastructure.clickhouse.client import get_async_client
+from tracely.infrastructure.clickhouse.client import get_async_client, get_client
+
+
+def delete_trace(project_id: str, trace_id: str) -> None:
+    """Drop one trace's spans, synchronously — the worker's half of this module.
+
+    Only used to *replace* a re-recorded internal run (`Recording.stable`), which happens once per
+    conversation-level eval pass. A mutation per span-write would be reckless; a mutation per
+    re-grade of a settled thread is not.
+    """
+    get_client().command(
+        "DELETE FROM events WHERE project_id = {p:String} AND trace_id = {t:String}",
+        parameters={"p": project_id, "t": trace_id},
+    )
 
 
 async def delete_threads(project_id: str, threads: list[str]) -> int:

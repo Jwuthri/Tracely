@@ -30,6 +30,7 @@ from tracely.infrastructure.db.models import (
     FailureEmbedding,
     GateCase,
     GateRun,
+    IngestKey,
     MetaAnalysis,
     Monitor,
     Project,
@@ -43,6 +44,13 @@ from tracely.infrastructure.db.models import (
 
 def project_get(s: Session, project_id: str) -> Project | None:
     return s.get(Project, project_id)
+
+
+def project_ingest_key(s: Session, project_id: str) -> str | None:
+    """Any ingest key for this workspace — what a server-side seeder authenticates with."""
+    return s.execute(
+        select(IngestKey.key).where(IngestKey.project_id == project_id).limit(1)
+    ).scalar_one_or_none()
 
 
 def project_set_openrouter_key(s: Session, project_id: str, encrypted: str | None) -> bool:

@@ -95,6 +95,8 @@ class Recording:
 
     kind: str
     subject_id: str
+    # `{level}` / `{n}` are substituted per emitted trace — a recording that graded 5 message
+    # columns and 1 step column is two traces, and one title cannot describe both.
     name: str
     project_id: str = ""
     agent_slug: str = ""
@@ -104,9 +106,16 @@ class Recording:
     # Groups every recording about the same conversation into ONE row of the traces table, so the
     # eval hierarchy lands on the table's own hierarchy: conversation → one run per turn (plus the
     # conversation-level run) → one step per evaluator column. Namespaced (`eval:`/`sim:`) so it
-    # can never merge with the real conversation it is about.
+    # can never merge with the real conversation it is about. `payload` suffixes the level, so a
+    # row is one level throughout.
     conversation_id: str = ""
     turn_index: int = 0
+    # This recording REPLACES the last one about the same subject instead of stacking next to it:
+    # its trace id is derived from (project, kind, subject, level) rather than random, and the
+    # emitter drops the previous spans first. For work that legitimately re-runs over the same
+    # subject — the conversation-level eval pass re-grades a thread every time it grows, and 6
+    # near-identical runs in one row is noise, not history.
+    stable: bool = False
     steps: list[Step] = field(default_factory=list)
     groups: list[Group] = field(default_factory=list)
     start_ns: int = field(default_factory=time.time_ns)
@@ -178,18 +187,56 @@ def _usage(tokens: dict[str, int]) -> list[dict]:
     return out
 
 
-def payload(rec: Recording) -> dict | None:
-    """The whole recording as an ExportTraceServiceRequest, or None when nothing was recorded.
+def payload(rec: Recording) -> dict[str, dict]:
+    """The recording as ExportTraceServiceRequests, **one per level**, keyed by trace id (hex).
 
-    Shape: a root span, one CHAIN per group, and each step underneath its group. Every span
-    carries `tracely.internal.kind`, which is what keeps these traces out of the lists and out of
-    the evaluator's reach.
+    Shape of each: a root span, one CHAIN per group, and each step underneath its group. Every
+    span carries `tracely.internal.kind`, which is what keeps these traces out of the lists and
+    out of the evaluator's reach.
+
+    Split by `Group.meta["level"]` because the traces table groups by conversation id, and one row
+    that mixes a message column with a step column has no level of its own — you read a verdict
+    without knowing what it graded. Groups with no level (a scenario run) share one bucket, so
+    that path emits exactly one trace as before.
     """
     if not rec.steps and not rec.groups:
-        return None
+        return {}
 
-    trace_id = uuid.uuid4().bytes
-    end_ns = max((s.end_ns for s in rec.steps), default=time.time_ns())
+    # level → (its groups, in declaration order; the steps filed under them). A step whose group
+    # was never declared keeps the old behavior — it lands in the unlevelled bucket, under root.
+    buckets: dict[str, tuple[list[Group], list[Step]]] = {}
+    level_of = {g.name: g.meta.get("level", "") for g in rec.groups}
+    for group in rec.groups:
+        buckets.setdefault(group.meta.get("level", ""), ([], []))[0].append(group)
+    for step in rec.steps:
+        buckets.setdefault(level_of.get(step.group, ""), ([], []))[1].append(step)
+
+    out = {}
+    for level, (groups, steps) in buckets.items():
+        trace_id = _trace_id(rec, level)
+        out[trace_id.hex()] = _one(rec, level, groups, steps, trace_id)
+    return out
+
+
+# Fixed namespace for stable trace ids — changing it orphans every recording already emitted.
+_NAMESPACE = uuid.UUID("6e0f1b9a-6e5c-5a3f-9f2a-1c0d5b7e4a21")
+
+
+def _trace_id(rec: Recording, level: str) -> bytes:
+    """Random, unless the recording replaces its predecessor — then the id IS the identity of
+    (project, kind, subject, level), so re-recording lands on the same trace."""
+    if not rec.stable:
+        return uuid.uuid4().bytes
+    key = f"{rec.project_id}:{rec.kind}:{rec.subject_id}:{level}"
+    return uuid.uuid5(_NAMESPACE, key).bytes
+
+
+def _one(
+    rec: Recording, level: str, groups: list[Group], steps: list[Step], trace_id: bytes
+) -> dict:
+    name = rec.name.replace("{level}", level).replace("{n}", str(len(groups)))
+    conversation_id = rec.conversation_id + (f":{level}" if rec.conversation_id and level else "")
+    end_ns = max((s.end_ns for s in steps), default=time.time_ns())
 
     def base(group: Group | None = None, extra: list[dict] | None = None) -> list[dict]:
         meta = (group.meta if group else {})
@@ -198,8 +245,8 @@ def payload(rec: Recording) -> dict | None:
             otlp.attr("tracely.internal.subject_id", rec.subject_id),
             otlp.attr("tracely.env", rec.env),
             *([otlp.attr("tracely.agent.id", rec.agent_slug)] if rec.agent_slug else []),
-            *([otlp.attr("tracely.conversation.id", rec.conversation_id)]
-              if rec.conversation_id else []),
+            *([otlp.attr("tracely.conversation.id", conversation_id)]
+              if conversation_id else []),
             *([otlp.attr("tracely.turn.index", rec.turn_index)] if rec.turn_index else []),
             # Which evaluator column, at what level — on EVERY span, so scanning the table answers
             # it without expanding anything. Skipped on the root, whose name already IS the run.
@@ -210,26 +257,26 @@ def payload(rec: Recording) -> dict | None:
 
     # The root belongs to no single column, so it names the ones it ran — the Agent column on that
     # row would otherwise be the only blank (or, worse, the fallback agent) in the recording.
-    names = [g.name for g in rec.groups]
+    names = [g.name for g in groups]
     root_group = Group(
-        rec.name,
+        name,
         meta={"evaluator": names[0] + (f" +{len(names) - 1}" if len(names) > 1 else "")}
         if names else {},
     )
 
     root_id = uuid.uuid4().bytes[:8]
     spans = [otlp.span(
-        trace_id=trace_id, span_id=root_id, name=rec.name,
+        trace_id=trace_id, span_id=root_id, name=name,
         start_ns=rec.start_ns, end_ns=end_ns,
         attributes=base(root_group, extra=[
             otlp.attr("tracely.observation.type", _CHAIN),
             otlp.attr("tracely.is_app_root", True),
-            otlp.attr("tracely.trace.name", rec.name),
+            otlp.attr("tracely.trace.name", name),
             otlp.attr("tracely.input", rec.subject_label or rec.subject_id),
             otlp.attr(
                 "tracely.output",
-                " · ".join(f"{g.name}: {g.output}" for g in rec.groups if g.output)
-                or f"{len(rec.steps)} step(s)",
+                " · ".join(f"{g.name}: {g.output}" for g in groups if g.output)
+                or f"{len(steps)} step(s)",
             ),
         ]),
     )]
@@ -237,8 +284,8 @@ def payload(rec: Recording) -> dict | None:
     # One span per DECLARED group, in declaration order — including groups that recorded no step,
     # so a structural evaluator is visible as having run rather than silently absent.
     group_ids: dict[str, bytes] = {}
-    for group in rec.groups:
-        members = [s for s in rec.steps if s.group == group.name]
+    for group in groups:
+        members = [s for s in steps if s.group == group.name]
         gid = uuid.uuid4().bytes[:8]
         group_ids[group.name] = gid
         spans.append(otlp.span(
@@ -253,8 +300,8 @@ def payload(rec: Recording) -> dict | None:
             error=group.error or "; ".join(m.error for m in members if m.error),
         ))
 
-    by_name = {g.name: g for g in rec.groups}
-    for step in rec.steps:
+    by_name = {g.name: g for g in groups}
+    for step in steps:
         spans.append(otlp.span(
             trace_id=trace_id, span_id=uuid.uuid4().bytes[:8],
             parent_span_id=group_ids.get(step.group, root_id),

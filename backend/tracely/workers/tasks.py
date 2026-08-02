@@ -194,3 +194,4 @@ def evaluate_monitors_task(self) -> dict:
     except Exception as exc:  # CH outage / Redis blip — the next tick will retry
         log.warning("evaluate_monitors_failed", error=str(exc))
         return {"monitors": 0, "fired": 0, "error": str(exc)}
+

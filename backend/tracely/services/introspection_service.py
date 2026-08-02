@@ -28,6 +28,7 @@ from tracely.config import settings
 from tracely.domain import introspection
 from tracely.domain.introspection import Recording
 from tracely.infrastructure.blob import s3 as blobstore
+from tracely.infrastructure.clickhouse import deletes
 from tracely.services.ingestion_service import IngestionService
 
 log = structlog.get_logger(__name__)
@@ -45,6 +46,7 @@ def record(
     subject_label: str = "",
     conversation_id: str = "",
     turn_index: int = 0,
+    stable: bool = False,
 ) -> Iterator[Recording | None]:
     """Record everything Tracely does inside this block as a trace about `subject_id`.
 
@@ -60,7 +62,7 @@ def record(
         kind=kind, subject_id=subject_id, name=name,
         project_id=project_id, agent_slug=agent_slug, env=env,
         subject_label=subject_label,
-        conversation_id=conversation_id, turn_index=turn_index,
+        conversation_id=conversation_id, turn_index=turn_index, stable=stable,
     )
     token = introspection._active.set(rec)
     try:
@@ -71,17 +73,21 @@ def record(
 
 
 def _emit(rec: Recording) -> None:
-    """Ship the recording as OTLP. Best-effort by design — see rule 1 in the module docstring."""
+    """Ship the recording as OTLP — one trace per evaluation level. Best-effort by design, see
+    rule 1 in the module docstring."""
     try:
-        payload = introspection.payload(rec)
-        if payload is None:
-            return  # nothing happened worth a trace (no LLM call, no step)
         import json
 
-        raw = json.dumps(payload).encode()
-        key = blobstore.event_blob_key(rec.project_id, uuid.uuid4().hex, "application/json")
-        blobstore.put_blob(key, raw, "application/json")
-        IngestionService().process_blob(rec.project_id, key, "application/json")
+        for trace_id, body in introspection.payload(rec).items():
+            if rec.stable:
+                # Replace, not append: this recording re-runs over the same subject and reuses its
+                # trace id, so the previous spans have to go. ReplacingMergeTree can't do it for
+                # us — its sort key carries `start_time`, and this run has its own.
+                deletes.delete_trace(rec.project_id, trace_id)
+            raw = json.dumps(body).encode()
+            key = blobstore.event_blob_key(rec.project_id, uuid.uuid4().hex, "application/json")
+            blobstore.put_blob(key, raw, "application/json")
+            IngestionService().process_blob(rec.project_id, key, "application/json")
     except Exception as exc:
         log.warning(
             "introspection_emit_failed",

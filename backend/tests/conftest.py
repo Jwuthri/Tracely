@@ -14,6 +14,11 @@ os.environ.setdefault("SESSION_SECRET", "test-session-secret-at-least-32-chars-l
 # Hard-off, not setdefault: a dev .env with a real key made every invite test send a live Resend
 # email to `@x.test`, i.e. a hard bounce per run. Env beats the dotenv file in pydantic-settings.
 os.environ["RESEND_API_KEY"] = ""
+# Same class of bug, same hard-off: recording is on by default in the product, so any test that
+# runs an evaluation or drives a scenario wrote an internal trace into whatever ClickHouse the dev
+# .env points at — i.e. the developer's own workspace, once per run. Tests assert on the recording
+# payload (`domain/introspection.py`), which is pure; nothing here needs it emitted.
+os.environ["INTROSPECTION_ENABLED"] = "false"
 
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402

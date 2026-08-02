@@ -29,37 +29,15 @@ def _vector_as_text(element, compiler, **kw):  # noqa: ARG001
     return "TEXT"
 
 
-_TABLES = [
-    models.Project.__table__,
-    models.IngestKey.__table__,
-    models.User.__table__,
-    models.Membership.__table__,
-    models.Invitation.__table__,
-    models.Evaluator.__table__,
-    models.Agent.__table__,
-    models.AgentVersion.__table__,
-    models.EvaluationSuite.__table__,
-    models.EvaluationSuiteCase.__table__,
-    models.EvaluationCase.__table__,
-    models.CaseReplay.__table__,
-    models.GateRun.__table__,
-    models.GateCase.__table__,
-    models.FailureCluster.__table__,
-    models.ClusterMember.__table__,
-    models.FailureEmbedding.__table__,
-    models.MetaAnalysis.__table__,
-    models.RollingSummary.__table__,
-    models.ConversationAgent.__table__,
-    models.ScoreAnnotation.__table__,
-    models.Monitor.__table__,
-]
-
-
 @pytest_asyncio.fixture
 async def engine(tmp_path):
     eng = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/test.db")
     async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all, tables=_TABLES)
+        # EVERY table, not a hand-kept subset: this list used to mirror what the wipe
+        # deletes, so adding `scenarios` to the schema left the test creating a database
+        # the wipe's own DELETE couldn't run against. The Vector shim above is what made
+        # the subset necessary in the first place.
+        await conn.run_sync(Base.metadata.create_all)
     yield eng
     await eng.dispose()
 

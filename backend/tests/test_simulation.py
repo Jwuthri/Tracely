@@ -224,9 +224,10 @@ def test_turns_are_ingested_inline_before_the_driver_returns(monkeypatch):
         "p1", "planner", _FakeScenario(), _FakeEndpoint(), env="ci"
     )
 
-    # 3 turns + the one recording of what Tracely did while driving them.
+    # One inline ingest per turn. (Recording is hard-off across the suite — see conftest — so no
+    # extra blob for the run's own recording.)
     assert len(result["trace_ids"]) == 3
-    assert len(ingested) == 4
+    assert len(ingested) == 3
 
 
 def test_each_turn_sends_the_trace_id_it_will_be_stored_under(monkeypatch):

@@ -1,4 +1,5 @@
 import { getStats } from "@/app/lib/api";
+import { SeedDataPanel } from "@/app/components/SeedDataPanel";
 import { WipeDataPanel } from "@/app/components/WipeDataPanel";
 
 export default async function DataSettingsPage() {
@@ -9,7 +10,7 @@ export default async function DataSettingsPage() {
       <header className="reveal">
         <h1 className="font-display text-[24px] font-extrabold tracking-tight">Data</h1>
         <p className="mt-1.5 text-[14px] text-fg-muted">
-          What this project currently holds, and how to clear it out.
+          What this project currently holds, how to fill it, and how to clear it out.
         </p>
       </header>
 
@@ -19,6 +20,8 @@ export default async function DataSettingsPage() {
         <Stat k="Agents" v={stats.agents} />
         <Stat k="Regression cases" v={stats.cases} />
       </section>
+
+      <SeedDataPanel empty={stats.traces === 0} />
 
       <WipeDataPanel />
     </div>
