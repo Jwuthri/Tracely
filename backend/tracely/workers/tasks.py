@@ -41,6 +41,11 @@ def ingest_otlp_blob(self, project_id: str, key: str, content_type: str) -> dict
         raise self.retry(exc=exc)
 
 
+# The conversation debounce shares the per-trace generation counter, namespaced so a thread and a
+# trace of the same id can never collide.
+_CONV_KEY = "conv:{thread}"
+
+
 @celery_app.task(name="tracely.evaluate_run", bind=True, max_retries=3, default_retry_delay=3)
 def evaluate_run_task(self, project_id: str, trace_id: str, gen: int = 0) -> dict:
     # Debounce: skip if a newer batch for this trace arrived after we were scheduled — the later
@@ -48,7 +53,9 @@ def evaluate_run_task(self, project_id: str, trace_id: str, gen: int = 0) -> dic
     if not eval_debounce.is_latest(project_id, trace_id, gen):
         return {"skipped": "superseded", "trace_id": trace_id}
     try:
-        result = EvaluationService().evaluate_trace(project_id, trace_id)
+        # Turn/step columns only. The conversation-level pass is scheduled below instead of run
+        # inline, so a 60-turn thread grades its conversation ONCE rather than 60 times.
+        result = EvaluationService().evaluate_trace(project_id, trace_id, skip_conversation=True)
     except Exception as exc:
         raise self.retry(exc=exc)
     # Real-time rolling summary: fold this turn into the thread's accumulating summary. Incremental
@@ -60,7 +67,27 @@ def evaluate_run_task(self, project_id: str, trace_id: str, gen: int = 0) -> dic
         RollingSummaryService().build_for_thread(project_id, thread_id, source="ingest")
     except Exception as exc:
         log.warning("rolling_summary_ingest_failed", trace_id=trace_id, error=str(exc))
+
+    # Conversation-level columns, debounced on the THREAD: every turn schedules one and only the
+    # last one standing runs, so the thread is graded once it stops growing. Same trailing-debounce
+    # mechanism as the per-trace one above, keyed by thread.
+    thread_id = result.get("thread_id") or trace_id
+    cgen = eval_debounce.bump(project_id, _CONV_KEY.format(thread=thread_id))
+    evaluate_conversation_task.apply_async(
+        (project_id, thread_id, cgen), countdown=settings.eval_debounce_seconds
+    )
     return result
+
+
+@celery_app.task(name="tracely.evaluate_conversation", bind=True, max_retries=3, default_retry_delay=3)
+def evaluate_conversation_task(self, project_id: str, thread_id: str, gen: int = 0) -> dict:
+    """Grade a whole thread with its CONVERSATION-level columns, once it has settled."""
+    if not eval_debounce.is_latest(project_id, _CONV_KEY.format(thread=thread_id), gen):
+        return {"skipped": "superseded", "thread_id": thread_id}
+    try:
+        return EvaluationService().evaluate_conversation(project_id, thread_id)
+    except Exception as exc:
+        raise self.retry(exc=exc)
 
 
 @celery_app.task(name="tracely.rebuild_clusters", bind=True, max_retries=0)

@@ -51,6 +51,70 @@ async def list_sessions(
     return rows
 
 
+@router.get("/sessions/{thread_id}/export")
+async def export_session(thread_id: str, project_id: str = Depends(get_project_id)) -> dict:
+    """The whole conversation as one JSON object — what the table's copy button puts on the
+    clipboard.
+
+    Assembled server-side from three queries rather than letting the browser stitch it from a
+    session fetch plus one trace fetch per turn: on a 60-turn thread that was 61 requests, and the
+    result depended on which rows happened to be expanded.
+    """
+    advisory = await advisory_score_names(project_id)
+    turns = await async_reader.session_turns(project_id, thread_id, advisory)
+    spans = await async_reader.thread_spans_full(project_id, thread_id)
+    conv_scores = await async_reader.conversation_scores(project_id, thread_id)
+    per_trace = await async_reader.scores_by_trace(
+        project_id, [t["trace_id"] for t in turns]
+    )
+
+    by_trace: dict[str, list[dict]] = {}
+    for s in sorted(spans, key=lambda s: s.get("start_time") or ""):
+        by_trace.setdefault(s.get("trace_id", ""), []).append({
+            "span_id": s.get("span_id"),
+            "parent_span_id": s.get("parent_span_id"),
+            "type": s.get("type"),
+            "name": s.get("name"),
+            "level": s.get("level"),
+            "status_message": s.get("status_message") or None,
+            "agent_id": s.get("agent_id") or None,
+            "model": s.get("model_id") or None,
+            "start_time": _iso(s.get("start_time")),
+            "end_time": _iso(s.get("end_time")),
+            "input": s.get("input"),
+            "output": s.get("output"),
+        })
+
+    return {
+        "thread_id": thread_id,
+        "turns": len(turns),
+        "tokens": sum(int(t.get("tokens") or 0) for t in turns),
+        "cost_usd": sum(float(t.get("cost") or 0.0) for t in turns),
+        "conversation_scores": conv_scores,
+        "messages": [
+            {
+                "index": i,
+                "trace_id": t["trace_id"],
+                "ts": _iso(t.get("ts")),
+                "input": t.get("input"),
+                "output": t.get("output"),
+                "model": t.get("model") or None,
+                "tokens": int(t.get("tokens") or 0),
+                "cost_usd": float(t.get("cost") or 0.0),
+                "latency_ms": t.get("latency_ms"),
+                "failing": bool(t.get("failing")),
+                "scores": per_trace.get(t["trace_id"], []),
+                "steps": by_trace.get(t["trace_id"], []),
+            }
+            for i, t in enumerate(turns, start=1)
+        ],
+    }
+
+
+def _iso(v) -> str | None:
+    return v.isoformat() if hasattr(v, "isoformat") else (v or None)
+
+
 class DeleteSessionsBody(BaseModel):
     threads: list[str]
 

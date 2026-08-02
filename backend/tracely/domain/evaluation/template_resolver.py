@@ -261,18 +261,11 @@ def format_agent_catalog(agents: list[dict]) -> str | None:
             tdef = tdef if isinstance(tdef, dict) else {}
             tname = tdef.get("name") or key
             tdesc = tdef.get("description") or ""
-            # `parameters` is usually a JSON Schema, so its top-level keys are `type`/`properties`/
-            # `required` — schema plumbing, not parameter names. Unwrap to the real argument names;
-            # a judge told a tool takes "type, properties, required" is being actively misled.
-            params = tdef.get("parameters")
-            if isinstance(params, dict) and isinstance(params.get("properties"), dict):
-                params = params["properties"]
-            pstr = (
-                " (params: " + ", ".join(map(str, params.keys())) + ")"
-                if isinstance(params, dict) and params
-                else ""
-            )
-            lines.append(f"    • {tname}" + (f" — {tdesc}" if tdesc else "") + pstr)
+            # Name + description only. Argument names answer "how would I call this?", which is
+            # not a question a judge asks — it only needs to know the tool exists and what it is
+            # for. They were also the bulk of the catalog's length, and the catalog is competing
+            # for room with the transcript it is supposed to help grade.
+            lines.append(f"    • {tname}" + (f" — {tdesc}" if tdesc else ""))
     return "\n".join(lines) or None
 
 

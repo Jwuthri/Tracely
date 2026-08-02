@@ -25,12 +25,13 @@ _CATALOG = [
 ]
 
 
-def testformat_agent_catalog_includes_desc_and_params():
+def test_format_agent_catalog_includes_names_and_descriptions():
     out = format_agent_catalog(_CATALOG)
     assert "Support Agent: Handles customer inquiries" in out
     assert "lookup_order" in out
     assert "Look up order by ID" in out
-    assert "params: order_id" in out
+    # Arguments deliberately omitted — see test_the_catalog_is_names_and_descriptions_only.
+    assert "params" not in out
 
 
 def test_list_agent_prefers_declared_catalog():
@@ -143,10 +144,9 @@ async def test_thread_agents_empty(monkeypatch):
 # ── the catalog in the judge's prompt ─────────────────────────────────────────
 
 
-def test_tool_params_unwrap_the_json_schema():
-    """`parameters` is a JSON Schema, so its top-level keys are `type`/`properties`/`required`.
-    Rendering those as the tool's arguments actively misleads the judge — it would be told
-    `get_weather` takes a parameter called "required"."""
+def test_the_catalog_is_names_and_descriptions_only():
+    """Argument names answer "how would I call this?" — not a question a judge asks. They were
+    also most of the catalog's length, competing for room with the transcript being graded."""
     rendered = format_agent_catalog([{
         "name": "Weather Agent",
         "tools": [{
@@ -159,16 +159,9 @@ def test_tool_params_unwrap_the_json_schema():
             },
         }],
     }])
-    assert "(params: city, units)" in rendered
-    assert "properties" not in rendered
-
-
-def test_a_plain_param_dict_still_renders():
-    """Not every SDK sends a JSON Schema; a bare {name: spec} map must survive unchanged."""
-    rendered = format_agent_catalog([
-        {"name": "A", "tools": [{"name": "t", "parameters": {"city": {}, "units": {}}}]}
-    ])
-    assert "(params: city, units)" in rendered
+    assert "get_weather — Current conditions." in rendered
+    for noise in ("params", "properties", "city", "required"):
+        assert noise not in rendered
 
 
 def test_the_basic_judge_is_told_which_tools_exist(monkeypatch):

@@ -609,11 +609,25 @@ class GateService:
                 break
             seen = count
 
+        threads: list[str] = []
         for trace_id in trace_ids:
             try:
-                self.eval_service.evaluate_trace(project_id, trace_id)
+                # Turn/step columns per turn; the conversation columns once, below. Inline here
+                # rather than queued (the gate holds the worker's only slot under `--pool=solo`),
+                # but still once per conversation instead of once per turn.
+                res = self.eval_service.evaluate_trace(
+                    project_id, trace_id, skip_conversation=True
+                )
+                thread = res.get("thread_id")
+                if thread and thread not in threads:
+                    threads.append(thread)
             except Exception as exc:  # one bad turn must not sink the whole gate
                 log.warning("scenario_turn_eval_failed", trace_id=trace_id, error=str(exc))
+        for thread in threads:
+            try:
+                self.eval_service.evaluate_conversation(project_id, thread)
+            except Exception as exc:
+                log.warning("scenario_conv_eval_failed", thread_id=thread, error=str(exc))
 
     # ── internals ─────────────────────────────────────────────────────────────
 

@@ -46,11 +46,28 @@ log = structlog.get_logger()
 OnResult = Callable[[dict], None]
 
 
+# The table calls its three levels conversation / message / step, so the recording does too — a
+# recording that says "turn" or "AGENT_RUN" for the row the table labels `M` makes the reader
+# translate between two vocabularies for the same thing.
+_LEVEL_NAME = {
+    "CONVERSATION": "conv",
+    "AGENT_RUN": "msg",
+    "SPAN": "step",
+    "TOOL": "step",
+    "GENERATION": "step",
+    "CHAIN": "step",
+}
+
+
+def level_name(level: str) -> str:
+    return _LEVEL_NAME.get(str(level).upper(), str(level or "?").lower())
+
+
 def _spec_label(spec: dict) -> str:
-    """`llm_judge · AGENT_RUN · basic` — what an evaluator column actually is, for the recording.
-    The column name alone doesn't say whether it graded the run, each step, or the whole thread."""
+    """`llm_judge · msg · basic` — what an evaluator column actually is, for the recording. The
+    column name alone doesn't say whether it graded the message, each step, or the whole thread."""
     cfg = spec.get("config") or {}
-    bits = [str(spec.get("kind") or "?"), str(spec.get("level") or "?")]
+    bits = [str(spec.get("kind") or "?"), level_name(spec.get("level", ""))]
     if spec.get("kind") == "llm_judge":
         bits.append("advanced" if cfg.get("is_advanced") else "basic")
         if cfg.get("model"):
@@ -62,8 +79,8 @@ def _spec_label(spec: dict) -> str:
 
 def _scope(ctx) -> str:
     """Which level this dispatch is grading, for the run's title. A conversation-level pass has no
-    `trace_id` — it grades the thread as a whole, and reads very differently from a turn."""
-    return "conversation" if not ctx.trace_id else "turn"
+    `trace_id` — it grades the thread as a whole, and reads very differently from one message."""
+    return "conv" if not ctx.trace_id else "msg"
 
 
 def _subject_label(ctx) -> str:
@@ -72,7 +89,7 @@ def _subject_label(ctx) -> str:
     from tracely.domain.evaluation.text import content_text
 
     text = (content_text(ctx.root.get("input")) or "").strip()
-    where = "conversation" if not ctx.trace_id else "trace"
+    where = "conversation" if not ctx.trace_id else "message"
     subject = ctx.trace_id or ctx.thread_id
     return f"grading {where} {subject}" + (f"\n\n{text[:600]}" if text else "")
 
@@ -350,6 +367,24 @@ class EvaluationService:
         return self._dispatch_specs(specs, ctx)
 
     # ── internals ─────────────────────────────────────────────────────────────
+
+    def evaluate_conversation(
+        self, project_id: str, thread_id: str, on_result: OnResult | None = None
+    ) -> dict:
+        """Grade a thread with its CONVERSATION-level evaluators, once.
+
+        Split out of `evaluate_trace` because it must NOT run per turn: the ingest path calls
+        `evaluate_trace` for every turn, so an inline conversation pass re-graded the whole thread
+        on each one — the same judge, the same transcript, N times, N times the spend, N identical
+        rows in the recording. Callers run this once after the thread settles (the ingest hop
+        debounces it per thread; the gate calls it after driving every turn).
+        """
+        specs = [
+            s for s in self.load_enabled_evaluators(project_id) if s["level"] == CONVERSATION
+        ]
+        if not specs:
+            return {"scores": 0}
+        return {"scores": self._evaluate_conversation(project_id, thread_id, specs, on_result)}
 
     def _evaluate_conversation(
         self, project_id: str, thread_id: str, specs: list[dict], on_result: OnResult | None

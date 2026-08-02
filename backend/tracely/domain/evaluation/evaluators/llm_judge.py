@@ -66,6 +66,11 @@ OUTPUT_TYPES = ("score", "number", "boolean", "category", "text", "json")
 _TRUNC_IO = 1500  # per-step input/output excerpt
 _TRUNC_TURN = 800  # per-turn excerpt in the conversation transcript
 _DEFAULT_MAX_SPANS = 30  # cost guard for per-step judges
+# The declared agent/tool catalog. Generous: a catalog cut mid-list silently hides the last few
+# tools from the judge, which is worse than a long prompt — it can then fault the agent for not
+# using something it was never told about. Still bounded so a pathological catalog can't crowd out
+# the transcript it exists to help grade.
+_TRUNC_CATALOG = 6000
 
 
 # ── structured response schemas (create_agent response_format) ───────────────
@@ -236,7 +241,7 @@ class LLMJudgeEvaluator(Evaluator):
             return ""
         return (
             "\n\nAgents and tools available to this agent (declared, not necessarily used) — "
-            "judge whether the right ones were used:\n" + _clip(rendered, 2000)
+            "judge whether the right ones were used:\n" + _clip(rendered, _TRUNC_CATALOG)
         )
 
     def _run_trace(self, ctx: RunContext, config: dict) -> list[EvalResult]:

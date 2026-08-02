@@ -78,6 +78,7 @@ import {
   TextGlyph,
   Trash,
 } from "./trace-table/icons";
+import { IconCheck, IconCopy } from "./icons";
 import { normalizeType, TypeChip } from "./ui";
 
 // ── A TurnWise-style hierarchical spreadsheet over Tracely's real tree ─────────
@@ -564,10 +565,10 @@ const SelectContext = createContext<SelectView>({
   enabled: false, selected: new Set(), toggle: () => {}, toggleAll: () => {}, allSelected: false, someSelected: false,
 });
 
-// Control cells the table always renders (chevron · run · agents) + the optional select column.
+// Control cells the table always renders (chevron · run · copy · agents) + the optional select column.
 // Every colSpan in the table derives from this, so adding the column can't desync the empty rows.
 function useCtrlCount(): number {
-  return 3 + (useContext(SelectContext).enabled ? 1 : 0);
+  return 4 + (useContext(SelectContext).enabled ? 1 : 0);
 }
 
 // Tracely's own runs, listed alongside real ones while the Evals toggle is on. They get a tag
@@ -578,6 +579,50 @@ const INTERNAL_TAG: Record<string, string> = {
   eval: "border-info/30 bg-info/10 text-info",
   sim: "border-signal/30 bg-signal/10 text-signal",
 };
+
+/** Copy the whole conversation — every message, step, and score — as one JSON object.
+ *
+ *  Fetches on click rather than serialising what the table happens to hold: the rows carry only
+ *  the turns that have been expanded, so copying from state gives a different object depending on
+ *  what you had open. */
+function CopyConvButton({ thread }: { thread: string }) {
+  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
+
+  async function copy(e: React.MouseEvent) {
+    e.stopPropagation();
+    setState("busy");
+    try {
+      const r = await fetch(`/api/sessions/${encodeURIComponent(thread)}/export`, { cache: "no-store" });
+      if (!r.ok) throw new Error(String(r.status));
+      await navigator.clipboard.writeText(JSON.stringify(await r.json(), null, 2));
+      setState("done");
+    } catch {
+      setState("error");
+    }
+    setTimeout(() => setState("idle"), 1600);
+  }
+
+  return (
+    <button
+      tabIndex={-1}
+      onClick={copy}
+      title="Copy this conversation as JSON"
+      className={clsx(
+        "inline-flex h-6 w-6 items-center justify-center rounded-lg transition-opacity hover:bg-ink-600",
+        // Stays visible once it has something to say; otherwise it is hover-only like its neighbours.
+        state === "idle" ? "opacity-0 group-hover:opacity-100" : "opacity-100",
+      )}
+    >
+      {state === "done" ? (
+        <IconCheck className="h-3 w-3 text-ok" />
+      ) : state === "error" ? (
+        <IconCopy className="h-3 w-3 text-fail" />
+      ) : (
+        <IconCopy className={clsx("h-3 w-3 text-fg-muted", state === "busy" && "animate-pulse")} />
+      )}
+    </button>
+  );
+}
 
 function ConvTitleCell({ conv }: { conv: ConvNode }) {
   const href = conv.turns > 1 ? `/sessions/${conv.thread}` : `/traces/${conv.last_trace_id}`;
@@ -1075,6 +1120,9 @@ function DataRow({
       </td>
       <td style={CTRL} className="px-2 py-2 align-top sm:px-3">
         <RowRunButton ctx={ctx} />
+      </td>
+      <td style={CTRL} className="px-2 py-2 align-top sm:px-3">
+        {ctx.level === "C" ? <CopyConvButton thread={ctx.conv.thread} /> : null}
       </td>
       <td style={CTRL} className="px-2 py-2 align-top sm:px-3">
         {ctx.level === "C" ? (

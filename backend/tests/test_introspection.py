@@ -318,3 +318,53 @@ def test_a_single_column_run_names_it_outright():
 
     root = next(s for s in _spans(introspection.payload(rec)) if "parentSpanId" not in s)
     assert _attrs(root)["tracely.metadata.evaluator"] == "tracely.run.quality"
+
+
+# ── the conversation pass runs once, not once per message ─────────────────────
+
+
+def test_ingest_defers_the_conversation_pass_instead_of_running_it_per_message(monkeypatch):
+    """It used to run inline in `evaluate_trace`, so a 60-turn thread re-graded the whole
+    conversation 60 times — the same judge, the same transcript, 60× the spend."""
+    from tracely.workers import tasks
+
+    calls: dict = {}
+    def fake_trace(self, p, t, **kw):
+        calls["skip"] = kw.get("skip_conversation")
+        return {"scores": 1, "thread_id": "th-1"}
+
+    def fake_bump(p, key):
+        calls["key"] = key
+        return 7
+
+    monkeypatch.setattr(tasks.EvaluationService, "evaluate_trace", fake_trace)
+    monkeypatch.setattr(tasks.eval_debounce, "is_latest", lambda p, t, g: True)
+    monkeypatch.setattr(tasks.eval_debounce, "bump", fake_bump)
+    monkeypatch.setattr(
+        tasks.evaluate_conversation_task, "apply_async",
+        lambda args, **kw: calls.setdefault("scheduled", args),
+    )
+
+    tasks.evaluate_run_task.run("p1", "tr-1")
+
+    assert calls["skip"] is True                      # not graded inline
+    assert calls["scheduled"] == ("p1", "th-1", 7)    # scheduled once, for the thread
+    assert calls["key"] == "conv:th-1"                # namespaced off the per-trace counter
+
+
+def test_only_the_last_scheduled_conversation_pass_runs(monkeypatch):
+    """Every message schedules one; all but the last must fall away, or the debounce buys nothing."""
+    from tracely.workers import tasks
+
+    ran: list[str] = []
+    monkeypatch.setattr(tasks.eval_debounce, "is_latest", lambda p, t, g: g == 3)
+    monkeypatch.setattr(
+        tasks.EvaluationService, "evaluate_conversation",
+        lambda self, p, th, *a: ran.append(th) or {"scores": 1},
+    )
+
+    assert tasks.evaluate_conversation_task.run("p1", "th-1", 1) == {
+        "skipped": "superseded", "thread_id": "th-1"
+    }
+    tasks.evaluate_conversation_task.run("p1", "th-1", 3)
+    assert ran == ["th-1"]
