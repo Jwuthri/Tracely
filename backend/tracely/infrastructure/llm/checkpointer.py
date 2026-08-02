@@ -14,9 +14,8 @@ Celery tasks. That is what a checkpointer is for: LangGraph loads the thread's m
 the new one, and persists the result — so the caller sends only the new item.
 
 Tables (`checkpoints`, `checkpoint_writes`, `checkpoint_blobs`) are LangGraph's own, created by
-`setup()` and applied by the migration runner alongside our Alembic revisions. They are NOT
-Alembic-managed: the schema belongs to the library, and pinning our migrations to its internals
-would break on its next release.
+`setup()` on the first call in each process. They are NOT Alembic-managed: the schema belongs to
+the library, and pinning our migrations to its internals would break on its next release.
 """
 
 from __future__ import annotations
@@ -77,7 +76,17 @@ def get_checkpointer() -> Any:
                     kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
                     open=True,
                 )
-                _saver = PostgresSaver(pool)
+                saver = PostgresSaver(pool)
+                # Create the tables HERE rather than in a deploy step. `setup()` is idempotent and
+                # costs one round-trip per process, while a deploy step is one more thing that can
+                # be skipped — and was: prod ran every sequential grade against a `checkpoints`
+                # table that did not exist, so the judge raised, returned no result, and the column
+                # read "not applicable" instead of failing loudly. Doing it on the way in also makes
+                # the failure land in the one place that already degrades gracefully: a setup that
+                # can't run marks the checkpointer unavailable (one-shot grades, transcript pasted
+                # in) instead of raising on every grade for the life of the process.
+                saver.setup()
+                _saver = saver
             except Exception as exc:
                 log.warning("checkpointer_unavailable", error=str(exc))
                 _saver = False  # remember the failure; don't retry per grade
@@ -96,7 +105,9 @@ def get_checkpointer() -> Any:
 
 
 def setup() -> None:
-    """Create LangGraph's checkpoint tables. Idempotent; called by the migration runner."""
+    """Create LangGraph's checkpoint tables. Idempotent; `get_checkpointer()` already does this on
+    first use — this is the explicit hook (`python -m tracely.infrastructure.llm.checkpointer`) for
+    creating them ahead of time, and it RAISES so a deploy check can't pass on a silent skip."""
     saver = get_checkpointer()
     if saver is None:
         raise RuntimeError("checkpointer unavailable — cannot create checkpoint tables")

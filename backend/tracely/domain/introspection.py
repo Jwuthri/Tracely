@@ -21,9 +21,11 @@ would record another eval run, without end.
 from __future__ import annotations
 
 import contextvars
+import json
 import time
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
 
 from tracely.domain import otlp_payload as otlp
 
@@ -174,6 +176,33 @@ class Recording:
         ))
 
 
+def json_value(text: str) -> Any:
+    """A recorded field back as data when it is data, verbatim when it is prose — so nesting one
+    recorded payload inside another gives an object rather than a wall of escaped quotes."""
+    try:
+        return json.loads(text)
+    except (ValueError, TypeError):
+        return text
+
+
+def _root_output(groups: list["Group"], steps: list["Step"]) -> str:
+    """Every group's verdict as ONE value, for the collapsed row.
+
+    JSON rather than `a: PASS · b: FAIL — rude`: the table pretty-prints and highlights anything
+    that parses, so the same summary that used to be a run-on sentence becomes an object you can
+    open. A single group contributes its payload verbatim — with nothing to disambiguate it,
+    wrapping it in its own name adds a layer that says nothing.
+    """
+    graded = [g for g in groups if g.output]
+    if not graded:
+        return f"{len(steps)} step(s)"
+    if len(graded) == 1:
+        return graded[0].output
+    return json.dumps(
+        {g.name: json_value(g.output) for g in graded}, indent=2, ensure_ascii=False
+    )
+
+
 def _usage(tokens: dict[str, int]) -> list[dict]:
     """Token counts as the `gen_ai.usage.*` attributes the span mapper already reads."""
     out = []
@@ -273,11 +302,7 @@ def _one(
             otlp.attr("tracely.is_app_root", True),
             otlp.attr("tracely.trace.name", name),
             otlp.attr("tracely.input", rec.subject_label or rec.subject_id),
-            otlp.attr(
-                "tracely.output",
-                " · ".join(f"{g.name}: {g.output}" for g in groups if g.output)
-                or f"{len(steps)} step(s)",
-            ),
+            otlp.attr("tracely.output", _root_output(groups, steps)),
         ]),
     )]
 

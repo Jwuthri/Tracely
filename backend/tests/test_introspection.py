@@ -8,6 +8,7 @@ worker fills with work that generates more work, and the first symptom is a bill
 from __future__ import annotations
 
 import base64
+import json
 
 import pytest
 
@@ -101,7 +102,8 @@ def test_the_root_says_what_was_graded_not_just_its_id():
 
 
 def test_the_root_summarises_every_verdict():
-    """So a collapsed recording still answers "what did this eval decide?"."""
+    """So a collapsed recording still answers "what did this eval decide?" — as an object, which
+    the table pretty-prints, rather than the run-on sentence it used to concatenate."""
     rec = _rec()
     rec.label = "a"
     rec.describe(output="PASS")
@@ -109,8 +111,18 @@ def test_the_root_summarises_every_verdict():
     rec.describe(output="FAIL — rude")
 
     root = next(s for s in _spans(introspection.payload(rec)) if "parentSpanId" not in s)
-    out = _attrs(root)["tracely.output"]
-    assert "a: PASS" in out and "b: FAIL — rude" in out
+    assert json.loads(_attrs(root)["tracely.output"]) == {"a": "PASS", "b": "FAIL — rude"}
+
+
+def test_a_single_verdict_is_the_roots_output_verbatim():
+    """One column has nothing to disambiguate, so its payload is not wrapped in its own name —
+    a `json` judge's schema stays an openable object on the collapsed row."""
+    rec = _rec()
+    rec.label = "tracely.run.correction"
+    rec.describe(output='{"verdict": "FAIL", "reason": "user had to repeat themselves"}')
+
+    root = next(s for s in _spans(introspection.payload(rec)) if "parentSpanId" not in s)
+    assert json.loads(_attrs(root)["tracely.output"])["verdict"] == "FAIL"
 
 
 def test_groups_keep_declaration_order():

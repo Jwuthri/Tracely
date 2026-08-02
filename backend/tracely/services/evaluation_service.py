@@ -69,18 +69,57 @@ def level_name(level: str) -> str:
     return _LEVEL_NAME.get(str(level).upper(), str(level or "?").lower())
 
 
-def _spec_label(spec: dict) -> str:
-    """`llm_judge · msg · basic` — what an evaluator column actually is, for the recording. The
-    column name alone doesn't say whether it graded the message, each step, or the whole thread."""
+def _spec_json(spec: dict) -> str:
+    """What an evaluator column IS, as an object — the recording's input for that column.
+
+    An object rather than the old `llm_judge · msg · basic` line for the sake of the checks that
+    make no LLM call: a structural column has no nested prompt/reply to open, so this descriptor is
+    the only thing on its row that explains what ran. The table renders anything that parses as
+    JSON, so both kinds of column now read the same way.
+    """
     cfg = spec.get("config") or {}
-    bits = [str(spec.get("kind") or "?"), level_name(spec.get("level", ""))]
+    out: dict[str, object] = {
+        "evaluator": spec.get("score_name", ""),
+        "kind": spec.get("kind", ""),
+        "level": level_name(spec.get("level", "")),
+        "mode": _execution_mode(spec),
+    }
     if spec.get("kind") == "llm_judge":
-        bits.append("advanced" if cfg.get("is_advanced") else "basic")
+        out["prompt"] = "advanced" if cfg.get("is_advanced") else "basic"
+        out["output_type"] = str(cfg.get("output_type") or "score")
         if cfg.get("model"):
-            bits.append(str(cfg["model"]))
+            out["model"] = cfg["model"]
+    elif cfg.get("check"):
+        out["check"] = cfg["check"]
+    if cfg.get("threshold") is not None:
+        out["threshold"] = cfg["threshold"]
     if cfg.get("advisory"):
-        bits.append("advisory")
-    return " · ".join(bits)
+        out["advisory"] = True
+    if cfg.get("depends_on"):
+        out["depends_on"] = cfg["depends_on"]
+    return json.dumps(out, indent=2, ensure_ascii=False)
+
+
+def _results_json(results: list[EvalResult]) -> str:
+    """A column's verdict(s) as an object — an array when a step-level column graded several spans.
+
+    `string_value` is re-parsed rather than embedded as a string so a `json` judge's own schema
+    shows as nested fields instead of escaped quotes.
+    """
+    items = []
+    for r in results:
+        item: dict[str, object] = {
+            "verdict": r.verdict or None,
+            "value": r.value,
+            "reason": r.comment or None,
+            "span_id": r.target_span_id or None,
+            "output": introspection.json_value(r.string_value) if r.string_value else None,
+            "usage": r.usage or None,
+        }
+        items.append({k: v for k, v in item.items() if v is not None})
+    if not items:
+        return ""
+    return json.dumps(items[0] if len(items) == 1 else items, indent=2, ensure_ascii=False)
 
 
 def _subject_label(ctx) -> str:
@@ -547,7 +586,7 @@ class EvaluationService:
                     # One span per evaluator, named for the column, describing WHICH kind at
                     # WHAT level — "why did this column say that" starts with knowing what it is.
                     rec.label = spec.get("score_name") or spec.get("kind") or "evaluator"
-                    rec.describe(input=_spec_label(spec), meta={
+                    rec.describe(input=_spec_json(spec), meta={
                         "evaluator": spec.get("score_name", ""),
                         # The table's word for it (msg/step/conv), not the enum — and the key the
                         # recording splits its traces on, so a row is one level throughout.
@@ -561,10 +600,10 @@ class EvaluationService:
                     if rec:
                         # The verdict lands ON the evaluator's own span rather than in a child
                         # "verdict" event — one row per evaluator, not two.
-                        rec.describe(output="; ".join(
-                            f"{r.verdict or r.value}" + (f" — {r.comment}" if r.comment else "")
-                            for r in new_results
-                        ) or "(no result — not applicable to this trace)")
+                        rec.describe(
+                            output=_results_json(new_results)
+                            or "(no result — not applicable to this trace)"
+                        )
                     results.extend(new_results)
                     if new_results:
                         completed[spec["score_name"]] = [
@@ -579,7 +618,12 @@ class EvaluationService:
                         ]
                 except Exception as exc:  # one bad evaluator must not sink the rest
                     if rec:
-                        rec.describe(error=str(exc)[:500])
+                        # As the output too, not only the span's error status: the status colours
+                        # the row, the output is the cell you actually read.
+                        rec.describe(
+                            output=json.dumps({"error": str(exc)[:2000]}, indent=2, ensure_ascii=False),
+                            error=str(exc)[:500],
+                        )
                     log.warning(
                         "evaluator_failed", evaluator=spec.get("score_name", "?"), error=str(exc)
                     )

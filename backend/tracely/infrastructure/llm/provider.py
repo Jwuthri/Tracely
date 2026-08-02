@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import json
 import time
 from typing import Any, Callable, Iterator, TypeVar
 
@@ -464,8 +465,12 @@ def _recorded(prompt: str, system_prompt: str | None, model: str | None) -> Iter
     try:
         yield sink
     except Exception as exc:
-        rec.add(label, input=_prompt_text(system_prompt, prompt), error=str(exc)[:500],
-                model=label, start_ns=start_ns)
+        # The error IS this call's output. Recording it only as the span's error status left the
+        # OUTPUT cell blank, so a judge failing on every call looked identical to one that simply
+        # had nothing to say — a whole eval recording of empty cells and no reason anywhere in it.
+        rec.add(label, input=_prompt_text(system_prompt, prompt),
+                output=json.dumps({"error": str(exc)[:2000]}, indent=2, ensure_ascii=False),
+                error=str(exc)[:500], model=label, start_ns=start_ns)
         raise
     text, usage = (sink[0] if sink else ("", {}))
     rec.add(
