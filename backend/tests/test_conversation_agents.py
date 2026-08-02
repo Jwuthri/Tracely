@@ -164,27 +164,16 @@ def test_the_catalog_is_names_and_descriptions_only():
         assert noise not in rendered
 
 
-def test_the_basic_judge_is_told_which_tools_exist(monkeypatch):
-    """A judge that only sees the transcript can say an answer was unhelpful; it cannot say the
-    agent should have called `issue_refund` and didn't, because it has no idea the tool exists."""
+def test_a_basic_judge_is_never_handed_the_tool_catalog(monkeypatch):
+    """It used to be stapled under every basic prompt. At message level that made the judge grade
+    tool choice on a greeting; at conversation level it answered "which tools should have run?"
+    instead of "how did this conversation go". The catalog reaches a judge one way now — an
+    advanced template asking for `@LIST_AGENT` — because there the author asked for it."""
     from tracely.domain.evaluation.evaluators import llm_judge as mod
-
-    judge = mod.LLMJudgeEvaluator()
     import tracely.services.conversation_agents_service as cas
 
     monkeypatch.setattr(
         cas.ConversationAgentsService, "for_thread",
         staticmethod(lambda p, t: [{"name": "Support", "tools": [{"name": "issue_refund"}]}]),
     )
-    ctx = mod.RunContext("p", "t1", "t1", [], {}, thread_id="th1")
-    assert "issue_refund" in judge._capabilities(ctx)
-
-
-def test_a_missing_catalog_adds_nothing(monkeypatch):
-    """Most threads declare no catalog. That must cost the prompt zero characters."""
-    from tracely.domain.evaluation.evaluators import llm_judge as mod
-    import tracely.services.conversation_agents_service as cas
-
-    monkeypatch.setattr(cas.ConversationAgentsService, "for_thread", staticmethod(lambda p, t: None))
-    judge = mod.LLMJudgeEvaluator()
-    assert judge._capabilities(mod.RunContext("p", "t1", "t1", [], {})) == ""
+    assert not hasattr(mod.LLMJudgeEvaluator, "_capabilities")

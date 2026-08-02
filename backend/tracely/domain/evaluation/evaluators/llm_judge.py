@@ -1,14 +1,16 @@
 """LLM-as-judge evaluator — one class, three granularities, every call through LangChain's
 `create_agent` on OpenRouter (see `infrastructure.llm.provider`).
 
-The judge's rubric prompt becomes the agent's SYSTEM prompt; the trace content (request /
-answer / tool grounding, thread transcript, or step I/O) is the user message; and
-`config.output_type` picks the structured response schema the agent must return:
+The judge's rubric prompt becomes the agent's SYSTEM prompt and the graded ITEM is the user
+message — the item alone, with nothing bundled alongside it, so what the judge reads is exactly
+what the level names:
 
-- level CONVERSATION  → one grade for the whole thread (multi-turn transcript)
-- level AGENT_RUN     → one grade per trace/turn (user request vs final answer + tool results)
-- level SPAN/TOOL/GENERATION → one grade per step — every event inside the message (tool call,
-                        thinking, retrieval, agent hand-off), the message root excluded
+- level CONVERSATION  → the whole `[user, ai, user, ai …]` transcript, once
+- level AGENT_RUN     → one `[user, ai]` pair, per message
+- level SPAN/TOOL/GENERATION → one step — every event inside the message (tool call, thinking,
+                        retrieval, agent hand-off), the message root excluded
+
+`config.output_type` picks the structured response schema the agent must return:
 
 Output types → persisted score shape:
   score (default) → NUMERIC value 0..1, PASS/FAIL via `threshold`
@@ -55,7 +57,6 @@ from tracely.domain.evaluation.results import EvalResult, RunContext
 from tracely.domain.evaluation.template_resolver import (
     build_context,
     extract_template_variables,
-    format_agent_catalog,
     template_resolver,
 )
 from tracely.domain import introspection
@@ -72,12 +73,6 @@ _TRUNC_TURN = 800  # per-turn excerpt in the conversation transcript
 _TRUNC_STEP_LINE = 400  # one earlier step, in a sequential judge's trajectory
 _TRUNC_TRAJECTORY = 4000  # the whole run-so-far block (steps, or earlier turns)
 _DEFAULT_MAX_SPANS = 30  # cost guard for per-step judges
-# The declared agent/tool catalog. Generous: a catalog cut mid-list silently hides the last few
-# tools from the judge, which is worse than a long prompt — it can then fault the agent for not
-# using something it was never told about. Still bounded so a pathological catalog can't crowd out
-# the transcript it exists to help grade.
-_TRUNC_CATALOG = 6000
-
 # The system prompt for an ADVANCED grade. Deliberately says nothing about what to grade: the
 # user's resolved template is the rubric AND the context, and it arrives as the human message.
 ADVANCED_SYSTEM = (
@@ -292,37 +287,6 @@ class LLMJudgeEvaluator(Evaluator):
 
     # ── per-level context builders ───────────────────────────────────────────
 
-    def _capabilities(self, ctx: RunContext) -> str:
-        """The agents and tools this conversation DECLARED (SDK `tracely.trace(agents=[...])`),
-        rendered for the prompt.
-
-        A judge that only sees the transcript can say the answer was unhelpful; it cannot say the
-        agent should have called `issue_refund` and didn't, because it has no idea that tool
-        exists. The catalog carries descriptions and parameter names the spans never do. Advanced
-        templates already reach it via `@LIST_AGENT` — this is the same data for basic judges.
-        Guarded: no catalog (or a lookup hiccup) simply omits the section.
-
-        Step and conversation level, NOT message level. Which tool should have been called is a
-        step-level question; pasting a 2 000-token tool catalog under every single message made
-        the prompt about the tools instead of the answer, and marked a plain greeting down for
-        "not calling mock_identify_customer".
-        """
-        try:
-            from tracely.services.conversation_agents_service import ConversationAgentsService
-
-            agents = ConversationAgentsService.for_thread(
-                ctx.project_id, ctx.thread_id or ctx.trace_id
-            )
-        except Exception:
-            return ""
-        rendered = format_agent_catalog(agents) if agents else None
-        if not rendered:
-            return ""
-        return (
-            "\n\nAgents and tools available to this agent (declared, not necessarily used) — "
-            "judge whether the right ones were used:\n" + _clip(rendered, _TRUNC_CATALOG)
-        )
-
     def _run_trace(self, ctx: RunContext, config: dict) -> list[EvalResult]:
         """One grade for the trace: user request vs final answer, grounded in tool results."""
         user_in = request_for(ctx.root, ctx.spans)
@@ -335,17 +299,11 @@ class LLMJudgeEvaluator(Evaluator):
         # there is genuinely nothing to grade.
         if not answer and not user_in:
             return []
-        grounding = ""
-        tool_outputs = [
-            f"- {s.get('name')}: {_clip(content_text(s.get('output')), 600)}"
-            for s in ctx.spans
-            if s.get("type") == TOOL and s.get("output")
-        ]
-        if tool_outputs:
-            grounding = "\n\nTool results the answer must be consistent with:\n" + "\n".join(tool_outputs)
         # Sequential: the earlier turns are the context this message is judged in. Batch grades the
-        # message alone. (The previous VERDICT is appended by `_grade` — useful, but it is not the
-        # conversation, and "did this answer follow from what came before" needs the conversation.)
+        # message alone. That is the ONLY difference between the modes at this level — the item
+        # itself is `[user, ai]` either way, with no tool dump, no catalog, nothing else bundled
+        # in. A judge that needs the tool results should read them at step level, where the tool
+        # call IS the item.
         chat = _chat_id(ctx, config, self.score_name)
         history = ""
         if _is_sequential(config) and not chat and ctx.thread_spans:
@@ -358,7 +316,7 @@ class LLMJudgeEvaluator(Evaluator):
         body = (
             f"{history}"
             f"User request:\n{_clip(user_in, 2000)}\n\n"
-            f"Agent answer:\n{_clip(answer, 2000) or '(the agent produced no answer)'}{grounding}"
+            f"Agent answer:\n{_clip(answer, 2000) or '(the agent produced no answer)'}"
         )
         result = self._grade(
             config, body, previous=_previous_from_config(config), chat_id=chat,
@@ -408,10 +366,8 @@ class LLMJudgeEvaluator(Evaluator):
             if eligible > len(candidates)
             else ""
         )
-        user_in = request_for(ctx.root, ctx.spans)
         sequential = _is_sequential(config)
         previous = _previous_from_config(config)
-        capabilities = self._capabilities(ctx)
         chat = _chat_id(ctx, config, self.score_name)
         out: list[EvalResult] = []
         for i, s in enumerate(candidates):
@@ -429,15 +385,15 @@ class LLMJudgeEvaluator(Evaluator):
             # them here would send the same text twice and break the cached prefix. Only the
             # fallback path (no checkpointer) pastes them in.
             trajectory = (
-                "\n\nSteps already taken in this message (oldest first):\n"
+                "Steps already taken in this message (oldest first):\n"
                 + _clip("\n".join(_step_line(p, n) for n, p in enumerate(candidates[:i], start=1)),
                         _TRUNC_TRAJECTORY)
+                + "\n\n"
                 if sequential and i and not chat
                 else ""
             )
             body = (
-                f"User request (the goal of the whole run):\n{_clip(user_in, 1200)}"
-                f"{capabilities}{trajectory}\n\n"
+                f"{trajectory}"
                 f"Step {i + 1} of {len(candidates)} — {s.get('type')} `{s.get('name') or s.get('step_id') or ''}`\n"
                 f"Step input:\n{_clip(readable_io(s.get('input')), _TRUNC_IO)}\n\n"
                 f"Step output:\n{_clip(readable_io(s.get('output')), _TRUNC_IO)}"
@@ -464,10 +420,10 @@ class LLMJudgeEvaluator(Evaluator):
             return []
         turns = sum(1 for line in lines if " — user: " in line) or len(lines)
         transcript = _clip("\n".join(lines), 8000)
-        body = (
-            f"Full conversation ({turns} turn{'s' if turns != 1 else ''}):\n{transcript}"
-            f"{self._capabilities(ctx)}"
-        )
+        # The messages, and nothing else. A conversation-level judge is asked to read a
+        # conversation; a tool catalog stapled underneath made it grade tool choice instead, and
+        # marked a plain greeting down for not calling an identification tool.
+        body = f"Full conversation ({turns} turn{'s' if turns != 1 else ''}):\n{transcript}"
         result = self._grade(config, body, chat_id=_chat_id(ctx, config, self.score_name))
         return [result] if result else []
 

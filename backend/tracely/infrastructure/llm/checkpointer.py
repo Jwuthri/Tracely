@@ -39,23 +39,6 @@ def _dsn() -> str:
     return settings.alembic_database_url.replace("postgresql+psycopg://", "postgresql://")
 
 
-# The judge's verdict is a pydantic model, so it rides into the checkpoint with it. LangGraph
-# deserializes unknown types with a warning today and will refuse them in a future release — name
-# the two modules that legitimately produce them rather than wait for the upgrade that breaks
-# every sequential column. Verdict schemas are built in `llm_judge` (fixed + category models) and
-# `output_schema` (a user's `json` contract).
-_ALLOWED_MODULES = (
-    ("tracely", "domain", "evaluation", "evaluators", "llm_judge"),
-    ("tracely", "domain", "evaluation", "output_schema"),
-)
-
-
-def _serde():
-    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-
-    return JsonPlusSerializer(allowed_msgpack_modules=_ALLOWED_MODULES)
-
-
 def get_checkpointer() -> Any:
     """The process-wide `PostgresSaver`, or None when it can't be reached.
 
@@ -94,11 +77,22 @@ def get_checkpointer() -> Any:
                     kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
                     open=True,
                 )
-                _saver = PostgresSaver(pool, serde=_serde())
+                _saver = PostgresSaver(pool)
             except Exception as exc:
                 log.warning("checkpointer_unavailable", error=str(exc))
                 _saver = False  # remember the failure; don't retry per grade
     return _saver or None
+
+
+# NOTE — the judge's verdict is a pydantic model, so it rides into the checkpoint alongside the
+# messages, and LangGraph logs "Deserializing unregistered type … ScoreVerdict" on every resume.
+# The obvious fix is `serde=JsonPlusSerializer(allowed_msgpack_modules=…)`, and it is a trap:
+# passing ANY explicit allowlist switches the serializer from warn-and-allow to block-what-is-not-
+# listed, and the list takes exact (module, classname) pairs with no wildcard. Two of our verdict
+# models are built at runtime (`CategoryVerdict`, and a user's `json` contract), so any list we
+# write is a list that can be incomplete — and an incomplete one turns a log line into a blocked
+# resume. Left on the default deliberately. When LangGraph makes strict the default, the fix is to
+# stop putting a pydantic instance in the state, not to guess at the enumeration.
 
 
 def setup() -> None:
