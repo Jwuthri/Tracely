@@ -94,6 +94,11 @@ class IngestionService:
         for ev in events:
             by_trace[ev.get("trace_id")].append(ev)
         for evs in by_trace.values():
+            # A recording of Tracely's own work was produced by no agent, so there is nothing to
+            # fall back to: attributing it to `default` both lies in the Agent column and files
+            # the product's own runs under a customer agent.
+            if any(e.get("internal_kind") for e in evs):
+                continue
             root = next((e for e in evs if e.get("is_app_root")), None)
             trace_agent = (
                 (root.get("agent_slug") if root else "")

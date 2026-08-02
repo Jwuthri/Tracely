@@ -294,3 +294,27 @@ def test_evaluation_refuses_a_trace_that_is_itself_a_recording(monkeypatch):
 
     svc = EvaluationService(trace_reader=_Reader(), score_writer=object())
     assert svc.evaluate_trace("p1", "rec-1") == {"scores": 0, "skipped": "internal"}
+
+
+def test_the_root_is_labelled_by_the_columns_it_ran():
+    """The run root belongs to no single column, so without this its Agent cell is the only blank
+    one in the recording — or worse, the `default` fallback agent, which produced none of it."""
+    rec = _rec()
+    for name in ("tracely.run.outcome", "tracely.run.quality", "tracely.tool.success"):
+        rec.label = name
+        rec.describe(output="PASS")
+
+    root = next(s for s in _spans(introspection.payload(rec)) if "parentSpanId" not in s)
+    a = _attrs(root)
+    assert a["tracely.metadata.evaluator"] == "tracely.run.outcome +2"
+    # the root's name already IS the run — repeating it as step_name duplicates the Name column
+    assert "tracely.step.name" not in a
+
+
+def test_a_single_column_run_names_it_outright():
+    rec = _rec()
+    rec.label = "tracely.run.quality"
+    rec.describe(output="PASS")
+
+    root = next(s for s in _spans(introspection.payload(rec)) if "parentSpanId" not in s)
+    assert _attrs(root)["tracely.metadata.evaluator"] == "tracely.run.quality"

@@ -202,17 +202,26 @@ def payload(rec: Recording) -> dict | None:
               if rec.conversation_id else []),
             *([otlp.attr("tracely.turn.index", rec.turn_index)] if rec.turn_index else []),
             # Which evaluator column, at what level — on EVERY span, so scanning the table answers
-            # it without expanding anything.
-            *([otlp.attr("tracely.step.name", group.name)] if group else []),
+            # it without expanding anything. Skipped on the root, whose name already IS the run.
+            *([otlp.attr("tracely.step.name", group.name)] if group and group is not root_group else []),
             *(otlp.attr(f"tracely.metadata.{k}", v) for k, v in meta.items()),
             *(extra or []),
         ]
+
+    # The root belongs to no single column, so it names the ones it ran — the Agent column on that
+    # row would otherwise be the only blank (or, worse, the fallback agent) in the recording.
+    names = [g.name for g in rec.groups]
+    root_group = Group(
+        rec.name,
+        meta={"evaluator": names[0] + (f" +{len(names) - 1}" if len(names) > 1 else "")}
+        if names else {},
+    )
 
     root_id = uuid.uuid4().bytes[:8]
     spans = [otlp.span(
         trace_id=trace_id, span_id=root_id, name=rec.name,
         start_ns=rec.start_ns, end_ns=end_ns,
-        attributes=base(extra=[
+        attributes=base(root_group, extra=[
             otlp.attr("tracely.observation.type", _CHAIN),
             otlp.attr("tracely.is_app_root", True),
             otlp.attr("tracely.trace.name", rec.name),

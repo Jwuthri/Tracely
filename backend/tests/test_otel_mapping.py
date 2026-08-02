@@ -311,3 +311,19 @@ def test_langchain_messages_to_dict_and_node_updates() -> None:
         {"type": "tool", "data": {"content": '{"k": 1}', "type": "tool", "tool_call_id": "c1", "name": "t"}}]}}]
     out = _decode_langchain(upd)
     assert out[0]["role"] == "tool" and out[0]["tool_call_id"] == "c1" and out[0]["name"] == "t"
+
+
+def test_a_recording_is_never_attributed_to_the_fallback_agent():
+    """`default` in the Agent column would claim a customer agent produced Tracely's own work —
+    and would file the product's runs under that agent everywhere agent scoping applies."""
+    from tracely.services.ingestion_service import IngestionService
+
+    events = [
+        {"trace_id": "t1", "span_id": "s1", "is_app_root": True, "agent_slug": "",
+         "internal_kind": "eval"},
+        {"trace_id": "t2", "span_id": "s2", "is_app_root": True, "agent_slug": ""},
+    ]
+    IngestionService._attribute_default_agent(events)
+
+    assert events[0]["agent_slug"] == ""          # the recording stays agent-less
+    assert events[1]["agent_slug"] != ""          # a real agent-less trace still gets the default
