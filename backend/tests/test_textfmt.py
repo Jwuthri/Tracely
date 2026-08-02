@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from tracely.domain.evaluation.text import request_for
+from tracely.domain.evaluation.text import readable_io, request_for
 from tracely.infrastructure.text import extract_text, message_text
 
 
@@ -98,3 +98,25 @@ def test_a_single_user_message_is_unchanged():
     root = {"input": '{"role": "user", "content": [{"type": "text", "text": "where is my order?"}]}'}
     assert request_for(root, [root]) == "where is my order?"
     assert request_for({"input": "plain string"}, []) == "plain string"
+
+
+def test_a_step_input_renders_the_whole_exchange_not_just_the_system_prompt():
+    """A generation's input is the message array it was called with. Rendered as "first readable
+    text" the step judge saw the agent's rubric under Step input and never the request."""
+    body = readable_io(_hist(
+        ("system", "You are Realize."),
+        ("user", "hellohello"),
+        ("assistant", "CPF?"),
+        ("user", "12345678900"),
+    ))
+    assert body.splitlines() == [
+        "system: You are Realize.",
+        "user: hellohello",
+        "assistant: CPF?",
+        "user: 12345678900",
+    ]
+
+
+def test_readable_io_leaves_tool_json_and_single_messages_alone():
+    assert readable_io('{"open_count": 1}') == '{"open_count": 1}'
+    assert readable_io('{"role": "assistant", "content": "done"}') == "done"

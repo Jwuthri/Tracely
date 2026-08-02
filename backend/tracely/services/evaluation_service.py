@@ -508,10 +508,12 @@ class EvaluationService:
             "eval · {level} · {n} column(s)", project_id=ctx.project_id,
             subject_label=_subject_label(ctx),
             conversation_id=f"eval:{thread}" if thread else "",
-            # The conversation-level pass re-grades the whole thread every time it grows, so its
-            # recording replaces the last one instead of stacking a near-identical run beside it.
-            # A message pass grades one message, once — nothing to replace.
-            stable=not ctx.trace_id,
+            # A recording REPLACES the last one about the same (subject, level) rather than
+            # stacking beside it. Every eval path re-runs: the conversation pass re-grades the
+            # thread each time it grows, ingest re-grades a turn whose spans arrived late, and the
+            # UI's "Run evals" re-grades on demand. Without this a 3-turn conversation showed 9
+            # step runs and the newest verdict was whichever row you happened to open.
+            stable=True,
         ) as rec:
             for spec in specs:
                 spec = _inject_dependencies(spec, completed)

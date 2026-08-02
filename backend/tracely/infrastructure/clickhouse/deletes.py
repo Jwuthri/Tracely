@@ -13,13 +13,24 @@ from tracely.infrastructure.clickhouse.client import get_async_client, get_clien
 def delete_trace(project_id: str, trace_id: str) -> None:
     """Drop one trace's spans, synchronously — the worker's half of this module.
 
-    Only used to *replace* a re-recorded internal run (`Recording.stable`), which happens once per
-    conversation-level eval pass. A mutation per span-write would be reckless; a mutation per
-    re-grade of a settled thread is not.
+    Used to *replace* a re-recorded internal run (`Recording.stable`): the recording keeps its
+    trace id, so the previous spans have to go before the new ones land.
+
+    Reads before it deletes, because the common case is that there is nothing there — a first
+    grading. ClickHouse runs a mutation for a `DELETE` that matches no rows just the same, and one
+    mutation per evaluated message is the kind of thing that quietly wrecks a table.
     """
-    get_client().command(
+    client = get_client()
+    params = {"p": project_id, "t": trace_id}
+    res = client.query(
+        "SELECT count() FROM events WHERE project_id = {p:String} AND trace_id = {t:String}",
+        parameters=params,
+    )
+    if not res.result_rows or not int(res.result_rows[0][0]):
+        return
+    client.command(
         "DELETE FROM events WHERE project_id = {p:String} AND trace_id = {t:String}",
-        parameters={"p": project_id, "t": trace_id},
+        parameters=params,
     )
 
 

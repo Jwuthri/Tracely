@@ -59,7 +59,7 @@ from tracely.domain.evaluation.template_resolver import (
     template_resolver,
 )
 from tracely.domain import introspection
-from tracely.domain.evaluation.text import answer_for, content_text, request_for
+from tracely.domain.evaluation.text import answer_for, content_text, readable_io, request_for
 from tracely.domain.traces.spans import root_span
 from tracely.infrastructure.llm import provider
 
@@ -394,8 +394,8 @@ class LLMJudgeEvaluator(Evaluator):
                 f"User request (the goal of the whole run):\n{_clip(user_in, 1200)}"
                 f"{capabilities}{trajectory}\n\n"
                 f"Step {i + 1} of {len(candidates)} — {s.get('type')} `{s.get('name') or s.get('step_id') or ''}`\n"
-                f"Step input:\n{_clip(content_text(s.get('input')), _TRUNC_IO)}\n\n"
-                f"Step output:\n{_clip(content_text(s.get('output')), _TRUNC_IO)}"
+                f"Step input:\n{_clip(readable_io(s.get('input')), _TRUNC_IO)}\n\n"
+                f"Step output:\n{_clip(readable_io(s.get('output')), _TRUNC_IO)}"
             )
             result = self._grade(
                 config, body, previous=previous, deps=_deps_for_span(config, s.get("span_id", ""))
