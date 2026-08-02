@@ -417,16 +417,21 @@ def get_chat_model(model: str | None = None, temperature: float = 0.0):
     )
 
 
-def _invoke(agent, prompt: str) -> dict[str, Any]:
+def _invoke(agent, prompt: str, thread_id: str | None = None) -> dict[str, Any]:
     """Run the agent, translating one badly-disguised provider failure into a readable error.
+
+    `thread_id` addresses a checkpointed conversation: LangGraph loads that thread's messages,
+    appends this one, and persists the result — so we send only the new item and the model sees
+    the whole transcript, with a byte-identical prefix the provider can cache.
 
     OpenRouter reports some failures — credit exhaustion above all — as HTTP **200** with an
     `{"error": …}` body and no `choices`. The OpenAI SDK's parser then trips over `choices=None`
     and raises `TypeError: 'NoneType' object is not iterable`, which tells an operator nothing and
     reads like a Tracely bug. The judge swallows exceptions per-evaluator, so the visible symptom
     is simply "no scores appeared" — worth spending a few lines to name the real cause."""
+    config = {"configurable": {"thread_id": thread_id}} if thread_id else None
     try:
-        return agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+        return agent.invoke({"messages": [{"role": "user", "content": prompt}]}, config)
     except TypeError as exc:
         if "NoneType" in str(exc):
             raise RuntimeError(
@@ -485,26 +490,43 @@ def run_structured_agent(
     model: str | None = None,
     temperature: float = 0.0,
     on_usage: UsageSink | None = None,
+    chat_id: str | None = None,
 ) -> T:
     """One `create_agent` invocation with a structured response schema. Returns the validated
     pydantic instance; raises on transport/validation errors (callers decide whether a failed
-    grade is skipped or surfaced). `on_usage` (optional) receives this call's token usage."""
+    grade is skipped or surfaced). `on_usage` (optional) receives this call's token usage.
+
+    `chat_id` continues a durable conversation instead of asking a fresh question: the rubric and
+    every earlier item→verdict pair are already on that thread, so only `prompt` goes over the
+    wire and the cached prefix does the rest. Without a reachable checkpointer it degrades to the
+    one-shot call — a lost transcript is worth less than a lost grade."""
     from langchain.agents import create_agent
 
+    checkpointer = _checkpointer_for(chat_id)
     agent = create_agent(
         get_chat_model(model, temperature),
         tools=[],
         system_prompt=system_prompt,
         response_format=response_format,
+        **({"checkpointer": checkpointer} if checkpointer else {}),
     )
     with _recorded(prompt, system_prompt, model) as sink:
-        result = _invoke(agent, prompt)
+        result = _invoke(agent, prompt, chat_id if checkpointer else None)
         usage = _extract_usage(result, model)
         structured = result["structured_response"]
         sink.append((_dump(structured), usage))
     if on_usage is not None:
         on_usage(usage)
     return structured
+
+
+def _checkpointer_for(chat_id: str | None):
+    """The Postgres checkpointer when this call belongs to a conversation, else None."""
+    if not chat_id:
+        return None
+    from tracely.infrastructure.llm.checkpointer import get_checkpointer
+
+    return get_checkpointer()
 
 
 def _dump(value: Any) -> str:

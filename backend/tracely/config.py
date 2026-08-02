@@ -171,6 +171,17 @@ class Settings(BaseSettings):
     # high-volume projects.
     introspection_enabled: bool = True
 
+    # Durable judge conversations: a SEQUENTIAL evaluator holds one chat with the model (rubric →
+    # item → verdict → item …), checkpointed in Postgres so turn 6 resumes what turn 5 left. The
+    # prefix is byte-identical between calls, so the provider serves it from its prompt cache.
+    # Off ⇒ every item is a fresh one-shot question and the prior verdict is pasted in as text
+    # (the pre-checkpoint behaviour), which is also the automatic fallback when Postgres is
+    # unreachable. `infrastructure/llm/checkpointer.py`.
+    eval_chat_enabled: bool = True
+    # Connections the checkpointer pool may open. One per concurrent grading task is plenty — the
+    # worker runs --pool=solo locally, and the API's on-demand run grades in a threadpool.
+    eval_chat_pool_size: int = 8
+
     # Where a worker-side task reaches this API (the Data page's "Seed demo data" runs the seeder
     # there, and it drives the product through its own HTTP API). Container DNS in compose; the
     # host port when the worker runs on the host.

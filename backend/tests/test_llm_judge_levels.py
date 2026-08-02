@@ -39,6 +39,7 @@ def judge_key(monkeypatch):
 def _judge(level: str) -> LLMJudgeEvaluator:
     ev = LLMJudgeEvaluator()
     ev.level = level
+    ev.score_name = "probe"
     return ev
 
 
@@ -51,7 +52,7 @@ def _ctx(spans: list[dict], thread_id: str = "") -> RunContext:
 def _stub_structured(monkeypatch, fields: dict, prompts: list | None = None, systems: list | None = None):
     """Patch run_structured_agent to build the requested response_format with canned fields."""
 
-    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None):
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None, **_):
         if prompts is not None:
             prompts.append(prompt)
         if systems is not None:
@@ -154,7 +155,7 @@ def test_json_without_schema_falls_back_to_freeform(monkeypatch):
     payload = {"score": 0.9, "issues": [], "reason": "clean"}
     monkeypatch.setattr(
         provider, "run_text_agent",
-        lambda prompt, *, system_prompt=None, model=None, temperature=0.0, on_usage=None:
+        lambda prompt, *, system_prompt=None, model=None, temperature=0.0, on_usage=None, **_:
             "```json\n" + json.dumps(payload) + "\n```",
     )
     r = _judge(RUN).run(_ctx([_span()]), {"output_type": "json", "threshold": 0.5})[0]
@@ -169,7 +170,7 @@ def test_json_with_schema_enforces_user_contract(monkeypatch):
     field (score included) stays in string_value."""
     seen: dict = {}
 
-    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None):
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None, **_):
         seen["fields"] = dict(response_format.model_fields)
         return response_format(intent="complaint", score=0.2, reasoning="the user is upset")
 
@@ -201,7 +202,7 @@ def test_sequential_steps_chain_previous_result(monkeypatch):
     graded. Batch grades each step alone — that is the whole difference between the modes."""
     prompts: list[str] = []
 
-    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None):
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None, **_):
         prompts.append(prompt)
         return response_format(score=0.4, reason=f"grade {len(prompts)}")
 
@@ -234,7 +235,7 @@ def test_trace_level_previous_result_seed(monkeypatch):
     """Thread runs seed cross-turn chaining via config.__previous_result__."""
     prompts: list[str] = []
 
-    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None):
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None, **_):
         prompts.append(prompt)
         return response_format(score=1.0, reason="ok")
 
@@ -250,7 +251,7 @@ def test_sequential_message_sees_the_earlier_turns(monkeypatch):
     that led here, not just the previous verdict. Batch grades the message on its own."""
     prompts: list[str] = []
 
-    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None):
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None, **_):
         prompts.append(prompt)
         return response_format(score=1.0, reason="ok")
 
@@ -311,7 +312,7 @@ def test_transport_error_skips(monkeypatch):
 def test_judge_attaches_token_usage(monkeypatch):
     monkeypatch.setattr(settings, "openrouter_api_key", "test-key")
 
-    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None):
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0, on_usage=None, **_):
         if on_usage:
             on_usage({"input_tokens": 100, "output_tokens": 20, "total_tokens": 120, "model": "openai/gpt-5.4-nano"})
         return response_format(score=0.9, reason="ok")
@@ -433,3 +434,78 @@ def test_the_advanced_template_is_not_sent_as_both_system_and_message(monkeypatc
     _judge(RUN).run(_ctx([_span()]), config)
     assert systems == [ADVANCED_SYSTEM]
     assert prompts[0] != ADVANCED_SYSTEM and "Grade" in prompts[0]
+
+
+# ── durable judge conversations ──────────────────────────────────────────────
+
+
+def test_a_sequential_column_grades_on_one_chat_thread(monkeypatch):
+    """Sequential holds ONE conversation with the model: rubric → item → verdict → item. The
+    transcript is the continuity, so the prior verdict is no longer pasted into the prompt and the
+    cached prefix carries everything but the new item."""
+    from tracely.infrastructure.llm import checkpointer
+
+    monkeypatch.setattr(checkpointer, "_saver", object())  # a reachable checkpointer
+    monkeypatch.setattr(checkpointer.settings, "eval_chat_enabled", True)
+    seen: list = []
+
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0,
+             on_usage=None, chat_id=None, **_):
+        seen.append((chat_id, prompt))
+        return response_format(score=1.0, reason="ok")
+
+    monkeypatch.setattr(provider, "run_structured_agent", fake)
+    thread = [
+        _span(trace_id="t0", span_id="r0", input="first", output="a"),
+        _span(trace_id="t1", span_id="r1", input="second", output="b"),
+    ]
+    ctx = RunContext("p", "t1", "run-1", [thread[1]], thread[1],
+                     thread_id="c1", thread_spans=thread)
+    _judge(RUN).run(ctx, {"execution_mode": "sequential",
+                          "__previous_result__": {"verdict": "FAIL"}})
+
+    chat_id, prompt = seen[0]
+    assert chat_id == "p:probe:c1" or chat_id.endswith(":c1")
+    # the thread already holds them, so re-sending would double the tokens and break the prefix
+    assert "Previous result of this metric" not in prompt
+    assert "Conversation so far" not in prompt
+
+
+def test_an_unreachable_checkpointer_falls_back_instead_of_degrading_to_batch(monkeypatch):
+    """The memoized failure is a `False` sentinel; leaking it made `is None` answer "yes there is
+    a checkpointer", so the judge dropped the pasted-in history AND had no thread to read it from.
+    Sequential silently became batch."""
+    from tracely.infrastructure.llm import checkpointer
+
+    monkeypatch.setattr(checkpointer.settings, "eval_chat_enabled", True)
+    monkeypatch.setattr(checkpointer, "_saver", False)
+    assert checkpointer.get_checkpointer() is None
+
+    prompts: list[str] = []
+    _stub_structured(monkeypatch, {"score": 1.0, "reason": "ok"}, prompts=prompts)
+    _judge(RUN).run(_ctx([_span()]), {"execution_mode": "sequential",
+                                      "__previous_result__": {"verdict": "FAIL"}})
+    assert "Previous result of this metric" in prompts[0]
+
+
+def test_an_advanced_column_never_opens_a_chat_thread(monkeypatch):
+    """Advanced templates stay one-shot by design: the rubric and its resolved context are one
+    blob in the human message, so chaining them would store that blob once per item inside the
+    transcript. Sequential advanced chains through @METRIC_PREVIOUS_RESULT instead."""
+    from tracely.infrastructure.llm import checkpointer
+
+    monkeypatch.setattr(checkpointer, "_saver", object())  # a reachable checkpointer
+    monkeypatch.setattr(checkpointer.settings, "eval_chat_enabled", True)
+    seen: list = []
+
+    def fake(prompt, *, response_format, system_prompt=None, model=None, temperature=0.0,
+             on_usage=None, chat_id=None, **_):
+        seen.append(chat_id)
+        return response_format(score=1.0, reason="ok")
+
+    monkeypatch.setattr(provider, "run_structured_agent", fake)
+    _judge(RUN).run(_ctx([_span()]), {
+        "is_advanced": True, "prompt": "Grade @CURRENT_MESSAGE.output",
+        "execution_mode": "sequential",
+    })
+    assert seen == [None]

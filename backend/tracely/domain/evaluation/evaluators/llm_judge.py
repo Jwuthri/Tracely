@@ -235,6 +235,30 @@ def _is_sequential(config: dict) -> bool:
     return str(config.get("execution_mode") or "batch") == "sequential"
 
 
+def _chat_id(ctx: RunContext, config: dict, score_name: str) -> str | None:
+    """The conversation this column holds with the model, or None for a batch column.
+
+    Batch means the items are independent, so each one is a fresh question — sharing a transcript
+    would be exactly the contamination `batch` promises not to have. Sequential means the opposite,
+    and gets one thread per (workspace, column, conversation): the rubric and every earlier
+    item→verdict pair stay on it, so a later item sends only itself and the provider serves the
+    rest from its prompt cache.
+
+    Returns None when the checkpointer can't be reached, and that is load-bearing: the callers
+    stop pasting the history in once a chat exists, so answering "yes" on a thread that will not
+    actually persist would degrade every sequential column to batch — silently, and only in the
+    incident where the database is already unhappy.
+    """
+    if not _is_sequential(config):
+        return None
+    from tracely.infrastructure.llm.checkpointer import chat_id, get_checkpointer
+
+    subject = ctx.thread_id or ctx.trace_id
+    if not subject or get_checkpointer() is None:
+        return None
+    return chat_id(ctx.project_id, score_name, subject)
+
+
 def _previous_from_config(config: dict) -> dict | None:
     """The cross-item seed for sequential mode (set by EvaluationService for thread runs)."""
     if not _is_sequential(config):
@@ -322,8 +346,9 @@ class LLMJudgeEvaluator(Evaluator):
         # Sequential: the earlier turns are the context this message is judged in. Batch grades the
         # message alone. (The previous VERDICT is appended by `_grade` — useful, but it is not the
         # conversation, and "did this answer follow from what came before" needs the conversation.)
+        chat = _chat_id(ctx, config, self.score_name)
         history = ""
-        if _is_sequential(config) and ctx.thread_spans:
+        if _is_sequential(config) and not chat and ctx.thread_spans:
             lines = _turn_lines(ctx.thread_spans, stop_before=ctx.trace_id)
             if lines:
                 history = (
@@ -335,7 +360,9 @@ class LLMJudgeEvaluator(Evaluator):
             f"User request:\n{_clip(user_in, 2000)}\n\n"
             f"Agent answer:\n{_clip(answer, 2000) or '(the agent produced no answer)'}{grounding}"
         )
-        result = self._grade(config, body, previous=_previous_from_config(config))
+        result = self._grade(
+            config, body, previous=_previous_from_config(config), chat_id=chat,
+        )
         return [result] if result else []
 
     def _step_candidates(self, ctx: RunContext, config: dict) -> tuple[list[dict], int]:
@@ -385,6 +412,7 @@ class LLMJudgeEvaluator(Evaluator):
         sequential = _is_sequential(config)
         previous = _previous_from_config(config)
         capabilities = self._capabilities(ctx)
+        chat = _chat_id(ctx, config, self.score_name)
         out: list[EvalResult] = []
         for i, s in enumerate(candidates):
             # Name the recorded call for the span it judges. Without this a step-level column
@@ -395,12 +423,16 @@ class LLMJudgeEvaluator(Evaluator):
                 rec.target = f"{s.get('type')} {s.get('name') or s.get('step_id') or i + 1}"
             # Sequential means the run so far is context: the tool call is judged knowing what the
             # model was thinking when it chose it. Batch grades each step on its own — that is the
-            # whole difference between the two modes, and a previous VERDICT is not the run so far.
+            # whole difference between the two modes.
+            #
+            # On a chat thread the earlier steps ARE the earlier user messages, so re-rendering
+            # them here would send the same text twice and break the cached prefix. Only the
+            # fallback path (no checkpointer) pastes them in.
             trajectory = (
                 "\n\nSteps already taken in this message (oldest first):\n"
                 + _clip("\n".join(_step_line(p, n) for n, p in enumerate(candidates[:i], start=1)),
                         _TRUNC_TRAJECTORY)
-                if sequential and i
+                if sequential and i and not chat
                 else ""
             )
             body = (
@@ -411,7 +443,9 @@ class LLMJudgeEvaluator(Evaluator):
                 f"Step output:\n{_clip(readable_io(s.get('output')), _TRUNC_IO)}"
             )
             result = self._grade(
-                config, body, previous=previous, deps=_deps_for_span(config, s.get("span_id", ""))
+                config, body, previous=previous,
+                deps=_deps_for_span(config, s.get("span_id", "")),
+                chat_id=chat,
             )
             if result:
                 result.target_span_id = s.get("span_id", "")
@@ -434,7 +468,7 @@ class LLMJudgeEvaluator(Evaluator):
             f"Full conversation ({turns} turn{'s' if turns != 1 else ''}):\n{transcript}"
             f"{self._capabilities(ctx)}"
         )
-        result = self._grade(config, body)
+        result = self._grade(config, body, chat_id=_chat_id(ctx, config, self.score_name))
         return [result] if result else []
 
     # ── advanced (template) grading ──────────────────────────────────────────
@@ -547,12 +581,22 @@ class LLMJudgeEvaluator(Evaluator):
     # ── grading + output-type handling ───────────────────────────────────────
 
     def _grade(
-        self, config: dict, body: str, previous: dict | None = None, deps: dict | None = None
+        self,
+        config: dict,
+        body: str,
+        previous: dict | None = None,
+        deps: dict | None = None,
+        chat_id: str | None = None,
     ) -> EvalResult | None:
-        """Basic grade: assemble the prompt (rubric system prompt + auto previous/deps context),
-        then hand off to the shared model-call tail."""
+        """Basic grade: assemble the prompt (rubric system prompt + auto deps context), then hand
+        off to the shared model-call tail.
+
+        `chat_id` puts this item into the column's running conversation with the model instead of
+        asking a fresh question. When it is set the transcript IS the continuity — the judge sees
+        the verdicts it gave, in its own words, and `previous` is not pasted in as a paraphrase.
+        """
         rubric = config.get("prompt") or DEFAULT_JUDGE_PROMPT
-        if previous:
+        if previous and not chat_id:
             body += (
                 "\n\nPrevious result of this metric (the preceding item in the sequence — use "
                 "it for continuity and comparison):\n"
@@ -569,7 +613,7 @@ class LLMJudgeEvaluator(Evaluator):
                 "\n\nResults from prerequisite evaluations (use these as additional context):\n"
                 + dep_lines
             )
-        return self._call_and_build(config, system_prompt=rubric, body=body)
+        return self._call_and_build(config, system_prompt=rubric, body=body, chat_id=chat_id)
 
     def _grade_advanced(self, config: dict, resolved_text: str) -> EvalResult | None:
         """Advanced grade: the resolved `@VARIABLE` template IS the prompt — the user's
@@ -581,11 +625,21 @@ class LLMJudgeEvaluator(Evaluator):
         input tokens of every advanced grade — an `@HISTORY` template is 8k characters — and
         repeating a rubric verbatim measurably degrades instruction-following on several models.
         Sent once now, under a fixed preamble that only says what kind of job this is.
+
+        **No `chat_id` here, on purpose — do not "fix" this.** Basic columns hold a durable
+        conversation with the model because their rubric is the system prompt and each item is a
+        short human turn, so the prefix repeats byte for byte. An advanced template is the
+        opposite shape: the rubric and its resolved context (`@HISTORY` is routinely 8k) are one
+        blob in the HUMAN message. Chaining those would store that blob once per item inside the
+        transcript — the conversation carried N times in a conversation — which costs more than
+        the one-shot it replaced. Sequential advanced columns chain through
+        `@METRIC_PREVIOUS_RESULT` instead, which is the author's explicit choice about what
+        carries over.
         """
         return self._call_and_build(config, system_prompt=ADVANCED_SYSTEM, body=resolved_text)
 
     def _call_and_build(
-        self, config: dict, *, system_prompt: str, body: str
+        self, config: dict, *, system_prompt: str, body: str, chat_id: str | None = None
     ) -> EvalResult | None:
         """The model call + output-type→result tail shared by basic and advanced grading —
         everything after the prompt is assembled. Picks the response schema from `output_type`,
@@ -605,6 +659,7 @@ class LLMJudgeEvaluator(Evaluator):
                         system_prompt=system_prompt,
                         model=model,
                         on_usage=usage.update,
+                        chat_id=chat_id,
                     )
                     return self._attach_usage(self._json_result(config, verdict.model_dump()), usage)
                 # no usable schema: free-form strict JSON (the rubric defines the shape)
@@ -622,6 +677,7 @@ class LLMJudgeEvaluator(Evaluator):
                 system_prompt=system_prompt,
                 model=model,
                 on_usage=usage.update,
+                chat_id=chat_id,
             )
         except Exception as exc:
             log.warning("llm_judge_failed", evaluator=self.score_name, level=self.level, error=str(exc))

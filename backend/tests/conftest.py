@@ -19,6 +19,11 @@ os.environ["RESEND_API_KEY"] = ""
 # .env points at — i.e. the developer's own workspace, once per run. Tests assert on the recording
 # payload (`domain/introspection.py`), which is pure; nothing here needs it emitted.
 os.environ["INTROSPECTION_ENABLED"] = "false"
+# Third time for the same class of bug: the judge's durable conversations live in Postgres, and a
+# developer's machine has one listening on localhost — so the suite silently reached it, wrote
+# checkpoint rows, and behaved differently there than in CI (where nothing is listening). Tests
+# that want the chat path turn it on with a fake checkpointer.
+os.environ["EVAL_CHAT_ENABLED"] = "false"
 
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402

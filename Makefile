@@ -16,13 +16,16 @@ install:     ## sync python deps (uv, all workspace packages + provider extras) 
 	uv sync --all-packages --all-extras
 	cd frontend && pnpm install
 
-migrate: migrate-ch migrate-pg ## run all migrations
+migrate: migrate-ch migrate-pg migrate-chat ## run all migrations
 
 migrate-ch:  ## apply ClickHouse migrations
 	uv run python -m tracely.infrastructure.clickhouse.migrations
 
 migrate-pg:  ## apply Postgres (Alembic) migrations
 	cd backend && uv run alembic upgrade head
+
+migrate-chat:  ## create LangGraph's checkpoint tables (durable judge conversations)
+	uv run python -m tracely.infrastructure.llm.checkpointer
 
 seed:        ## create the default project + ingest key (tracely_dev_key)
 	uv run python -m tracely.services.seeding_service
