@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from tracely.infrastructure.db.models import (
     Agent,
+    AgentEndpoint,
     AgentVersion,
     CaseReplay,
     ClusterMember,
@@ -1017,7 +1018,14 @@ def project_data_delete(s: Session, project_id: str) -> dict[str, int]:
     wipe(
         "score_annotations", delete(ScoreAnnotation).where(ScoreAnnotation.project_id == project_id)
     )
+    # Everything that FKs to `agents` must go before it. Miss one and the whole wipe raises a
+    # ForeignKeyViolation and rolls back — the button reports "internal server error" and NOTHING
+    # is deleted, which reads as "the delete silently did nothing".
+    wipe("scenarios", delete(Scenario).where(Scenario.project_id == project_id))
     if agent_ids:
+        wipe(
+            "agent_endpoints", delete(AgentEndpoint).where(AgentEndpoint.agent_id.in_(agent_ids))
+        )
         wipe("agent_versions", delete(AgentVersion).where(AgentVersion.agent_id.in_(agent_ids)))
     wipe("agents", delete(Agent).where(Agent.project_id == project_id))
 

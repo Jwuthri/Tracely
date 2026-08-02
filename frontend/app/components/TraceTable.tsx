@@ -565,10 +565,14 @@ const SelectContext = createContext<SelectView>({
   enabled: false, selected: new Set(), toggle: () => {}, toggleAll: () => {}, allSelected: false, someSelected: false,
 });
 
-// Control cells the table always renders (chevron · run · copy · agents) + the optional select column.
-// Every colSpan in the table derives from this, so adding the column can't desync the empty rows.
+// Control cells the table always renders, in order: chevron · run · copy · agents. The header, the
+// body rows and every colSpan all count off this ONE constant — they used to be three independent
+// hardcoded lists, so adding a control rendered a 4th body cell against a 3-cell header and shifted
+// every data column one to the left.
+const CTRL_CELLS = 4;
+
 function useCtrlCount(): number {
-  return 4 + (useContext(SelectContext).enabled ? 1 : 0);
+  return CTRL_CELLS + (useContext(SelectContext).enabled ? 1 : 0);
 }
 
 // Tracely's own runs, listed alongside real ones while the Evals toggle is on. They get a tag
@@ -1419,9 +1423,9 @@ function HeaderRow({ cols }: { cols: Col[] }) {
           />
         </th>
       )}
-      <th style={CTRL} className={HEAD_TH} />
-      <th style={CTRL} className={HEAD_TH} />
-      <th style={CTRL} className={HEAD_TH} />
+      {Array.from({ length: CTRL_CELLS }, (_, i) => (
+        <th key={`ctrl-${i}`} style={CTRL} className={HEAD_TH} />
+      ))}
       {cols.map((col, i) => (
         <th
           key={col.key}

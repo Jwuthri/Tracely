@@ -19,9 +19,27 @@ async function apiGet(path: string): Promise<Response> {
   return fetch(`${API}${path}`, { headers: await authHeaders(), cache: "no-store" });
 }
 
+/** A signed-out response is not an application error — send the user to sign in again.
+ *
+ *  The middleware only checks that a session cookie EXISTS, so an EXPIRED one walks straight past
+ *  it and fails here instead; sessions last 7 days, so every user hits this eventually. Left to the
+ *  error boundary it renders "Something went wrong" over a stack trace, which reads as "the product
+ *  is broken" rather than "your session ended".
+ *
+ *  403 lands here too: the active-workspace cookie can outlive your membership of that workspace
+ *  (removed from it, or it was deleted), and every request then 403s with no way out from the UI.
+ *  `/login` clears both cookies, which is exactly the reset that case needs.
+ */
+async function redirectIfSignedOut(res: Response): Promise<void> {
+  if (res.status !== 401 && res.status !== 403) return;
+  const { redirect } = await import("next/navigation");
+  redirect("/login?expired=1");
+}
+
 /** GET + parse JSON; throws `ApiError` on any non-2xx (→ error boundary). */
 async function getJson<T>(path: string): Promise<T> {
   const res = await apiGet(path);
+  await redirectIfSignedOut(res);
   if (!res.ok) throw new ApiError(res.status, path);
   return res.json() as Promise<T>;
 }
@@ -30,6 +48,7 @@ async function getJson<T>(path: string): Promise<T> {
 async function getJsonOrNull<T>(path: string): Promise<T | null> {
   const res = await apiGet(path);
   if (res.status === 404) return null;
+  await redirectIfSignedOut(res);
   if (!res.ok) throw new ApiError(res.status, path);
   return res.json() as Promise<T>;
 }

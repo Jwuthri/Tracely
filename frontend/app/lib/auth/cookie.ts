@@ -7,7 +7,13 @@ import { ACTIVE_PROJECT_COOKIE, SESSION_COOKIE } from "./index";
 
 const MAX_AGE = Number(process.env.SESSION_TTL_SECONDS ?? 604800); // 7 days
 
+/** Starts a session. Also drops any active-workspace choice: it belonged to the PREVIOUS session,
+ *  and a workspace the new user isn't a member of makes every request 403 with no way out of it
+ *  from the UI — sign in, get bounced, sign in again. Cleared here rather than at each call site so
+ *  a future auth entry point can't forget. `authHeaders()` then omits the header and the backend
+ *  picks the user's first membership. */
 export async function setSessionCookie(token: string): Promise<void> {
+  await clearActiveProject();
   (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax", // survives the post-login top-level redirect and the accept-invite link
