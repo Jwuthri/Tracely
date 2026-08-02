@@ -240,3 +240,35 @@ def test_conversation_targeting_uses_the_thread_as_the_sampling_subject():
     got = svc._apply_conversation_targeting("p", specs, spans, "th-1")
 
     assert [s["score_name"] for s in got] == ["keep"]
+
+
+# ── a whole-thread pass writes whole-thread scores, or nothing ────────────────
+
+
+def test_the_conversation_pass_drops_span_scoped_results(capsys):
+    """This pass writes with NO trace_id, so only CONVERSATION-level results are addressable —
+    readers find them by session_id. A span-scoped evaluator misconfigured to CONVERSATION level
+    (`tool_success` keeps its TOOL level) would otherwise be written with an empty trace_id: rows
+    no query in the system can reach, silently."""
+    from tracely.domain.evaluation.results import EvalResult
+    from tracely.services.evaluation_service import EvaluationService
+
+    written: list = []
+    svc = EvaluationService.__new__(EvaluationService)
+    svc.trace_reader = type("R", (), {
+        "read_thread_spans": staticmethod(
+            lambda p, th: [{"span_id": "s1", "parent_span_id": "", "trace_id": "tr-1"}]
+        )
+    })()
+    svc.score_writer = type("W", (), {
+        "write_eval_scores": staticmethod(lambda *a, **kw: written.append(a[3]))
+    })()
+    svc._dispatch_specs = lambda specs, ctx: [
+        EvalResult("conv.judge", "CONVERSATION", "PASS"),
+        EvalResult("tool.success", "TOOL", "FAIL", target_span_id="s1"),
+    ]
+
+    assert svc._evaluate_conversation("p1", "th-1", [{"score_name": "x"}], None) == 1
+    assert [r.name for r in written[0]] == ["conv.judge"]
+    # Dropped, but never silently — structlog prints to stdout, so capsys is what sees it.
+    assert "tool.success" in capsys.readouterr().out

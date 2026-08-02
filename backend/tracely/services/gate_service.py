@@ -217,13 +217,16 @@ class GateService:
         # single-phase path and phase-2 grading block, instead of a suite that never ran going green.
         misconfigured = driven < 0
         driven = max(0, driven)
+        # Warnings raised WHILE driving (a stateless multi-turn suite) have to be picked up here:
+        # the assignment below replaces `gate.warnings` wholesale with the delta warnings, so
+        # anything left on the row by `_drive_scenarios` would otherwise be dropped on the floor.
+        warnings = list(gate.warnings or [])
         if misconfigured:
-            gate.warnings = ["scenarios are enabled but this agent has no endpoint configured"]
+            warnings.append("scenarios are enabled but this agent has no endpoint configured")
 
         baseline = self._baseline_gate(project_id, agent_id, gate.id)
-        warnings = delta_warnings(total_lat, total_tok, baseline)
+        warnings += delta_warnings(total_lat, total_tok, baseline)
         if misconfigured:
-            warnings = (gate.warnings or []) + warnings
             case_status = _worst(case_status, "NO_COVERAGE")
 
         gate.total = len(cases) + driven
@@ -365,6 +368,7 @@ class GateService:
         agent = self.session.get(Agent, agent_id)
         slug = agent.slug if agent else agent_id
         sim = SimulationService()
+        self._warn_if_multi_turn_is_stateless(gate, scenarios, endpoint)
 
         # Looked up once per gate, not per turn: the attacker gets the same leverage all run.
         weaknesses = (
@@ -388,6 +392,34 @@ class GateService:
         self.session.commit()
         log.info("scenario_gate_driven", gate_id=gate.id, scenarios=len(scenarios))
         return len(scenarios)
+
+    @staticmethod
+    def _warn_if_multi_turn_is_stateless(
+        gate: GateRun, scenarios: list[Scenario], endpoint: AgentEndpoint
+    ) -> None:
+        """Flag a multi-turn suite pointed at an endpoint we have no way of keeping in context.
+
+        Each turn is POSTed with the full history in `messages` AND the conversation id in
+        `session_key`, so a chat-shaped or a session-shaped API both carry context. An endpoint
+        that reads neither — the bespoke `{"message": "..."}` shape, with `session_key` cleared —
+        sees every turn cold. The suite still runs and still grades, but it is testing N unrelated
+        one-shot requests while reporting a conversation, and an escalating adversarial probe can
+        never land. We cannot detect what the endpoint reads; a blank `session_key` on a multi-turn
+        scenario is the one case that is visible from here, so it is the one we say out loud.
+        """
+        if endpoint.session_key:
+            return
+        multi_turn = any(
+            s.kind == "ADVERSARIAL" or len(normalize_turns(s.turns)) > 1 for s in scenarios
+        )
+        if not multi_turn:
+            return
+        warning = (
+            "multi-turn scenarios are running against an endpoint with no session key — "
+            "turn context depends entirely on the endpoint reading the `messages` array"
+        )
+        log.warning("scenario_gate_no_session_key", agent_id=gate.agent_id)
+        gate.warnings = [*(gate.warnings or []), warning]
 
     def _grade_conversations(
         self,
@@ -596,6 +628,13 @@ class GateService:
         worker with spare concurrency, where an ingest can still land while we hold a slot. It
         ends as soon as the span count stops growing, so it costs one sample when there is nothing
         more coming, and it never blocks on spans that may never arrive.
+
+        Every enabled evaluator runs, WITHOUT targeting or sampling. Those knobs exist to control
+        judge spend on production traffic; applied here they silently thin the gate — a
+        `sampling=0.1` column grades one turn in ten, an evaluator scoped `target_env=prod` skips
+        `ci` turns entirely, and a conversation with nothing left to grade is UNGRADED, which
+        blocks the merge for a reason no one can see. A gate is an explicit run: it grades with
+        everything, like the UI's Play button.
         """
         if not trace_ids:
             return
@@ -609,6 +648,9 @@ class GateService:
                 break
             seen = count
 
+        # Passing specs explicitly is what turns targeting + sampling off (`evaluate_trace` only
+        # applies them when it loads the list itself). Loaded once, not once per turn.
+        specs = self.eval_service.load_enabled_evaluators(project_id)
         threads: list[str] = []
         for trace_id in trace_ids:
             try:
@@ -616,7 +658,7 @@ class GateService:
                 # rather than queued (the gate holds the worker's only slot under `--pool=solo`),
                 # but still once per conversation instead of once per turn.
                 res = self.eval_service.evaluate_trace(
-                    project_id, trace_id, skip_conversation=True
+                    project_id, trace_id, specs=specs, skip_conversation=True
                 )
                 thread = res.get("thread_id")
                 if thread and thread not in threads:
@@ -625,7 +667,9 @@ class GateService:
                 log.warning("scenario_turn_eval_failed", trace_id=trace_id, error=str(exc))
         for thread in threads:
             try:
-                self.eval_service.evaluate_conversation(project_id, thread)
+                self.eval_service.evaluate_conversation(
+                    project_id, thread, apply_targeting=False
+                )
             except Exception as exc:
                 log.warning("scenario_conv_eval_failed", thread_id=thread, error=str(exc))
 

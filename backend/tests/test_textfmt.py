@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from tracely.domain.evaluation.text import readable_io, request_for
+from tracely.domain.evaluation.text import answer_for, readable_io, request_for
 from tracely.infrastructure.text import extract_text, message_text
 
 
@@ -120,3 +120,46 @@ def test_a_step_input_renders_the_whole_exchange_not_just_the_system_prompt():
 def test_readable_io_leaves_tool_json_and_single_messages_alone():
     assert readable_io('{"open_count": 1}') == '{"open_count": 1}'
     assert readable_io('{"role": "assistant", "content": "done"}') == "done"
+
+
+def test_the_request_is_read_from_the_fullest_record_in_the_trace():
+    """The root often carries a single message — the session's opening line, stamped on every turn
+    by the instrumentation — while the real history sits on the generation underneath. Answering
+    from the root made every turn of a 6-turn conversation read as "heyy"."""
+    root = {"input": '{"role": "user", "content": "heyy"}', "type": "AGENT"}
+    generation = {"input": _hist(
+        ("system", "You are Realize."),
+        ("user", "heyy"),
+        ("assistant", "Please provide your CPF."),
+        ("user", "11144477735"),
+    )}
+    assert request_for(root, [root, generation]) == "11144477735"
+
+
+def test_a_richer_root_still_wins_over_a_sub_agents_derived_prompt():
+    """Ties and near-ties go to the entry point: a sub-agent is handed a rewritten task, and that
+    task is not what the user asked."""
+    root = {"input": _hist(
+        ("system", "s"), ("user", "first"), ("assistant", "a"), ("user", "the real request"),
+    )}
+    sub = {"input": _hist(("system", "s"), ("user", "look up the CPF"))}
+    assert request_for(root, [root, sub]) == "the real request"
+
+
+# ── the graded answer is the displayed answer ─────────────────────────────────
+
+_LEVELS = ("TOOL", "GENERATION", "CHAIN")
+
+
+def test_the_answer_is_the_last_generation_not_a_framework_root_signal():
+    """`answer_for` used to take the root's output first, which put it out of step with the SQL the
+    whole UI reads through — and graded LangGraph's `__end__` as the agent's reply."""
+    root = {"type": "CHAIN", "output": "__end__"}
+    gen = {"type": "GENERATION", "output": "your refund is on its way"}
+    assert answer_for(root, [root, gen], *_LEVELS) == "your refund is on its way"
+
+
+def test_the_root_answers_when_no_generation_did():
+    root = {"type": "AGENT", "output": "handled"}
+    tool = {"type": "TOOL", "output": '{"status": "ok"}'}
+    assert answer_for(root, [root, tool], *_LEVELS) == "handled"

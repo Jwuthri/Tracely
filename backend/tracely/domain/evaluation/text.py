@@ -29,8 +29,13 @@ def content_text(value: Any) -> str:
     return value
 
 
-def first_io(spans: list[dict], key: str) -> str:
-    """Find the latest span with a non-empty `key` (input/output) and return its readable text."""
+def last_io(spans: list[dict], key: str) -> str:
+    """The LATEST span with a non-empty `key` (input/output), as readable text.
+
+    Named for what it does. It was `first_io`, which read as "the first input in the trace" — the
+    opposite of the body — and that mismatch is how it ended up standing in for the user's request.
+    It is a last-resort fallback only; `request_for` / `answer_for` are the real accessors.
+    """
     for s in reversed(spans):
         if s.get(key):
             return content_text(s[key])
@@ -103,34 +108,50 @@ def readable_io(value: Any, per_message: int = 400) -> str:
 
 
 def request_for(root: dict, spans: list[dict]) -> str:
-    """The user's request for THIS message — the LAST user turn in it, not the first.
+    """The user's request for THIS message — the LAST thing the human said, not the first.
 
-    A span's stored input is usually the whole message array the model was called with (system +
-    every earlier turn + the new one), and `extract_text` returns the FIRST readable text in it —
-    the system prompt, or turn 1. So a judge graded turn 6's answer against turn 1's question,
-    which is exactly as wrong as it sounds. Symmetric to `answer_for`, which already takes the
-    LAST answer; falls back to the old first-text behavior when nothing carries a role.
+    Read from the FULLEST record of the conversation anywhere in the trace, which is the whole
+    point. Two traps, and taking the first source that answered fell into both:
+
+    - `extract_text` returns the first readable text in a message array — the system prompt, or
+      turn 1. So a judge graded turn 6's answer against turn 1's question.
+    - the root often carries a single message (the session's opening line, stamped on every turn
+      by the instrumentation) while the real history sits on the generation underneath. Stopping
+      at the root meant every turn of a 6-turn conversation read as "heyy".
+
+    So: score every candidate by how much conversation it holds, take the richest, and read its
+    last user turn. Ties go to the earlier candidate, which is the root — the entry point beats a
+    sub-agent's derived prompt. Symmetric to `answer_for`, which already takes the LAST answer.
     """
-    for value in (root.get("input"), *(s.get("input") for s in reversed(spans))):
-        text = _last_user_text(value)
-        if text:
-            return text
-    return content_text(root.get("input")) or first_io(spans, "input")
+    best: list[dict] = []
+    for value in (root.get("input"), *(s.get("input") for s in spans)):
+        msgs = _chat_messages(value)
+        if len(msgs) > len(best):
+            best = msgs
+    text = _last_user_text(best)
+    if text:
+        return text
+    return content_text(root.get("input")) or last_io(spans, "input")
 
 
 def answer_for(root: dict, spans: list[dict], TOOL: str, GENERATION: str, CHAIN: str) -> str:
     """The agent's final answer for judge grading.
 
-    Order of preference: the root span's output → the LAST GENERATION span (skips CHAIN/AGENT
-    framework routing signals like LangGraph's `__end__`) → any non-TOOL/non-CHAIN output → the
-    fallback `first_io(spans, 'output')`.
+    Order of preference: the LAST GENERATION span → the root span's output → any non-TOOL/non-CHAIN
+    output → the fallback `last_io(spans, 'output')`.
+
+    The root used to come first, which put this out of step with the SQL the whole UI reads through
+    (`sessions_overview` / `session_turns` both take the latest GENERATION first). Two consequences,
+    both real: a trace could DISPLAY one answer and be GRADED on another, and a framework root whose
+    output is a routing signal — LangGraph's `__end__` — was graded as the agent's reply. Same order
+    in both places now, so what you read in the table is what the judge read.
     """
-    if root.get("output"):
-        return content_text(root["output"])
     for s in reversed(spans):
         if s.get("type") == GENERATION and s.get("output"):
             return content_text(s["output"])
+    if root.get("output"):
+        return content_text(root["output"])
     for s in reversed(spans):
         if s.get("output") and s.get("type") not in (TOOL, CHAIN):
             return content_text(s["output"])
-    return first_io(spans, "output")
+    return last_io(spans, "output")

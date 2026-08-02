@@ -78,6 +78,13 @@ _DEFAULT_MAX_SPANS = 30  # cost guard for per-step judges
 # the transcript it exists to help grade.
 _TRUNC_CATALOG = 6000
 
+# The system prompt for an ADVANCED grade. Deliberately says nothing about what to grade: the
+# user's resolved template is the rubric AND the context, and it arrives as the human message.
+ADVANCED_SYSTEM = (
+    "You are an evaluator. Follow the instructions in the message exactly and return the "
+    "structured verdict you are asked for — nothing else."
+)
+
 
 # ── structured response schemas (create_agent response_format) ───────────────
 
@@ -296,7 +303,13 @@ class LLMJudgeEvaluator(Evaluator):
         """One grade for the trace: user request vs final answer, grounded in tool results."""
         user_in = request_for(ctx.root, ctx.spans)
         answer = answer_for(ctx.root, ctx.spans, TOOL, GENERATION, CHAIN)
-        if not answer:
+        # An empty answer used to return no result at all, so the worst outcome there is — the
+        # agent crashed, timed out, or replied with nothing — produced no score, and the cell read
+        # "not graded yet" rather than a failure. Grade it against the rubric like anything else,
+        # stating plainly that there was no answer; the rubric decides (a "did it refuse?" column
+        # may well call that a PASS). Only a run with neither a request nor an answer is skipped —
+        # there is genuinely nothing to grade.
+        if not answer and not user_in:
             return []
         grounding = ""
         tool_outputs = [
@@ -320,7 +333,7 @@ class LLMJudgeEvaluator(Evaluator):
         body = (
             f"{history}"
             f"User request:\n{_clip(user_in, 2000)}\n\n"
-            f"Agent answer:\n{_clip(answer, 2000)}{grounding}"
+            f"Agent answer:\n{_clip(answer, 2000) or '(the agent produced no answer)'}{grounding}"
         )
         result = self._grade(config, body, previous=_previous_from_config(config))
         return [result] if result else []
@@ -559,11 +572,17 @@ class LLMJudgeEvaluator(Evaluator):
         return self._call_and_build(config, system_prompt=rubric, body=body)
 
     def _grade_advanced(self, config: dict, resolved_text: str) -> EvalResult | None:
-        """Advanced grade: the resolved `@VARIABLE` template IS the prompt — used as both the
-        system prompt and the human message (the user's placeholders already carry every piece of
-        context they chose). No auto previous/deps append — `@METRIC_PREVIOUS_RESULT` handles
-        sequential chaining inside the template."""
-        return self._call_and_build(config, system_prompt=resolved_text, body=resolved_text)
+        """Advanced grade: the resolved `@VARIABLE` template IS the prompt — the user's
+        placeholders already carry every piece of context they chose, so it goes in the human
+        message and nothing is auto-appended (`@METRIC_PREVIOUS_RESULT` handles sequential
+        chaining inside the template).
+
+        It used to be passed as BOTH the system prompt and the human message. That doubled the
+        input tokens of every advanced grade — an `@HISTORY` template is 8k characters — and
+        repeating a rubric verbatim measurably degrades instruction-following on several models.
+        Sent once now, under a fixed preamble that only says what kind of job this is.
+        """
+        return self._call_and_build(config, system_prompt=ADVANCED_SYSTEM, body=resolved_text)
 
     def _call_and_build(
         self, config: dict, *, system_prompt: str, body: str

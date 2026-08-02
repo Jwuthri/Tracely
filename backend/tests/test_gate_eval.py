@@ -172,3 +172,50 @@ def test_quality_cannot_rescue_a_structural_fail():
     q = [{"score_name": "tracely.run.quality", "verdict": "PASS", "value": 0.9, "comment": "good"}]
     verdict, _ = apply_quality("FAIL", {"missing_tools": ["get_weather"]}, q, blocks=True)
     assert verdict == "FAIL"
+
+
+# ── the gate grades with everything, not a sampled subset ────────────────────
+
+
+class _RecordingEvalService:
+    """Captures how `_evaluate_turns` calls into evaluation."""
+
+    def __init__(self):
+        self.trace_calls: list[dict] = []
+        self.conv_calls: list[dict] = []
+
+    def load_enabled_evaluators(self, project_id):
+        return [{"score_name": "q", "level": "AGENT_RUN", "kind": "llm_judge", "config": {}}]
+
+    def evaluate_trace(self, project_id, trace_id, **kw):
+        self.trace_calls.append(kw)
+        return {"scores": 1, "thread_id": "th-1"}
+
+    def evaluate_conversation(self, project_id, thread_id, **kw):
+        self.conv_calls.append(kw)
+        return {"scores": 1}
+
+
+def _gate_service(eval_service):
+    from tracely.services.gate_service import GateService
+
+    svc = GateService.__new__(GateService)
+    svc.eval_service = eval_service
+    svc.trace_reader = type("R", (), {"span_count": staticmethod(lambda *a: 0)})()
+    return svc
+
+
+def test_the_gate_grades_without_targeting_or_sampling(monkeypatch):
+    """Targeting/sampling exist to control judge spend on production traffic. Applied to a gate they
+    silently thin the suite — a `sampling=0.1` column grades one turn in ten, an evaluator scoped
+    `target_env=prod` skips every `ci` turn — and a conversation left with nothing graded is
+    UNGRADED, which blocks the merge for a reason nobody can see."""
+    monkeypatch.setattr(settings, "gate_scenario_span_grace_s", 0)
+    ev = _RecordingEvalService()
+    _gate_service(ev)._evaluate_turns("p1", ["tr-1", "tr-2"])
+
+    # Specs passed explicitly is what turns targeting + sampling off in `evaluate_trace`.
+    assert [c["specs"][0]["score_name"] for c in ev.trace_calls] == ["q", "q"]
+    assert all(c["skip_conversation"] for c in ev.trace_calls)
+    # One conversation pass for the thread, also ungated.
+    assert ev.conv_calls == [{"apply_targeting": False}]

@@ -118,6 +118,9 @@ class TraceReader:
         rows = self.client.query(
             "SELECT trace_id, name, comment FROM scores FINAL WHERE project_id = {p:String} "
             "AND source = 'EVAL' AND verdict = 'FAIL' AND evaluation_case_id = '' "
+            # `is_deleted = 0` like `scores_by_trace`: FINAL collapses versions of a row, it does
+            # not drop tombstoned ones, so without this a deleted score still names a failure.
+            "AND is_deleted = 0 "
             "LIMIT {n:UInt32}",
             parameters={"p": project_id, "n": limit},
         ).result_rows
@@ -150,12 +153,18 @@ class TraceReader:
 
     def span_count(self, project_id: str, trace_ids: Iterable[str]) -> int:
         """Total spans across `trace_ids`. The gate samples this to tell when a customer's own
-        spans have finished arriving on an emulated conversation (count stops growing)."""
+        spans have finished arriving on an emulated conversation (count stops growing).
+
+        FINAL because this is a *stability* signal: an unmerged duplicate of a span already counted
+        looks exactly like a new span arriving, so the poll keeps waiting for traffic that already
+        landed — or, once merged between two samples, the count DROPS and the loop reads that as
+        settled while spans are still coming.
+        """
         uniq = sorted({t for t in trace_ids if t})
         if not uniq:
             return 0
         rows = self.client.query(
-            "SELECT count() FROM events WHERE project_id = {p:String} "
+            "SELECT count() FROM events FINAL WHERE project_id = {p:String} "
             "AND trace_id IN {t:Array(String)}",
             parameters={"p": project_id, "t": uniq},
         ).result_rows

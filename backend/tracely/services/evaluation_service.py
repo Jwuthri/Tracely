@@ -262,6 +262,14 @@ class EvaluationService:
             "scores": len(results) + conv_count,
             "failures": len(fail_results),
             "thread_id": thread_id,
+            # Is the deferred whole-thread pass worth scheduling at all? It exists for two kinds of
+            # column — CONVERSATION-level ones, and sequential ones that need the turns in order —
+            # so it is only wasted work when the project has neither. The specs are already loaded
+            # here, so answering costs nothing and saves a queued task plus its DB round-trip on
+            # every message of the common batch-only setup.
+            "needs_thread_pass": any(
+                s["level"] == CONVERSATION or _execution_mode(s) == "sequential" for s in specs
+            ),
         }
 
     def evaluate_thread(
@@ -394,9 +402,16 @@ class EvaluationService:
     # ── internals ─────────────────────────────────────────────────────────────
 
     def evaluate_conversation(
-        self, project_id: str, thread_id: str, on_result: OnResult | None = None
+        self,
+        project_id: str,
+        thread_id: str,
+        on_result: OnResult | None = None,
+        apply_targeting: bool = True,
     ) -> dict:
         """Grade a thread with its CONVERSATION-level evaluators, once.
+
+        `apply_targeting=False` grades with every enabled column regardless of target/sampling —
+        for explicit runs (the CI gate) where thinning the suite would silently weaken it.
 
         Split out of `evaluate_trace` because it must NOT run per turn: the ingest path calls
         `evaluate_trace` for every turn, so an inline conversation pass re-graded the whole thread
@@ -411,7 +426,7 @@ class EvaluationService:
             return {"scores": 0}
         return {
             "scores": self._evaluate_conversation(
-                project_id, thread_id, specs, on_result, apply_targeting=True
+                project_id, thread_id, specs, on_result, apply_targeting=apply_targeting
             )
         }
 
@@ -433,10 +448,21 @@ class EvaluationService:
             return 0
         ctx = RunContext(project_id, "", "", spans, root_span(spans), thread_id=thread_id)
         results = self._dispatch_specs(specs, ctx)
-        if results:
-            self.score_writer.write_eval_scores(project_id, "", "", results, thread_id=thread_id)
-            self._emit(on_result, results, trace_id="", thread_id=thread_id)
-        return len(results)
+        # This pass writes with NO trace_id, so only CONVERSATION-level results are addressable
+        # (readers find them by session_id). A span-scoped evaluator misconfigured to CONVERSATION
+        # level — `tool_success` is one, its results stay TOOL-level — would otherwise be written
+        # with an empty trace_id: rows no query in the system can reach, silently. Drop and say so.
+        keep = [r for r in results if r.level == CONVERSATION]
+        if len(keep) != len(results):
+            log.warning(
+                "conversation_pass_dropped_span_scoped_results",
+                thread_id=thread_id,
+                evaluators=sorted({r.name for r in results if r.level != CONVERSATION}),
+            )
+        if keep:
+            self.score_writer.write_eval_scores(project_id, "", "", keep, thread_id=thread_id)
+            self._emit(on_result, keep, trace_id="", thread_id=thread_id)
+        return len(keep)
 
     def _apply_conversation_targeting(
         self, project_id: str, specs: list[dict], spans: list[dict], thread_id: str

@@ -60,7 +60,9 @@ async def traces_overview(
                anyIf(name, parent_span_id = '')      AS root_name,
                anyIf(agent_id, parent_span_id = '')  AS agent_id,
                maxIf(1, level = 'ERROR')             AS has_error
-        FROM events
+        -- FINAL, like every other read: without it a span re-delivered by a retrying exporter is
+        -- still two unmerged rows here, and `count()` reports a span total nothing else agrees with.
+        FROM events FINAL
         WHERE project_id = {p:String} AND internal_kind = ''
         GROUP BY trace_id
         ORDER BY ts DESC
@@ -198,7 +200,7 @@ async def score_samples_in_window(
             "FROM scores AS s FINAL "
             "INNER JOIN ("
             "  SELECT trace_id FROM events FINAL WHERE project_id = {p:String} "
-            "  AND agent_id = {ag:String} AND env != 'ci' "
+            f"  AND agent_id = {{ag:String}} AND env != 'ci' AND {_REAL} "
             "  AND start_time >= now() - toIntervalMinute({w:UInt32}) "
             "  GROUP BY trace_id"
             ") AS e USING trace_id "
@@ -235,7 +237,11 @@ async def trace_failure_samples_in_window(
         "WITH trace_meta AS ( "
         "  SELECT trace_id, anyIf(agent_id, parent_span_id = '') AS root_agent "
         "  FROM events FINAL "
-        "  WHERE project_id = {p:String} AND env != 'ci' "
+        # `_REAL` is load-bearing here, not tidiness. Tracely records its own evaluations as
+        # traces, at `env='prod'`, roughly ONE PER GRADED TRACE. Without this they land in the
+        # denominator carrying no scores — so they all read PASS, the sample count doubles and the
+        # measured failure rate halves. A monitor set to fire at 20% would need 40% real failures.
+        f"  WHERE project_id = {{p:String}} AND env != 'ci' AND {_REAL} "
         "  AND start_time >= now() - toIntervalMinute({w:UInt32}) "
         "  GROUP BY trace_id"
         "), trace_verdict AS ( "
@@ -499,9 +505,17 @@ async def session_turns(
             dateDiff('millisecond', min(start_time), max(coalesce(end_time, start_time))) AS latency_ms,
             min(start_time)                                               AS ts,
             maxIf(1, trace_id IN ({_FAILING}))                            AS failing
+          -- Narrow to the thread INSIDE the subquery. The outer WHERE alone made opening one
+          -- conversation group every span in the project first and throw all but one thread away:
+          -- O(project) per page view. A thread's traces either carry its conversation_id or ARE it
+          -- (a trace with no conversation is its own 1-turn thread) — same predicate the sync
+          -- reader's `read_thread_spans` uses, and the bloom filter on conversation_id covers it.
           FROM events FINAL WHERE project_id = {{p:String}}
+            AND (conversation_id = {{th:String}} OR trace_id = {{th:String}})
           GROUP BY trace_id
         )
+        -- Still guarded: a trace whose id happens to equal this thread's while ALSO carrying a
+        -- different conversation_id belongs to that other thread, not this one.
         WHERE if(conv != '', conv, trace_id) = {{th:String}}
         ORDER BY ts ASC
         """,

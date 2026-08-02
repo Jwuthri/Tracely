@@ -1936,7 +1936,9 @@ export function TraceTable({
             <tbody>
               {conversations.length === 0 ? (
                 <tr>
-                  <td colSpan={3 + (selectView.enabled ? 1 : 0) + cols.length} className="px-6 py-14 text-center text-sm text-fg-faint">
+                  {/* CTRL_CELLS, not a hardcoded count — this row is outside the SelectContext
+                      provider below, so it cannot call useCtrlCount(), but it must agree with it. */}
+                  <td colSpan={CTRL_CELLS + (selectView.enabled ? 1 : 0) + cols.length} className="px-6 py-14 text-center text-sm text-fg-faint">
                     No conversations.
                   </td>
                 </tr>

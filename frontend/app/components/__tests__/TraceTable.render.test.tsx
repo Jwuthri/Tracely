@@ -166,3 +166,33 @@ describe("TraceTable State Δ columns", () => {
     expect(screen.queryByText("State Δ")).not.toBeInTheDocument();
   });
 });
+
+// The header, the body rows and the empty-state colSpan all count control cells independently.
+// They drifted once — a 4th control cell was added to the body against a 3-cell header, which
+// shifted every data column one to the left, so a verdict rendered under the wrong metric's name.
+// Nothing about that fails loudly; it just displays the wrong thing. Hence a test.
+describe("TraceTable column alignment", () => {
+  const cells = (row: Element) => row.querySelectorAll(":scope > th, :scope > td").length;
+
+  it("gives every body row exactly as many cells as the header", async () => {
+    const { container } = render(<TraceTable conversations={[conv()]} />);
+    await screen.findByText("Conversation");
+    const [header, ...body] = Array.from(container.querySelectorAll("tr"));
+    expect(body.length).toBeGreaterThan(0);
+    body.forEach((row) => expect(cells(row)).toBe(cells(header)));
+  });
+
+  it("keeps them aligned with the select column on", async () => {
+    const { container } = render(<TraceTable conversations={[conv()]} onDeleted={() => {}} />);
+    await screen.findByText("Conversation");
+    const [header, ...body] = Array.from(container.querySelectorAll("tr"));
+    body.forEach((row) => expect(cells(row)).toBe(cells(header)));
+  });
+
+  it("spans the empty state across the full width", async () => {
+    const { container } = render(<TraceTable conversations={[]} />);
+    await screen.findByText(/No conversations/i);
+    const [header, empty] = Array.from(container.querySelectorAll("tr"));
+    expect(Number(empty.querySelector("td")!.getAttribute("colSpan"))).toBe(cells(header));
+  });
+});

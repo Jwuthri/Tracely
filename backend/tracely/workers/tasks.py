@@ -72,14 +72,18 @@ def evaluate_run_task(self, project_id: str, trace_id: str, gen: int = 0) -> dic
     except Exception as exc:
         log.warning("rolling_summary_ingest_failed", trace_id=trace_id, error=str(exc))
 
-    # Conversation-level columns, debounced on the THREAD: every turn schedules one and only the
-    # last one standing runs, so the thread is graded once it stops growing. Same trailing-debounce
-    # mechanism as the per-trace one above, keyed by thread.
-    thread_id = result.get("thread_id") or trace_id
-    cgen = eval_debounce.bump(project_id, _CONV_KEY.format(thread=thread_id))
-    evaluate_conversation_task.apply_async(
-        (project_id, thread_id, cgen), countdown=settings.eval_debounce_seconds
-    )
+    # The whole-thread pass (conversation columns + sequential message columns), debounced on the
+    # THREAD: every turn schedules one and only the last one standing runs, so the thread is graded
+    # once it stops growing. Same trailing-debounce mechanism as the per-trace one above, keyed by
+    # thread. Skipped outright when the project has neither kind of column — `evaluate_trace`
+    # already knows, and a task whose only job is to discover it has nothing to do is a queue hop
+    # plus a DB round-trip on every message.
+    if result.get("needs_thread_pass"):
+        thread_id = result.get("thread_id") or trace_id
+        cgen = eval_debounce.bump(project_id, _CONV_KEY.format(thread=thread_id))
+        evaluate_conversation_task.apply_async(
+            (project_id, thread_id, cgen), countdown=settings.eval_debounce_seconds
+        )
     return result
 
 

@@ -10,5 +10,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     headers: await authHeaders(),
     cache: "no-store",
   });
-  return NextResponse.json(await r.json(), { status: r.status });
+  // A backend that fell over answers in HTML, not JSON, and `r.json()` on that throws — turning a
+  // readable 502 into an opaque 500 from this route. Pass the status through either way.
+  const body = await r.text();
+  try {
+    return NextResponse.json(JSON.parse(body), { status: r.status });
+  } catch {
+    return NextResponse.json({ detail: body.slice(0, 300) || r.statusText }, { status: r.status });
+  }
 }

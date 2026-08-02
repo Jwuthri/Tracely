@@ -335,9 +335,11 @@ def test_usage_metadata_maps_to_strings():
 # ── advanced (template) mode ─────────────────────────────────────────────────
 
 
-def test_advanced_resolves_template_as_both_system_and_human(monkeypatch):
-    """is_advanced=True: the resolved `@VARIABLE` prompt IS the prompt — fed as both the system
-    prompt and the human message, with NO auto-injected trace context."""
+def test_advanced_sends_the_resolved_template_as_the_human_message(monkeypatch):
+    """is_advanced=True: the resolved `@VARIABLE` prompt IS the prompt — carried ONCE, as the human
+    message, with NO auto-injected trace context and a fixed system preamble."""
+    from tracely.domain.evaluation.evaluators.llm_judge import ADVANCED_SYSTEM
+
     systems: list = []
     prompts: list = []
     _stub_structured(monkeypatch, {"score": 0.9, "reason": "ok"}, prompts=prompts, systems=systems)
@@ -348,8 +350,8 @@ def test_advanced_resolves_template_as_both_system_and_human(monkeypatch):
     }
     results = _judge(RUN).run(_ctx([_span(input="ping", output="pong")]), config)
     assert len(results) == 1 and results[0].verdict == "PASS"
-    resolved = "Grade: pong (asked: ping)"
-    assert systems == [resolved] and prompts == [resolved]
+    assert prompts == ["Grade: pong (asked: ping)"]
+    assert systems == [ADVANCED_SYSTEM]
 
 
 def test_advanced_history_uses_full_thread_spans(monkeypatch):
@@ -394,3 +396,40 @@ def test_needs_thread_context_gates_on_conversation_scoped_vars():
     assert _needs_thread_context([step_local]) is False  # step-local pays nothing
     assert _needs_thread_context([basic]) is False
     assert _needs_thread_context([convo]) is True
+
+
+# ── an unanswered run is graded, not skipped ──────────────────────────────────
+
+
+def test_a_run_with_no_answer_is_still_graded(monkeypatch):
+    """It used to return no result at all, so the worst outcome there is — the agent crashed,
+    timed out, or replied with nothing — produced no score and the cell read "not graded yet"."""
+    prompts: list = []
+    _stub_structured(monkeypatch, {"score": 0.0, "reason": "no answer"}, prompts=prompts)
+    spans = [_span(output="", input="where is my refund?")]
+    results = _judge(RUN).run(_ctx(spans), {"prompt": "Grade.", "threshold": 0.6})
+    assert [r.verdict for r in results] == ["FAIL"]
+    assert "(the agent produced no answer)" in prompts[0]
+
+
+def test_a_run_with_neither_request_nor_answer_is_skipped(monkeypatch):
+    """Nothing to grade is not the same as a failure — don't spend a judge call on it."""
+    _stub_structured(monkeypatch, {"score": 1.0, "reason": "x"})
+    assert _judge(RUN).run(_ctx([_span(input="", output="")]), {"prompt": "Grade."}) == []
+
+
+# ── the advanced template is sent once, not twice ─────────────────────────────
+
+
+def test_the_advanced_template_is_not_sent_as_both_system_and_message(monkeypatch):
+    """It used to ride in both slots: double the input tokens on every advanced grade, and a
+    rubric repeated verbatim measurably degrades instruction-following."""
+    from tracely.domain.evaluation.evaluators.llm_judge import ADVANCED_SYSTEM
+
+    prompts: list = []
+    systems: list = []
+    _stub_structured(monkeypatch, {"score": 0.9, "reason": "ok"}, prompts=prompts, systems=systems)
+    config = {"is_advanced": True, "prompt": "Grade @CURRENT_MESSAGE.output", "threshold": 0.6}
+    _judge(RUN).run(_ctx([_span()]), config)
+    assert systems == [ADVANCED_SYSTEM]
+    assert prompts[0] != ADVANCED_SYSTEM and "Grade" in prompts[0]

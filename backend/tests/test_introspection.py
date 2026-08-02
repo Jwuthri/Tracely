@@ -396,7 +396,7 @@ def test_ingest_defers_the_conversation_pass_instead_of_running_it_per_message(m
     def fake_trace(self, p, t, **kw):
         calls["skip"] = kw.get("skip_conversation")
         calls["mode"] = kw.get("execution_mode")
-        return {"scores": 1, "thread_id": "th-1"}
+        return {"scores": 1, "thread_id": "th-1", "needs_thread_pass": True}
 
     def fake_bump(p, key):
         calls["key"] = key
@@ -434,3 +434,40 @@ def test_only_the_last_scheduled_conversation_pass_runs(monkeypatch):
     }
     tasks.evaluate_conversation_task.run("p1", "th-1", 3)
     assert ran == [("th-1", "sequential")]
+
+
+# ── the deferred thread pass is only scheduled when there is one to run ───────
+
+
+def _run_ingest_eval(monkeypatch, evaluate_result: dict) -> dict:
+    from tracely.workers import tasks
+
+    calls: dict = {}
+    monkeypatch.setattr(
+        tasks.EvaluationService, "evaluate_trace",
+        lambda self, p, t, **kw: evaluate_result,
+    )
+    monkeypatch.setattr(tasks.eval_debounce, "is_latest", lambda p, t, g: True)
+    monkeypatch.setattr(tasks.eval_debounce, "bump", lambda p, key: 7)
+    monkeypatch.setattr(
+        tasks.evaluate_conversation_task, "apply_async",
+        lambda args, **kw: calls.setdefault("scheduled", args),
+    )
+    tasks.evaluate_run_task.run("p1", "tr-1")
+    return calls
+
+
+def test_no_thread_pass_is_scheduled_when_no_column_needs_one(monkeypatch):
+    """A project with only batch message columns has nothing for the thread pass to do, so the
+    task existed only to find that out — a queue hop and a DB round-trip on every message."""
+    calls = _run_ingest_eval(
+        monkeypatch, {"scores": 1, "thread_id": "th-1", "needs_thread_pass": False}
+    )
+    assert "scheduled" not in calls
+
+
+def test_a_conversation_or_sequential_column_still_schedules_it(monkeypatch):
+    calls = _run_ingest_eval(
+        monkeypatch, {"scores": 1, "thread_id": "th-1", "needs_thread_pass": True}
+    )
+    assert calls["scheduled"] == ("p1", "th-1", 7)

@@ -36,6 +36,16 @@ CREATE TABLE IF NOT EXISTS scores
     INDEX idx_scores_eval_case evaluation_case_id TYPE bloom_filter(0.01) GRANULARITY 1
 )
 ENGINE = ReplacingMergeTree(event_ts, is_deleted)
+-- `created_at` is the WRITE time, so it is not stable across re-evaluations: re-grading a trace in
+-- a later calendar month writes the same `id` into a different partition, and background merges
+-- never merge across partitions. Those two rows therefore never collapse on disk.
+--
+-- Reading them as one is what `FINAL` does (it merges across partitions unless
+-- `do_not_merge_across_partitions_select_final` is set), which is why EVERY read of this table in
+-- the codebase uses FINAL — enforced by `test_scores_reads_are_final`, not by convention. Drop the
+-- FINAL from one query and it starts reporting a re-graded score twice, potentially showing the
+-- stale verdict first. Repartitioning would need a table rebuild; the guard test is what makes the
+-- current shape safe, and the 90-day TTL is what bounds the un-collapsed rows.
 PARTITION BY toYYYYMM(created_at)
 ORDER BY (project_id, name, id)
 -- Retention: scores age out 90 days after they were written (same horizon as `events`). Tune via
