@@ -38,6 +38,10 @@ def first_io(spans: list[dict], key: str) -> str:
 
 
 _USER_ROLES = {"user", "human"}
+# Everything that is plainly NOT the person talking to the agent. The second pass uses this, so a
+# framework that calls the human `customer` or `contact` still resolves — the rule that survives an
+# unknown vocabulary is "the last message that isn't the agent's", not a list of user synonyms.
+_NON_USER_ROLES = {"assistant", "ai", "system", "tool", "function", "developer", "model"}
 
 
 def _chat_messages(value: Any) -> list[dict]:
@@ -50,6 +54,9 @@ def _chat_messages(value: Any) -> list[dict]:
             value = json.loads(s)
         except (ValueError, TypeError):
             return []
+    # `{"messages": [...]}` — how LangChain/LangGraph state and several SDKs hand over a history.
+    if isinstance(value, dict) and isinstance(value.get("messages"), list):
+        value = value["messages"]
     if isinstance(value, dict):
         value = [value]
     if not isinstance(value, list):
@@ -58,11 +65,20 @@ def _chat_messages(value: Any) -> list[dict]:
 
 
 def _last_user_text(value: Any) -> str:
-    for m in reversed(_chat_messages(value)):
-        if str(m.get("role") or m.get("type") or "").lower() in _USER_ROLES:
-            text = content_text(m.get("content"))
-            if text:
-                return text
+    """The last thing the human said in this message list.
+
+    Two passes: first a role we know, then anything that isn't the agent's own side. The roles in
+    the wild are not always `user` (`customer`, `contact`, a framework prefix…), and falling
+    through to "first readable text" is what put turn 1's greeting on every turn of a transcript.
+    """
+    msgs = _chat_messages(value)
+    for known_only in (True, False):
+        for m in reversed(msgs):
+            role = str(m.get("role") or m.get("type") or "").lower()
+            if (role in _USER_ROLES) if known_only else (role not in _NON_USER_ROLES):
+                text = content_text(m.get("content", m))
+                if text:
+                    return text
     return ""
 
 
