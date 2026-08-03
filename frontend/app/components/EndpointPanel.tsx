@@ -25,6 +25,9 @@ export function EndpointPanel({
   const [replyPath, setReplyPath] = useState("");
   // Set when the ENDPOINT mints the session id and expects it echoed (see the label).
   const [sessionPath, setSessionPath] = useState("");
+  // The body key the session id travels under. Paired with sessionPath: capturing the id
+  // and sending it back under the wrong key looks exactly like no session at all.
+  const [sessionKey, setSessionKey] = useState("conversation_id");
   const [extraBody, setExtraBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -43,6 +46,7 @@ export function EndpointPanel({
         setUrl(d.url ?? "");
         setReplyPath(d.reply_path ?? "");
         setSessionPath(d.session_path ?? "");
+        setSessionKey(d.session_key || "conversation_id");
         setExtraBody(
           d.extra_body && Object.keys(d.extra_body).length
             ? JSON.stringify(d.extra_body, null, 2)
@@ -86,6 +90,7 @@ export function EndpointPanel({
           token: token || undefined,
           reply_path: replyPath,
           session_path: sessionPath,
+          session_key: sessionKey,
           extra_body: parsedBody,
         }),
       });
@@ -190,23 +195,40 @@ export function EndpointPanel({
               />
             </div>
           </div>
-          <div>
-            <label className={LABEL} htmlFor="ep-session">
-              Session path <span className="text-fg-faint">(optional)</span>
-            </label>
-            <input
-              id="ep-session"
-              value={sessionPath}
-              onChange={(e) => setSessionPath(e.target.value)}
-              placeholder="session_id — only if your API mints the session"
-              className={`${FIELD} mt-1`}
-            />
-            <p className="mt-1 text-[11.5px] text-fg-faint">
-              Leave blank if your API accepts a session id we supply. Set it when the API returns
-              its own: turn 1 sends none, and every later turn echoes back what came out of this
-              path — otherwise each turn starts a fresh conversation.
-            </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className={LABEL} htmlFor="ep-session-key">
+                Session key
+              </label>
+              <input
+                id="ep-session-key"
+                value={sessionKey}
+                onChange={(e) => setSessionKey(e.target.value)}
+                placeholder="conversation_id"
+                className={`${FIELD} mt-1`}
+              />
+            </div>
+            <div>
+              <label className={LABEL} htmlFor="ep-session">
+                Session path <span className="text-fg-faint">(optional)</span>
+              </label>
+              <input
+                id="ep-session"
+                value={sessionPath}
+                onChange={(e) => setSessionPath(e.target.value)}
+                placeholder="session_id — only if your API mints the session"
+                className={`${FIELD} mt-1`}
+              />
+            </div>
           </div>
+          <p className="-mt-2 text-[11.5px] text-fg-faint">
+            <b>Key</b> is the body field the session id travels in. Leave <b>path</b> blank if your
+            API accepts an id we supply. Set it when the API returns its own — turn 1 then sends no
+            session, and every later turn echoes back whatever came out of that path. The two must
+            agree: capturing <code>session_id</code> and sending it as{" "}
+            <code>conversation_id</code> looks exactly like no session at all, and every turn opens
+            a new conversation.
+          </p>
           <div>
             <label className={LABEL} htmlFor="ep-body">
               Extra body fields <span className="text-fg-faint">(optional JSON)</span>

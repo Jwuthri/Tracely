@@ -1,5 +1,6 @@
 import { getSession, getTrace, type ConvNode, type FullTurn } from "@/app/lib/api";
 import { convUsage, fmtUsd } from "@/app/lib/usage";
+import { AwaitingTurns } from "@/app/components/AwaitingTurns";
 import { CopyId } from "@/app/components/CopyId";
 import { SaveAsScenarioButton } from "@/app/components/SaveAsScenarioButton";
 import { SessionView } from "@/app/components/SessionView";
@@ -77,7 +78,8 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
       </header>
 
       {turns.length === 0 ? (
-        <div className="card p-10 text-center text-[13px] text-fg-faint">Thread not found.</div>
+        // Not "not found" — a scenario run opens this page before its first turn is driven.
+        <AwaitingTurns threadId={threadId} />
       ) : (
         <div className="reveal" style={{ animationDelay: "60ms" }}>
           <SessionView conv={conv} turns={fullTurns} />
