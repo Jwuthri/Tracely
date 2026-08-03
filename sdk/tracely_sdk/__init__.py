@@ -498,27 +498,68 @@ def _activate_instrumentors(instrument: str | list[str] | bool) -> None:
 # every child span (auto or manual), replacing today's per-span agent=/conversation= plumbing (R9).
 
 
+def _remote_context(traceparent: str) -> Any:
+    """A W3C `traceparent` header → the OTel context to run under, or None if it carries no usable
+    span.
+
+    Explicitly `TraceContextTextMapPropagator` rather than the global `propagate.extract`: the
+    caller handed us a `traceparent` by name, and resolving it through whatever `OTEL_PROPAGATORS`
+    happens to be set to would make "did my span join the parent trace?" depend on unrelated
+    configuration.
+
+    A malformed header returns None *and logs*. Silently starting a new root is what this argument
+    exists to prevent — a caller who passed a header and got no correlation would be looking at the
+    same disconnected trace with nothing to explain it.
+    """
+    from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+    ctx = TraceContextTextMapPropagator().extract({"traceparent": traceparent})
+    if not otel_trace.get_current_span(ctx).get_span_context().is_valid:
+        log.warning(
+            "tracely: ignoring unusable traceparent %r — this run starts its own trace and will "
+            "not join the caller's", traceparent[:64],
+        )
+        return None
+    return ctx
+
+
 class _Trace:
     """The object returned by `tracely.trace(...)`. Usable three ways — as a context manager
     (`with tracely.trace(...):`), a sync decorator, or an async decorator. Each entry merges its
     fields over the enclosing run context (so nested traces inherit + override), and resets on
     exit. It sets context only — it does not open a span (an `@observe`/`agent()` span, or the
-    auto-instrumentor's own span, becomes the root)."""
+    auto-instrumentor's own span, becomes the root).
 
-    __slots__ = ("_fields", "_token")
+    With `traceparent` it also attaches the caller's trace context for the block, so that root span
+    becomes a CHILD of the caller's span instead of starting a trace of its own."""
 
-    def __init__(self, fields: dict[str, Any]):
+    __slots__ = ("_fields", "_token", "_traceparent", "_ctx_token")
+
+    def __init__(self, fields: dict[str, Any], traceparent: str | None = None):
         self._fields = {k: v for k, v in fields.items() if v not in (None, {})}
         self._token: Any = None
+        self._traceparent = traceparent
+        self._ctx_token: Any = None
 
     def __enter__(self) -> dict[str, Any]:
         parent = _run_ctx.get() or {}
         merged = {**parent, **self._fields}
         merged["metadata"] = {**parent.get("metadata", {}), **self._fields.get("metadata", {})}
         self._token = _run_ctx.set(merged)
+        if self._traceparent:
+            remote = _remote_context(self._traceparent)
+            if remote is not None:
+                from opentelemetry import context as otel_context
+
+                self._ctx_token = otel_context.attach(remote)
         return merged
 
     def __exit__(self, *exc: Any) -> bool:
+        if self._ctx_token is not None:
+            from opentelemetry import context as otel_context
+
+            otel_context.detach(self._ctx_token)
+            self._ctx_token = None
         if self._token is not None:
             _run_ctx.reset(self._token)
             self._token = None
@@ -529,14 +570,14 @@ class _Trace:
 
             @functools.wraps(fn)
             async def awrapper(*a: Any, **k: Any) -> Any:
-                with _Trace(self._fields):
+                with _Trace(self._fields, self._traceparent):
                     return await fn(*a, **k)
 
             return awrapper
 
         @functools.wraps(fn)
         def wrapper(*a: Any, **k: Any) -> Any:
-            with _Trace(self._fields):
+            with _Trace(self._fields, self._traceparent):
                 return fn(*a, **k)
 
         return wrapper
@@ -552,12 +593,32 @@ def trace(
     trace_name: str | None = None,
     env: str | None = None,
     agents: list[dict] | None = None,
+    traceparent: str | None = None,
     **metadata: Any,
 ) -> _Trace:
     """Open a run context: set `agent`/`conversation`/`turn`/`turn_id`/`user`/`trace_name`/`env`
     (+ arbitrary `metadata`) once, and every span started inside — including zero-touch provider
     spans from the auto-instrumentors — inherits them via the context processor (R9/R4). Use as a
     context manager or a (sync/async) decorator. Nested `trace()`s merge over the enclosing one.
+
+    `traceparent` joins the caller's trace: pass the incoming request's W3C header and every span in
+    the block nests under the caller's span instead of starting a new trace.
+
+        @app.post("/chat")
+        def chat(req: ChatRequest, request: Request):
+            with tracely.trace(agent="support",
+                               conversation=req.session_id,
+                               traceparent=request.headers.get("traceparent")):
+                return run_agent(req.message)
+
+    This is what makes a Tracely-driven conversation (`tracely simulate`, the scenario gate) show
+    your real trajectory: Tracely mints the trace id, sends it as `traceparent`, and POSTs its
+    conversation id in the body — so honour both and your tool calls land inside the turn instead of
+    on a disconnected trace of their own. Without it Tracely sees only the request and the reply, and
+    every step/tool-level evaluator has nothing to grade. Also correct for any ordinary upstream
+    caller that already traces. A header that carries no usable span is ignored (logged), never
+    fatal; if your web framework already has OTel server instrumentation, the context is ambient and
+    you can leave this unset.
 
     `turn` is the ordinal (0, 1, 2…); `turn_id` is your own id for one exchange, and unlike the
     `turn()` span helper it lands on EVERY span of the turn, which is what the `turn_id` column
@@ -595,7 +656,9 @@ def trace(
             "env": env,
             "agents": agents,
             "metadata": {k: v for k, v in metadata.items()},
-        }
+        },
+        # Not a run-context field: it addresses the caller's span, it is not an attribute of ours.
+        traceparent=traceparent,
     )
 
 

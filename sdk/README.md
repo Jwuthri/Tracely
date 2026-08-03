@@ -43,6 +43,29 @@ def plan(goal): ...
 the provider spans the instrumentor creates — via a custom `SpanProcessor`. Streaming token usage
 needs `stream_options={"include_usage": True}`.
 
+### Serving an agent Tracely drives (`traceparent`)
+
+If Tracely calls your agent — `tracely simulate`, a scenario gate, the Emulate tab — it **mints the
+trace id**, sends it as a W3C `traceparent` header, and POSTs its conversation id in the body under
+the endpoint's `session_key`. Honour both and your real trajectory lands inside the turn:
+
+```python
+@app.post("/api/chat")
+def chat(body: dict, request: Request):
+    with tracely.trace(
+        agent="support-agent",
+        conversation=body.get("conversation_id"),          # the endpoint's session_key
+        traceparent=request.headers.get("traceparent"),    # joins Tracely's turn span
+    ):
+        return run_agent(body["message"])
+```
+
+Skip it and the turn is Tracely's own span alone — request in, reply out. Your tool calls still get
+traced, but onto a **separate** trace with a conversation id of your own, so nothing correlates and
+every step/tool-level evaluator has nothing to grade. A header that carries no usable span is logged
+and ignored, never fatal. Already running OTel server instrumentation (FastAPI/Starlette/Flask)? The
+incoming context is ambient — pass `conversation` and leave `traceparent` unset.
+
 **Also covered:** LangChain/LangGraph (`[langchain]` — graphs nest, node names become steps), LiteLLM
 (`instrument=["litellm"]` — 100+ providers via one callback), and a non-patching drop-in
 (`from tracely_sdk.openai import OpenAI` / `wrap_openai`). Under `"auto"`, when the LangChain

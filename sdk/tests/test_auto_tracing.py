@@ -482,3 +482,50 @@ def test_set_state_ignores_an_empty_delta(exporter: InMemorySpanExporter) -> Non
     with tracely.step("noop"):
         tracely.set_state({})
     assert not any(k.startswith("tracely.state.") for k in _attrs(exporter, "noop"))
+
+
+# ── trace(traceparent=…) — joining the caller's trace ────────────────────────
+
+
+def test_traceparent_makes_the_run_a_child_of_the_callers_trace(
+    exporter: InMemorySpanExporter,
+) -> None:
+    """A Tracely-driven conversation POSTs the turn's `traceparent`. Honouring it is the whole
+    difference between the agent's tool calls landing inside the turn and landing on a trace of
+    their own — where every step-level evaluator has nothing to grade."""
+    trace_id, parent_span_id = 0x0AF7651916CD43DD8448EB211C80319C, 0xB7AD6B7169203331
+
+    with tracely.trace(agent="support", traceparent=f"00-{trace_id:032x}-{parent_span_id:016x}-01"):
+        with tracely.agent("support"):
+            pass
+
+    span = next(s for s in exporter.get_finished_spans() if s.name == "support")
+    assert span.context.trace_id == trace_id
+    assert span.parent is not None and span.parent.span_id == parent_span_id
+
+
+def test_the_callers_context_is_detached_on_exit(exporter: InMemorySpanExporter) -> None:
+    """Turn N+1 must not inherit turn N's parent — an attached context that outlives its block
+    would silently glue every later trace onto the first caller's span."""
+    with tracely.trace(traceparent="00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"):
+        pass
+    with tracely.agent("after"):
+        pass
+
+    span = next(s for s in exporter.get_finished_spans() if s.name == "after")
+    assert span.context.trace_id != 0x0AF7651916CD43DD8448EB211C80319C
+    assert span.parent is None
+
+
+def test_an_unusable_traceparent_is_logged_not_fatal(
+    exporter: InMemorySpanExporter, caplog
+) -> None:
+    """Starting a fresh trace in silence is the failure this argument exists to prevent: the caller
+    asked to be joined, so if we can't, it has to say so."""
+    with caplog.at_level("WARNING", logger="tracely"):
+        with tracely.trace(agent="support", traceparent="not-a-traceparent"):
+            with tracely.agent("support"):
+                pass
+
+    assert "traceparent" in caplog.text
+    assert next(s for s in exporter.get_finished_spans() if s.name == "support").parent is None
