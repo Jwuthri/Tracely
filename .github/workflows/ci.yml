@@ -27,8 +27,11 @@ jobs:
           enable-cache: true
       # --frozen installs exactly what uv.lock pins (incl. the tracely-ai[all] provider extras),
       # so CI also catches lock/extra drift — the "transitive-conflict minefield" risk.
-      - name: Install (uv sync --frozen)
-        run: uv sync --frozen
+      # --all-packages is required: the dev group pulls in tracely-ai (the SDK) but NOT
+      # tracely-backend, so without it `backend/tests/conftest.py` dies on `import tracely`.
+      # Matches `make install`.
+      - name: Install (uv sync --frozen --all-packages)
+        run: uv sync --frozen --all-packages --all-extras
       - name: Lint (ruff check)
         run: uv run ruff check .
       - name: Test (pytest)
