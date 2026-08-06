@@ -59,12 +59,26 @@ class RegressionService:
     ) -> None:
         self.session = session
         self.trace_reader = trace_reader or TraceReader()
-        self.score_writer = score_writer or ScoreWriter(self.trace_reader.client)
+        self._score_writer = score_writer
         # Grades answer quality on the source trace so a hallucination (clean trace, bad answer)
         # becomes a promotable, gate-able case — not just structural tool/error failures.
+        # `score_writer` is forwarded as-is (possibly None) rather than via the property below, so
+        # constructing the service stays connection-free — see the note on `score_writer`.
         self.eval_service = eval_service or EvaluationService(
-            trace_reader=self.trace_reader, score_writer=self.score_writer
+            trace_reader=self.trace_reader, score_writer=score_writer
         )
+
+    # Lazy for the same reason as EvaluationService.score_writer: reading `trace_reader.client` is
+    # what opens the ClickHouse socket, so doing it in __init__ made construction a connection.
+    @property
+    def score_writer(self) -> ScoreWriter:
+        if self._score_writer is None:
+            self._score_writer = ScoreWriter(self.trace_reader.client)
+        return self._score_writer
+
+    @score_writer.setter
+    def score_writer(self, writer: ScoreWriter) -> None:
+        self._score_writer = writer
 
     # ── reads (used by callers that just need the trace) ──────────────────────
 

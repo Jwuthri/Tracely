@@ -229,8 +229,22 @@ class EvaluationService:
         registry=default_registry,
     ) -> None:
         self.trace_reader = trace_reader or TraceReader()
-        self.score_writer = score_writer or ScoreWriter(self.trace_reader.client)
+        self._score_writer = score_writer
         self.registry = registry
+
+    # Lazy on purpose: building the writer reads `trace_reader.client`, and *that* property is what
+    # opens the ClickHouse socket. Doing it in __init__ made merely constructing the service a
+    # connection attempt, so every unit test that instantiates it (directly or via a Celery task)
+    # needed a live ClickHouse — defeating TraceReader's deliberate laziness.
+    @property
+    def score_writer(self) -> ScoreWriter:
+        if self._score_writer is None:
+            self._score_writer = ScoreWriter(self.trace_reader.client)
+        return self._score_writer
+
+    @score_writer.setter
+    def score_writer(self, writer: ScoreWriter) -> None:
+        self._score_writer = writer
 
     def evaluate_trace(
         self,
