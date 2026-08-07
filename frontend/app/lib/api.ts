@@ -214,8 +214,19 @@ export type EvalCase = {
   replays?: Replay[];
 };
 
-export async function getCases(): Promise<EvalCase[]> {
-  return getJson<EvalCase[]>(`/api/cases`);
+/** A page of a growing table, plus how many rows exist in total. Lists that only ever grow
+ *  (cases, gates, clusters) return this so a page can show "12–24 of 318" without loading 318. */
+export type Page<T> = { items: T[]; total: number };
+
+export const PAGE_SIZE = 25;
+
+export async function getCases(
+  limit = PAGE_SIZE,
+  offset = 0,
+): Promise<Page<EvalCase> & { by_agent: Record<string, number> }> {
+  return getJson<Page<EvalCase> & { by_agent: Record<string, number> }>(
+    `/api/cases?limit=${limit}&offset=${offset}`,
+  );
 }
 
 export async function getCase(caseId: string): Promise<EvalCase | null> {
@@ -351,14 +362,22 @@ export type FailureCluster = {
   first_seen_at: string | null;
   last_seen_at: string | null;
   members?: ClusterMember[];
+  // How many traces the cluster actually has — `members` is capped by the detail endpoint so a
+  // cluster that fired thousands of times doesn't ship every one of them to the browser.
+  member_total?: number;
   histogram?: { t: string; count: number }[];
   suggested_evaluator?: SuggestedEvaluator;
 };
 
 /** `minSize` hides clusters with fewer members (>= 2); omitted = the backend default. */
-export async function getClusters(minSize?: number): Promise<FailureCluster[]> {
-  const q = minSize ? `?min_size=${minSize}` : "";
-  return getJson<FailureCluster[]>(`/api/clusters${q}`);
+export async function getClusters(
+  minSize?: number,
+  limit = PAGE_SIZE,
+  offset = 0,
+): Promise<Page<FailureCluster> & { open: number }> {
+  const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (minSize) qs.set("min_size", String(minSize));
+  return getJson<Page<FailureCluster> & { open: number }>(`/api/clusters?${qs.toString()}`);
 }
 
 export async function getCluster(id: string): Promise<FailureCluster | null> {
@@ -405,8 +424,8 @@ export async function getAgents(): Promise<AgentRow[]> {
   return getJson<AgentRow[]>(`/api/meta-analyses/agents`);
 }
 
-export async function getGates(): Promise<GateRun[]> {
-  return getJson<GateRun[]>(`/api/gates`);
+export async function getGates(limit = PAGE_SIZE, offset = 0): Promise<Page<GateRun>> {
+  return getJson<Page<GateRun>>(`/api/gates?limit=${limit}&offset=${offset}`);
 }
 
 export async function getGate(gateId: string): Promise<GateRun | null> {

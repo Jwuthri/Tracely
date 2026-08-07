@@ -279,18 +279,23 @@ async def evaluator_catalog(project_id: str) -> list[dict]:
     ]
 
 
-async def evaluator_score_queue(project_id: str, name: str, limit: int = 100) -> list[dict]:
-    """Recent verdict-bearing online scores for one evaluator — the labeling queue. Each row is a
-    judge decision (its target identity + verdict + rationale comment) a reviewer can agree/disagree
-    with. Newest first."""
+async def evaluator_score_queue(
+    project_id: str, name: str, limit: int = 25, offset: int = 0
+) -> list[dict]:
+    """One page of verdict-bearing online scores for one evaluator — the labeling queue. Each row
+    is a judge decision (its target identity + verdict + rationale comment) a reviewer can
+    agree/disagree with. Newest first.
+
+    `id` breaks ties on created_at: scores written in the same batch share a timestamp, and without
+    a total order LIMIT/OFFSET would show the same verdict on two consecutive pages."""
     client = await get_async_client()
     res = await client.query(
         "SELECT trace_id, observation_id, session_id, evaluation_level, verdict, value, comment, "
         "toString(created_at) AS created_at "
         f"FROM scores FINAL WHERE project_id = {{p:String}} AND {_ONLINE} "
         "AND name = {n:String} AND verdict != '' "
-        "ORDER BY created_at DESC LIMIT {lim:UInt32}",
-        parameters={"p": project_id, "n": name, "lim": limit},
+        "ORDER BY created_at DESC, id LIMIT {lim:UInt32} OFFSET {off:UInt32}",
+        parameters={"p": project_id, "n": name, "lim": limit, "off": max(offset, 0)},
     )
     return [
         {

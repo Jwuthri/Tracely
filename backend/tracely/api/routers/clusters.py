@@ -79,32 +79,56 @@ async def rebuild(project_id: str = Depends(get_project_id)) -> dict:
 async def list_clusters(
     project_id: str = Depends(get_project_id),
     min_size: int = Query(default=None, ge=2, description="hide clusters with fewer members"),
-) -> list[dict]:
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """One page of failure clusters (biggest first) plus the `total` matching `min_size`.
+
+    `open` is counted project-wide too, not derived from the page — the header badge would
+    otherwise read "3 open" when it means "3 open on page 1 of 9"."""
     floor = settings.cluster_min_size if min_size is None else min_size
 
     def work():
         with SyncSessionLocal() as s:
-            return [
-                _cluster_dict(cl, slug)
-                for cl, slug in repo.clusters_list_with_agent(s, project_id, floor)
-            ]
+            return {
+                "items": [
+                    _cluster_dict(cl, slug)
+                    for cl, slug in repo.clusters_list_with_agent(
+                        s, project_id, floor, limit=limit, offset=offset
+                    )
+                ],
+                "total": repo.clusters_count(s, project_id, floor),
+                "open": repo.clusters_count(s, project_id, floor, status="OPEN"),
+            }
 
     return await run_in_threadpool(work)
 
 
 @router.get("/clusters/{cluster_id}")
-async def get_cluster(cluster_id: str, project_id: str = Depends(get_project_id)) -> dict:
+async def get_cluster(
+    cluster_id: str, project_id: str = Depends(get_project_id), members: int = 25
+) -> dict:
+    """One cluster, with the first `members` linked traces.
+
+    The member list is capped: a cluster that fired thousands of times used to send every one of
+    them — each with its full input text — to the browser. The histogram still reads EVERY
+    member's timestamp (a separate, light query), so the "seen over time" shape stays truthful
+    rather than becoming "the most recent page".
+    """
+    cap = max(1, min(members, 200))
+
     def work():
         reader = TraceReader()
         with SyncSessionLocal() as s:
             cl = repo.cluster_get(s, project_id, cluster_id)
             if not cl:
                 return None
-            mem = repo.cluster_members(s, cl.id)
-            meta = reader.member_meta(project_id, [m.trace_id for m in mem])
+            all_ids = [m.trace_id for m in repo.cluster_members(s, cl.id)]
+            page = repo.cluster_members(s, cl.id, limit=cap)
+            meta = reader.member_meta(project_id, [m.trace_id for m in page])
             # Drop members whose trace no longer exists in events (wiped, or aged out by
             # ClickHouse TTL retention) so the detail shows real linked traces.
-            members = [
+            shown = [
                 {
                     "trace_id": m.trace_id,
                     "is_medoid": m.is_medoid,
@@ -112,12 +136,15 @@ async def get_cluster(cluster_id: str, project_id: str = Depends(get_project_id)
                     "input": message_text(meta[m.trace_id].get("input", "")),
                     "latency_ms": meta[m.trace_id].get("latency_ms", 0.0),
                 }
-                for m in mem
+                for m in page
                 if m.trace_id in meta
             ]
             agent = s.get(Agent, cl.agent_id)
-            d = _cluster_dict(cl, agent.slug if agent else None, members)
-            d["histogram"] = histogram([meta[m.trace_id]["ts"] for m in mem if m.trace_id in meta])
+            d = _cluster_dict(cl, agent.slug if agent else None, shown)
+            # How many the cluster really has, so the UI can say "25 of 312" instead of implying
+            # the page is the whole thing.
+            d["member_total"] = len(all_ids)
+            d["histogram"] = histogram(reader.member_timestamps(project_id, all_ids))
             d["suggested_evaluator"] = suggest_evaluator(cl.label, cl.taxonomy)
             return d
 

@@ -79,16 +79,29 @@ async def promote(trace_id: str, project_id: str = Depends(get_project_id)) -> d
 
 
 @router.get("/cases")
-async def list_cases(project_id: str = Depends(get_project_id)) -> list[dict]:
+async def list_cases(
+    limit: int = 50, offset: int = 0, project_id: str = Depends(get_project_id)
+) -> dict:
+    """One page of regression cases, newest first, plus the project-wide `total`.
+
+    Paginated because this list only grows: every promoted failure is a case that lives for ever,
+    and the page used to render all of them. `total` is a COUNT so the header can still say how
+    many exist without shipping them all."""
     def work():
         with SyncSessionLocal() as s:
-            out = []
-            for c in repo.cases_list(s, project_id):
+            items = []
+            for c in repo.cases_list(s, project_id, limit=limit, offset=offset):
                 last = repo.case_last_replay(s, c.id)
                 d = _case_dict(c)
                 d["last_verdict"] = last.verdict if last else None
-                out.append(d)
-            return out
+                items.append(d)
+            return {
+                "items": items,
+                "total": repo.cases_count(s, project_id),
+                # Per-agent totals for the gate launcher's ranking — computed here so it never
+                # has to load every case just to count them.
+                "by_agent": repo.cases_count_by_agent(s, project_id),
+            }
 
     return await run_in_threadpool(work)
 

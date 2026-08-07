@@ -1,18 +1,31 @@
-import { getClusters } from "@/app/lib/api";
+import { getClusters, PAGE_SIZE } from "@/app/lib/api";
 import { Badge } from "@/app/components/ui";
 import { ClusterList } from "@/app/components/ClusterList";
+import { Pager, pageParam } from "@/app/components/Pager";
 import { RebuildButton } from "@/app/components/RebuildButton";
 
 export default async function ClustersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ min_size?: string }>;
+  searchParams: Promise<{ min_size?: string; page?: string }>;
 }) {
-  const raw = Number((await searchParams).min_size);
+  const sp = await searchParams;
+  const raw = Number(sp.min_size);
   // ponytail: plain GET form -> URL -> server re-fetch. No client state, back button works.
   const minSize = Number.isFinite(raw) && raw >= 2 ? Math.floor(raw) : undefined;
-  const clusters = await getClusters(minSize);
-  const open = clusters.filter((c) => c.status === "OPEN").length;
+  const page = pageParam(sp.page);
+  // `open` comes from the server as a project-wide count — deriving it from the page would make
+  // the badge mean "open on this page".
+  const { items: clusters, total, open } = await getClusters(
+    minSize,
+    PAGE_SIZE,
+    (page - 1) * PAGE_SIZE,
+  );
+  const qs = (p: number) =>
+    `/clusters?${new URLSearchParams({
+      ...(minSize ? { min_size: String(minSize) } : {}),
+      page: String(p),
+    }).toString()}`;
   return (
     <div className="space-y-6">
       <header className="reveal flex flex-wrap items-end justify-between gap-4">
@@ -46,6 +59,8 @@ export default async function ClustersPage({
 
       {/* rows + multi-select delete (client) */}
       <ClusterList clusters={clusters} />
+
+      <Pager page={page} pageSize={PAGE_SIZE} total={total} label="clusters" href={qs} />
     </div>
   );
 }

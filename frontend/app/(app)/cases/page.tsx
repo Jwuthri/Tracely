@@ -1,11 +1,17 @@
-import { getCases } from "@/app/lib/api";
+import { getCases, PAGE_SIZE } from "@/app/lib/api";
 import { Badge, statusVariant, verdictVariant } from "@/app/components/ui";
 import { CopyId } from "@/app/components/CopyId";
+import { Pager, pageParam } from "@/app/components/Pager";
 import { RowLink } from "@/app/components/RowLink";
 import { IconChevron } from "@/app/components/icons";
 
-export default async function CasesPage() {
-  const cases = await getCases();
+export default async function CasesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const page = pageParam((await searchParams).page);
+  const { items: cases, total } = await getCases(PAGE_SIZE, (page - 1) * PAGE_SIZE);
   return (
     <div className="space-y-6">
       <header className="reveal flex items-end justify-between">
@@ -15,7 +21,8 @@ export default async function CasesPage() {
             Each case is a production trace promoted into a forever-running regression test.
           </p>
         </div>
-        <Badge variant="signal">{cases.length} cases</Badge>
+        {/* the project-wide count, not this page's — a COUNT(*), so it stays true as the list pages */}
+        <Badge variant="signal">{total} cases</Badge>
       </header>
 
       <div className="reveal card overflow-hidden" style={{ animationDelay: "80ms" }}>
@@ -61,6 +68,14 @@ export default async function CasesPage() {
           ))
         )}
       </div>
+
+      <Pager
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={total}
+        label="cases"
+        href={(p) => `/cases?page=${p}`}
+      />
     </div>
   );
 }

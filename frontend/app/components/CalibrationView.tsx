@@ -32,12 +32,19 @@ type QueueRow = {
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const flip = (v: string) => (v.toUpperCase() === "FAIL" ? "PASS" : "FAIL");
 
+// One screen of verdicts at a time. Labeling is a one-at-a-time activity, and an evaluator with a
+// few hundred graded runs used to render every one of them (each with its rationale comment) into
+// the DOM the moment you selected it.
+const QUEUE_PAGE = 25;
+
 export function CalibrationView() {
   const [evaluators, setEvaluators] = useState<Evaluator[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [queue, setQueue] = useState<QueueRow[]>([]);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [queueLoading, setQueueLoading] = useState(false);
+  const [more, setMore] = useState(false);
 
   const loadSummary = async () => {
     const r = await fetch("/api/calibration", { cache: "no-store" });
@@ -54,12 +61,39 @@ export function CalibrationView() {
 
   useEffect(() => {
     if (!selected) return;
+    let live = true;
     setQueueLoading(true);
-    fetch(`/api/calibration/${encodeURIComponent(selected)}/queue?limit=100`, { cache: "no-store" })
+    setQueue([]); // drop the previous evaluator's rows rather than showing them under a new header
+    fetch(`/api/calibration/${encodeURIComponent(selected)}/queue?limit=${QUEUE_PAGE}`, {
+      cache: "no-store",
+    })
       .then((r) => (r.ok ? r.json() : []))
-      .then(setQueue)
-      .finally(() => setQueueLoading(false));
+      .then((rows: QueueRow[]) => {
+        if (!live) return;
+        setQueue(rows);
+        setHasMore(rows.length === QUEUE_PAGE);
+      })
+      .finally(() => live && setQueueLoading(false));
+    return () => {
+      live = false;
+    };
   }, [selected]);
+
+  async function loadMore() {
+    if (!selected) return;
+    setMore(true);
+    try {
+      const r = await fetch(
+        `/api/calibration/${encodeURIComponent(selected)}/queue?limit=${QUEUE_PAGE}&offset=${queue.length}`,
+        { cache: "no-store" },
+      );
+      const rows: QueueRow[] = r.ok ? await r.json() : [];
+      setQueue((q) => [...q, ...rows]);
+      setHasMore(rows.length === QUEUE_PAGE);
+    } finally {
+      setMore(false);
+    }
+  }
 
   async function label(row: QueueRow, human: string | null) {
     if (!selected) return;
@@ -189,6 +223,23 @@ export function CalibrationView() {
         )}
         {!queueLoading && !queue.length && (
           <div className="card p-6 text-[13px] text-fg-muted">No verdicts to review for this evaluator.</div>
+        )}
+
+        {!queueLoading && queue.length > 0 && (
+          <div className="flex items-center justify-center gap-3 pt-1">
+            {hasMore && (
+              <button
+                onClick={loadMore}
+                disabled={more}
+                className="rounded-lg border border-line bg-ink-800 px-4 py-2 text-[12.5px] font-medium text-fg-muted transition-colors hover:text-fg disabled:opacity-50"
+              >
+                {more ? "Loading…" : "Load more"}
+              </button>
+            )}
+            <span className="font-mono text-[10.5px] text-fg-faint">
+              {queue.length} of {sel?.total ?? queue.length} shown
+            </span>
+          </div>
         )}
       </div>
     </div>

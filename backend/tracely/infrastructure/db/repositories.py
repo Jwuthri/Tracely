@@ -237,14 +237,40 @@ def _slug_score_name(name: str) -> str:
 # ── regression cases ──────────────────────────────────────────────────────────
 
 
-def cases_list(s: Session, project_id: str) -> list[EvaluationCase]:
-    return list(
-        s.execute(
-            select(EvaluationCase)
-            .where(EvaluationCase.project_id == project_id)
-            .order_by(desc(EvaluationCase.created_at))
-        ).scalars()
+def cases_list(
+    s: Session, project_id: str, limit: int | None = None, offset: int = 0
+) -> list[EvaluationCase]:
+    q = (
+        select(EvaluationCase)
+        .where(EvaluationCase.project_id == project_id)
+        .order_by(desc(EvaluationCase.created_at), EvaluationCase.id)
     )
+    if limit is not None:
+        q = q.limit(limit).offset(max(offset, 0))
+    return list(s.execute(q).scalars())
+
+
+def cases_count(s: Session, project_id: str) -> int:
+    return int(
+        s.execute(
+            select(func.count())
+            .select_from(EvaluationCase)
+            .where(EvaluationCase.project_id == project_id)
+        ).scalar_one()
+    )
+
+
+def cases_count_by_agent(s: Session, project_id: str) -> dict[str, int]:
+    """`{agent_id: cases}` — what the gate launcher ranks agents by. A GROUP BY rather than a
+    tally over the case list, so it stays correct once that list is paginated."""
+    return {
+        aid: int(n)
+        for aid, n in s.execute(
+            select(EvaluationCase.agent_id, func.count())
+            .where(EvaluationCase.project_id == project_id)
+            .group_by(EvaluationCase.agent_id)
+        ).all()
+    }
 
 
 def case_get(s: Session, project_id: str, case_id: str) -> EvaluationCase | None:
@@ -265,12 +291,15 @@ def case_last_replay(s: Session, case_id: str) -> CaseReplay | None:
     )
 
 
-def case_replays(s: Session, case_id: str) -> list[CaseReplay]:
+def case_replays(s: Session, case_id: str, limit: int = 50) -> list[CaseReplay]:
+    """The case's replay history, newest first. Capped: a case gated on every PR accumulates a
+    replay per run for ever, and the detail page only ever shows the recent ones."""
     return list(
         s.execute(
             select(CaseReplay)
             .where(CaseReplay.case_id == case_id)
             .order_by(desc(CaseReplay.created_at))
+            .limit(limit)
         ).scalars()
     )
 
@@ -301,21 +330,40 @@ def case_delete(s: Session, project_id: str, case_id: str) -> bool:
 
 
 def clusters_list_with_agent(
-    s: Session, project_id: str, min_size: int = 1
+    s: Session, project_id: str, min_size: int = 1,
+    limit: int | None = None, offset: int = 0,
 ) -> list[tuple[FailureCluster, str]]:
     """`min_size` hides clusters with fewer members — a failure seen once is noise, not an issue."""
-    return [
-        (cl, slug)
-        for cl, slug in s.execute(
-            select(FailureCluster, Agent.slug)
-            .join(Agent, FailureCluster.agent_id == Agent.id)
-            .where(
-                FailureCluster.project_id == project_id,
-                FailureCluster.count >= min_size,
-            )
-            .order_by(desc(FailureCluster.count), desc(FailureCluster.last_seen_at))
-        ).all()
-    ]
+    q = (
+        select(FailureCluster, Agent.slug)
+        .join(Agent, FailureCluster.agent_id == Agent.id)
+        .where(
+            FailureCluster.project_id == project_id,
+            FailureCluster.count >= min_size,
+        )
+        # `id` breaks ties so LIMIT/OFFSET paging can't repeat or skip a cluster between pages.
+        .order_by(desc(FailureCluster.count), desc(FailureCluster.last_seen_at), FailureCluster.id)
+    )
+    if limit is not None:
+        q = q.limit(limit).offset(max(offset, 0))
+    return [(cl, slug) for cl, slug in s.execute(q).all()]
+
+
+def clusters_count(
+    s: Session, project_id: str, min_size: int = 1, status: str | None = None
+) -> int:
+    q = (
+        select(func.count())
+        .select_from(FailureCluster)
+        .join(Agent, FailureCluster.agent_id == Agent.id)
+        .where(
+            FailureCluster.project_id == project_id,
+            FailureCluster.count >= min_size,
+        )
+    )
+    if status:
+        q = q.where(FailureCluster.status == status)
+    return int(s.execute(q).scalar_one())
 
 
 def cluster_get(s: Session, project_id: str, cluster_id: str) -> FailureCluster | None:
@@ -323,14 +371,20 @@ def cluster_get(s: Session, project_id: str, cluster_id: str) -> FailureCluster 
     return cl if cl and cl.project_id == project_id else None
 
 
-def cluster_members(s: Session, cluster_id: str) -> list[ClusterMember]:
-    return list(
-        s.execute(
-            select(ClusterMember)
-            .where(ClusterMember.cluster_id == cluster_id)
-            .order_by(desc(ClusterMember.is_medoid), ClusterMember.added_at)
-        ).scalars()
+def cluster_members(
+    s: Session, cluster_id: str, limit: int | None = None
+) -> list[ClusterMember]:
+    """The cluster's traces, medoid first. `limit` caps the render on the detail page — a cluster
+    that fired 5,000 times must not ship 5,000 rows to the browser; promotion only needs the
+    medoid, and the count is shown from `cluster.count` regardless."""
+    q = (
+        select(ClusterMember)
+        .where(ClusterMember.cluster_id == cluster_id)
+        .order_by(desc(ClusterMember.is_medoid), ClusterMember.added_at)
     )
+    if limit is not None:
+        q = q.limit(limit)
+    return list(s.execute(q).scalars())
 
 
 def clusters_delete(s: Session, project_id: str, cluster_ids: list[str]) -> int:
@@ -363,16 +417,31 @@ def cluster_medoid(s: Session, cluster_id: str) -> ClusterMember | None:
 # ── gates ─────────────────────────────────────────────────────────────────────
 
 
-def gates_list_with_agent(s: Session, project_id: str) -> list[tuple[GateRun, str]]:
-    return [
-        (g, slug)
-        for g, slug in s.execute(
-            select(GateRun, Agent.slug)
+def gates_list_with_agent(
+    s: Session, project_id: str, limit: int | None = None, offset: int = 0
+) -> list[tuple[GateRun, str]]:
+    q = (
+        select(GateRun, Agent.slug)
+        .join(Agent, GateRun.agent_id == Agent.id)
+        .where(GateRun.project_id == project_id)
+        # Gates are the fastest-growing table in the product — one row per agent per PR run. Ties
+        # on created_at are broken by id so paging is stable.
+        .order_by(desc(GateRun.created_at), GateRun.id)
+    )
+    if limit is not None:
+        q = q.limit(limit).offset(max(offset, 0))
+    return [(g, slug) for g, slug in s.execute(q).all()]
+
+
+def gates_count(s: Session, project_id: str) -> int:
+    return int(
+        s.execute(
+            select(func.count())
+            .select_from(GateRun)
             .join(Agent, GateRun.agent_id == Agent.id)
             .where(GateRun.project_id == project_id)
-            .order_by(desc(GateRun.created_at))
-        ).all()
-    ]
+        ).scalar_one()
+    )
 
 
 def gate_cases_with_titles(s: Session, gate_id: str) -> list[tuple[GateCase, str]]:

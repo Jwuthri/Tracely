@@ -106,7 +106,13 @@ export default async function ClusterPage({ params }: { params: Promise<{ cluste
 
       <section className="reveal card overflow-hidden" style={{ animationDelay: "140ms" }}>
         <div className="border-b border-line px-4 py-3 text-[13px] font-semibold text-fg">
-          Linked traces <span className="font-mono text-[11px] text-fg-faint">({members.length})</span>
+          Linked traces{" "}
+          <span className="font-mono text-[11px] text-fg-faint">
+            {/* the list is capped server-side — say so rather than implying it's all of them */}
+            {(c.member_total ?? members.length) > members.length
+              ? `(${members.length} of ${c.member_total})`
+              : `(${members.length})`}
+          </span>
         </div>
         {members.map((m, i) => (
           <div key={i} className="border-b border-line/50 px-4 py-2.5 text-[12.5px] last:border-0">

@@ -181,6 +181,21 @@ class TraceReader:
 
     # ── ui helpers ────────────────────────────────────────────────────────────
 
+    def member_timestamps(self, project_id: str, trace_ids: Iterable[str]) -> list[Any]:
+        """Just the start times of these traces — what the cluster's "seen over time" histogram
+        needs. Separate from `member_meta` because that one also carries each trace's input text:
+        pulling those for a 5,000-member cluster to draw a bar chart is the whole payload for a
+        few pixels. Missing traces (wiped / TTL'd) are simply absent."""
+        uniq = sorted({t for t in trace_ids if t})
+        if not uniq:
+            return []
+        rows = self.client.query(
+            "SELECT min(start_time) AS ts FROM events FINAL "
+            "WHERE project_id = {p:String} AND trace_id IN {t:Array(String)} GROUP BY trace_id",
+            parameters={"p": project_id, "t": uniq},
+        ).result_rows
+        return [r[0] for r in rows]
+
     def member_meta(
         self, project_id: str, trace_ids: Iterable[str]
     ) -> dict[str, dict[str, Any]]:

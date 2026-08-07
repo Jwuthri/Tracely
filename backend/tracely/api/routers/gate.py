@@ -163,10 +163,24 @@ async def gate_suite(agent: str, project_id: str = Depends(get_project_id)) -> d
 
 
 @router.get("/gates")
-async def list_gates(project_id: str = Depends(get_project_id)) -> list[dict]:
+async def list_gates(
+    limit: int = 50, offset: int = 0, project_id: str = Depends(get_project_id)
+) -> dict:
+    """One page of gate runs, newest first, plus the project-wide `total`.
+
+    The fastest-growing table in the product — one row per agent per PR run — so this list is
+    paginated rather than returned whole."""
     def work():
         with SyncSessionLocal() as s:
-            return [_gate_dict(g, slug) for g, slug in repo.gates_list_with_agent(s, project_id)]
+            return {
+                "items": [
+                    _gate_dict(g, slug)
+                    for g, slug in repo.gates_list_with_agent(
+                        s, project_id, limit=limit, offset=offset
+                    )
+                ],
+                "total": repo.gates_count(s, project_id),
+            }
 
     return await run_in_threadpool(work)
 

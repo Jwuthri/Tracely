@@ -1,5 +1,6 @@
-import { getAgents, getCases, getGates, type GateRun } from "@/app/lib/api";
+import { getAgents, getCases, getGates, PAGE_SIZE, type GateRun } from "@/app/lib/api";
 import { Badge } from "@/app/components/ui";
+import { Pager, pageParam } from "@/app/components/Pager";
 import { RowLink } from "@/app/components/RowLink";
 import { RunGateButton } from "@/app/components/RunGateButton";
 import { TimeAgo } from "@/app/components/TimeAgo";
@@ -23,12 +24,22 @@ function Counts({ g }: { g: GateRun }) {
   );
 }
 
-export default async function GatesPage() {
-  const [gates, agents, cases] = await Promise.all([getGates(), getAgents(), getCases()]);
+export default async function GatesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const page = pageParam((await searchParams).page);
+  const [{ items: gates, total }, agents, cases] = await Promise.all([
+    getGates(PAGE_SIZE, (page - 1) * PAGE_SIZE),
+    getAgents(),
+    // Only the counts are needed here, so ask for the smallest page the API will give.
+    getCases(1),
+  ]);
   // Offer the agents that can actually gate something first — an agent with no promoted cases
-  // only ever returns NO_COVERAGE.
-  const caseCounts: Record<string, number> = {};
-  for (const c of cases) caseCounts[c.agent_id] = (caseCounts[c.agent_id] ?? 0) + 1;
+  // only ever returns NO_COVERAGE. Counts come from the server's GROUP BY, not from tallying the
+  // case list, which is now one page.
+  const caseCounts = cases.by_agent;
   const ranked = [...agents].sort((a, b) => (caseCounts[b.id] ?? 0) - (caseCounts[a.id] ?? 0));
 
   return (
@@ -79,6 +90,14 @@ export default async function GatesPage() {
           ))
         )}
       </div>
+
+      <Pager
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={total}
+        label="gate runs"
+        href={(p) => `/gates?page=${p}`}
+      />
     </div>
   );
 }

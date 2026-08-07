@@ -60,12 +60,19 @@ async def calibration_summary(principal: Principal = Depends(get_principal)) -> 
 
 @router.get("/calibration/{score_name}/queue")
 async def calibration_queue(
-    score_name: str, limit: int = 100, principal: Principal = Depends(get_principal)
+    score_name: str,
+    limit: int = 25,
+    offset: int = 0,
+    principal: Principal = Depends(get_principal),
 ) -> list[dict]:
-    """The evaluator's recent judge decisions, each annotated with THIS reviewer's label (if any) —
-    the labeling queue."""
+    """One page of the evaluator's recent judge decisions, each annotated with THIS reviewer's
+    label (if any) — the labeling queue.
+
+    Paged rather than dumped: an evaluator that has graded 992 runs was sending every verdict (with
+    its comment) to the browser, and labeling is a one-at-a-time activity — nobody reads past the
+    first screen. Callers derive "has more" from `len(rows) == limit`, as `/api/sessions` does."""
     pid, me = principal.project_id, _labeler(principal)
-    queue = await async_reader.evaluator_score_queue(pid, score_name, limit)
+    queue = await async_reader.evaluator_score_queue(pid, score_name, limit, offset)
 
     def fetch() -> dict[tuple, object]:
         with SyncSessionLocal() as s:

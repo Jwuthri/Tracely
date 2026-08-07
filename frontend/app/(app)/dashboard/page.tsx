@@ -57,13 +57,18 @@ function TopClusters({ clusters }: { clusters: FailureCluster[] }) {
 }
 
 export default async function Dashboard() {
-  const [stats, traces, cases, trends, clusters] = await Promise.all([
+  // The dashboard only ever renders the top few of each list, so it asks for exactly that many
+  // instead of pulling every case and cluster in the project to slice 6 off the front. The big
+  // numbers above come from `getStats()`, which counts server-side.
+  const [stats, traces, casesPage, trends, clustersPage] = await Promise.all([
     getStats(),
     getTraces(),
-    getCases(),
+    getCases(6),
     getTrends(14),
-    getClusters(),
+    getClusters(undefined, 6),
   ]);
+  const cases = casesPage.items;
+  const clusters = clustersPage.items;
   // 14-day shape behind the headline counts — a count with no direction can't tell you if it's
   // getting worse, which is the only question a dashboard number is really asked. Under three
   // days there is no shape to show, and a one-point spark just renders as a solid block.
