@@ -1,9 +1,17 @@
 import { getStats } from "@/app/lib/api";
+import { DeleteWorkspacePanel } from "@/app/components/DeleteWorkspacePanel";
 import { SeedDataPanel } from "@/app/components/SeedDataPanel";
 import { WipeDataPanel } from "@/app/components/WipeDataPanel";
+import { getMe } from "@/app/lib/auth";
 
 export default async function DataSettingsPage() {
-  const stats = await getStats();
+  const [stats, me] = await Promise.all([getStats(), getMe()]);
+  // Deleting the workspace is an owner/admin action; the backend enforces it too, this just
+  // keeps the button out of a member's way.
+  const canDelete = me?.role === "OWNER" || me?.role === "ADMIN";
+  const siblings = (me?.projects ?? []).filter(
+    (p) => p.organization_id === me?.organization_id && p.id !== me?.project_id,
+  );
 
   return (
     <div className="space-y-7">
@@ -24,6 +32,13 @@ export default async function DataSettingsPage() {
       <SeedDataPanel empty={stats.traces === 0} />
 
       <WipeDataPanel />
+
+      {canDelete && (
+        <DeleteWorkspacePanel
+          name={me?.project_name ?? "this workspace"}
+          onlyWorkspace={siblings.length === 0}
+        />
+      )}
     </div>
   );
 }

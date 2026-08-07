@@ -31,6 +31,8 @@ from tracely.infrastructure.db.models import (
     GateCase,
     GateRun,
     IngestKey,
+    Invitation,
+    Membership,
     MetaAnalysis,
     Monitor,
     Organization,
@@ -87,6 +89,60 @@ def usage_increment(s: Session, project_id: str, period: str, n: int) -> None:
             .where(UsageCounter.project_id == project_id, UsageCounter.period == period)
             .values(traces=UsageCounter.traces + n)
         )
+
+
+def project_siblings(s: Session, project_id: str) -> list[str]:
+    """Other workspaces in the same organization, oldest first. Empty for an org-less project."""
+    org_id = s.execute(
+        select(Project.organization_id).where(Project.id == project_id)
+    ).scalar_one_or_none()
+    if not org_id:
+        return []
+    return list(
+        s.execute(
+            select(Project.id)
+            .where(Project.organization_id == org_id, Project.id != project_id)
+            .order_by(Project.created_at, Project.id)
+        ).scalars()
+    )
+
+
+def project_delete(s: Session, project_id: str, *, usage_heir_id: str) -> dict[str, int]:
+    """Delete a workspace outright: its trace-derived data, its configuration, and the row itself.
+
+    `project_data_delete` handles everything derived; this adds what that deliberately keeps —
+    ingest keys, evaluators, monitors, the legacy per-project membership/invitation rows — and
+    then the project.
+
+    `usage_heir_id` is a surviving workspace in the same org that INHERITS this one's
+    `usage_counters`. Without that, deleting a workspace would zero its share of the org's
+    monthly quota, making "create workspace → burn quota → delete it" an unlimited free tier.
+    The caller guarantees an heir exists by refusing to delete an org's last workspace.
+    """
+    counts = project_data_delete(s, project_id)  # commits its own half
+
+    for row in s.execute(
+        select(UsageCounter).where(UsageCounter.project_id == project_id)
+    ).scalars():
+        usage_increment(s, usage_heir_id, row.period, int(row.traces))
+
+    def wipe(key: str, stmt) -> None:
+        n = int(s.execute(stmt).rowcount or 0)
+        if n:
+            counts[key] = counts.get(key, 0) + n
+
+    wipe("usage_counters", delete(UsageCounter).where(UsageCounter.project_id == project_id))
+    # AgentEndpoint carries project_id as well as agent_id; the derived wipe only clears the ones
+    # reachable through an agent, so any orphan would block the project delete on its FK.
+    wipe("agent_endpoints", delete(AgentEndpoint).where(AgentEndpoint.project_id == project_id))
+    wipe("evaluators", delete(Evaluator).where(Evaluator.project_id == project_id))
+    wipe("monitors", delete(Monitor).where(Monitor.project_id == project_id))
+    wipe("ingest_keys", delete(IngestKey).where(IngestKey.project_id == project_id))
+    wipe("memberships", delete(Membership).where(Membership.project_id == project_id))
+    wipe("invitations", delete(Invitation).where(Invitation.project_id == project_id))
+    wipe("projects", delete(Project).where(Project.id == project_id))
+    s.commit()
+    return counts
 
 
 def usage_traces(s: Session, project_id: str, period: str) -> int:

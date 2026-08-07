@@ -7,16 +7,21 @@ Pure HTTP shaping — ClickHouse deletes live in `infrastructure.clickhouse.dele
 
 from __future__ import annotations
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from tracely.api.auth import get_project_id
+from tracely.api.auth import get_project_id, require_role
+from tracely.auth import Principal
+from tracely.infrastructure.blob import s3
 from tracely.infrastructure.clickhouse import deletes
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.llm import provider
 from tracely.services import demo_seed
+
+log = structlog.get_logger()
 
 router = APIRouter(prefix="/api")
 
@@ -50,6 +55,53 @@ async def wipe_project_data(body: WipeBody, project_id: str = Depends(get_projec
 
     registry = await run_in_threadpool(work)
     return {"deleted": {**events, **registry}}
+
+
+@router.delete("/project")
+async def delete_workspace(
+    body: WipeBody, principal: Principal = Depends(require_role("OWNER", "ADMIN"))
+) -> dict:
+    """Delete this workspace and everything in it — traces, blobs, config, the workspace itself.
+
+    Owners and admins only, and only the workspace you're currently in (there is no id parameter,
+    so no way to aim this at someone else's). Confirm by sending the workspace's exact name.
+
+    Refuses to delete an organization's LAST workspace: access is derived from the org, so an org
+    with no workspaces locks every one of its members out of the product with a 403 and no way
+    back through the UI. The surviving sibling also inherits this workspace's usage counters, so
+    deleting a workspace can't be used to reset the month's quota.
+    """
+    project_id = principal.project_id
+
+    def load():
+        with SyncSessionLocal() as s:
+            project = repo.project_get(s, project_id)
+            return (project.name if project else None), repo.project_siblings(s, project_id)
+
+    name, siblings = await run_in_threadpool(load)
+    if name is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    if not siblings:
+        raise HTTPException(
+            status_code=409,
+            detail="this is your organization's only workspace — create another one first",
+        )
+    if body.confirm != name:
+        raise HTTPException(
+            status_code=400, detail=f"confirm must be exactly the workspace name ('{name}')"
+        )
+
+    await deletes.delete_project_events(project_id)
+
+    def work():
+        with SyncSessionLocal() as s:
+            return repo.project_delete(s, project_id, usage_heir_id=siblings[0])
+
+    deleted = await run_in_threadpool(work)
+    deleted["blobs"] = await run_in_threadpool(s3.delete_project_blobs, project_id)
+    log.info("workspace_deleted", project_id=project_id, by=principal.user_id)
+    # The caller's active-workspace cookie now points at a dead id; tell it where to go instead.
+    return {"deleted": deleted, "switch_to": siblings[0]}
 
 
 @router.post("/project/seed")

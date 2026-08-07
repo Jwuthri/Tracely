@@ -6,10 +6,12 @@ nothing is queued unless the blob is durable). The worker reads it back.
 from __future__ import annotations
 
 import boto3
+import structlog
 from botocore.config import Config
 
 from tracely.config import settings
 
+log = structlog.get_logger()
 _client = None
 
 
@@ -56,3 +58,29 @@ def ensure_bucket() -> None:
 def event_blob_key(project_id: str, batch_id: str, content_type: str) -> str:
     ext = "pb" if "x-protobuf" in content_type else "json"
     return f"{settings.s3_event_prefix}{project_id}/otlp/{batch_id}.{ext}"
+
+
+def delete_project_blobs(project_id: str) -> int:
+    """Delete every raw OTLP body this project ever uploaded. Used when a workspace is deleted —
+    the blobs are the source of truth, so leaving them behind means the customer's payloads
+    outlive the workspace they asked us to remove.
+
+    Best-effort: object storage being unavailable must not block the delete (the rows are already
+    gone), so failures are counted as zero rather than raised.
+    """
+    prefix = f"{settings.s3_event_prefix}{project_id}/"
+    client = _s3()
+    removed = 0
+    try:
+        for page in client.get_paginator("list_objects_v2").paginate(
+            Bucket=settings.s3_bucket, Prefix=prefix
+        ):
+            batch = [{"Key": o["Key"]} for o in page.get("Contents", [])]
+            if not batch:
+                continue
+            # delete_objects caps at 1000 keys, which is exactly one page's default maximum.
+            client.delete_objects(Bucket=settings.s3_bucket, Delete={"Objects": batch})
+            removed += len(batch)
+    except Exception as exc:
+        log.warning("blob_prefix_delete_failed", project_id=project_id, error=str(exc))
+    return removed
