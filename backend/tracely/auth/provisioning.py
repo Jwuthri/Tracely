@@ -178,7 +178,10 @@ async def assert_can_add_seat(session: AsyncSession, org: Organization) -> None:
         )
 
 
-async def owned_company_orgs(session: AsyncSession, user_id: str) -> int:
+async def company_orgs_joined(session: AsyncSession, user_id: str) -> int:
+    """Company orgs the user BELONGS to, whatever their role. Membership is what counts, not
+    ownership: someone already working inside a company doesn't get to spin up their own on the
+    side — that would be a second free quota pool per person, whoever created it."""
     return (
         await session.execute(
             select(func.count())
@@ -186,7 +189,6 @@ async def owned_company_orgs(session: AsyncSession, user_id: str) -> int:
             .join(Organization, Organization.id == OrgMembership.organization_id)
             .where(
                 OrgMembership.user_id == user_id,
-                OrgMembership.role == "OWNER",
                 Organization.kind == KIND_COMPANY,
             )
         )
@@ -199,12 +201,13 @@ async def can_create_organization(session: AsyncSession, user_id: str | None) ->
         return False
     if not settings.billing_enabled:
         return True
-    return await owned_company_orgs(session, user_id) < await _org_limit(session, user_id)
+    return await company_orgs_joined(session, user_id) < await _org_limit(session, user_id)
 
 
 async def _org_limit(session: AsyncSession, user_id: str) -> int:
-    """Owning anything paid lifts the cap — otherwise a customer who needs a second org has no
-    self-serve path and every free account could mint quota pools for nothing."""
+    """OWNING something paid lifts the cap — deliberately ownership here, not membership: a
+    customer who pays gets a self-serve path to a second org, while their teammates stay at one
+    apiece."""
     paid = (
         await session.execute(
             select(func.count())
@@ -222,10 +225,12 @@ async def _org_limit(session: AsyncSession, user_id: str) -> int:
 
 async def assert_can_create_organization(session: AsyncSession, user_id: str) -> None:
     if not await can_create_organization(session, user_id):
+        joined = await company_orgs_joined(session, user_id)
+        limit = await _org_limit(session, user_id)
         raise AuthError(
             409,
-            f"you can create {await _org_limit(session, user_id)} organization(s) on this plan — "
-            "upgrade an existing one to add more",
+            f"you already belong to {joined} organization(s) and this plan allows {limit} — "
+            "leave one, or upgrade an organization you own",
         )
 
 

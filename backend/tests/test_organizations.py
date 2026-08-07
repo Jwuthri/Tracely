@@ -109,6 +109,26 @@ async def test_creating_an_organization_is_how_a_solo_account_grows(client, host
     assert len([p for p in me["projects"] if p["organization_id"] == org_id]) == 1
 
 
+async def test_joining_a_company_uses_up_your_one_organization(client, hosted):
+    """Membership, not ownership: someone invited into a company can't also run their own on the
+    side, which would be a second free pool for the same person."""
+    owner = await _company_token(client)
+    inv = await client.post(
+        "/auth/invitations", json={"email": "teammate@x.test", "role": "ADMIN"},
+        headers=_bearer(owner),
+    )
+    joined = await client.post(
+        "/auth/invitations/accept",
+        json={"token": inv.json()["token"], "password": "member-pw-1"},
+    )
+    mh = _bearer(joined.json()["token"])
+
+    me = (await client.get("/auth/me", headers=mh)).json()
+    assert me["can_create_organization"] is False  # ADMIN of a company, owns nothing
+    r = await client.post("/auth/organizations", json={"name": "Side"}, headers=mh)
+    assert r.status_code == 409 and "already belong" in r.json()["detail"]
+
+
 async def test_orgs_are_capped_or_the_whole_tier_is_theatre(client, hosted):
     """Each org is a fresh quota pool, so unlimited orgs would be unlimited free quota — the
     exact fan-out this layer exists to close, one level up."""

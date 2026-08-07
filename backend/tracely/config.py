@@ -100,9 +100,12 @@ class Settings(BaseSettings):
     pro_workspace_limit: int = 10
     free_seat_limit: int = 3
     pro_seat_limit: int = 10
-    # How many COMPANY organizations one user may own. Without this the whole account tier is
-    # theatre: creating an org is free and each one is a fresh quota pool, so unlimited orgs is
-    # unlimited free quota. Personal accounts don't count (everyone gets exactly one).
+    # How many COMPANY organizations one user may BELONG to (any role) before they can create
+    # another. Without this the whole account tier is theatre: creating an org is free and each
+    # one is a fresh quota pool, so unlimited orgs is unlimited free quota. Counting membership
+    # rather than ownership also stops someone inside a company running a second one on the
+    # side. Personal accounts don't count — everyone gets exactly one. Owning a PAID org lifts
+    # the cap to `pro_org_limit`.
     free_org_limit: int = 1
     pro_org_limit: int = 3
     # Stripe (subscription billing). Secret key + the Pro plan's monthly price id, plus the

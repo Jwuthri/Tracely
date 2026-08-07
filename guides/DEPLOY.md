@@ -143,9 +143,11 @@ into a single workspace, which is what keeps tenants apart:
 | `unlimited` (operator) | ∞ | ∞ | by invite |
 
 A solo user turns into a team by creating an organization (account menu → New organization) —
-but **`FREE_ORG_LIMIT` caps how many company orgs one user may own**, and that cap is what makes
-the whole tier real: an organization is a quota pool, so uncapped org creation would just be
-uncapped free quota one level up. Owning any paid org raises the cap to `PRO_ORG_LIMIT`.
+but **`FREE_ORG_LIMIT` caps how many company orgs one user may BELONG to**, and that cap is what
+makes the whole tier real: an organization is a quota pool, so uncapped org creation would just
+be uncapped free quota one level up. It counts membership, not ownership — being invited into a
+company uses up your one, so nobody runs a private org on the side of the team they're in.
+*Owning* a paid org raises the cap to `PRO_ORG_LIMIT`.
 `ALLOW_PUBLIC_SIGNUP=false` (the self-host default) keeps registration first-user-only, with
 everyone else arriving by invite; set it to `true` for hosted cloud, where each signup gets its
 own personal organization. Caps are only enforced when `BILLING_ENABLED=true`, so a self-hosted
