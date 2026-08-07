@@ -21,7 +21,8 @@ export function QuotaBanner({ usage }: { usage: BillingUsage | null }) {
         </span>
         <span className="text-fg-muted">
           {usage.traces_used.toLocaleString()} of {usage.trace_limit.toLocaleString()} traces this
-          month{over ? " — new traces are being rejected until the month rolls over." : "."}
+          month{usage.quota_scope === "account" ? " across your workspaces" : ""}
+          {over ? " — new traces are being rejected until the month rolls over." : "."}
         </span>
         <Link
           href="/settings/billing"

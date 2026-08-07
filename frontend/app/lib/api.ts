@@ -518,6 +518,9 @@ export type BillingUsage = {
   period: string; // "YYYY-MM" (UTC)
   traces_used: number;
   trace_limit: number | null;
+  // "account" = free quota pooled across every workspace this account owns; "workspace" = this
+  // project alone (paid plans, or self-host projects with no owning user).
+  quota_scope: "account" | "workspace";
 };
 
 /** Never throws (same rationale as getLlmKeyConfigured): the shell's quota banner and the

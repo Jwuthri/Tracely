@@ -18,6 +18,10 @@ What counts: externally-POSTed OTLP traces (`/v1/traces`), excluding Tracely's o
 (`internal_kind`). Emulated scenario turns are emitted inline (never through the counting task),
 so driving scenarios doesn't consume quota — unless the customer's own instrumented endpoint
 exports spans for those turns, which are their spans arriving like any other trace.
+
+Counting stays per-project (exact, dedup'd per project-month); only the gate's READ side pools:
+a free workspace's `used` is the sum across every free workspace sharing its
+`billing_owner_id`, so creating workspaces never mints extra free quota (see `_usage_from_pg`).
 """
 
 from __future__ import annotations
@@ -26,11 +30,11 @@ from collections.abc import Iterable
 
 import structlog
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tracely.config import settings
-from tracely.domain.billing import current_period, trace_limit_for
+from tracely.domain.billing import PLAN_FREE, current_period, trace_limit_for
 from tracely.infrastructure.db.models import Project, UsageCounter
 from tracely.infrastructure.redis_client import async_redis, sync_redis
 
@@ -130,27 +134,58 @@ async def quota_gate(project_id: str, session: AsyncSession) -> None:
 async def usage_snapshot(project_id: str, session: AsyncSession) -> dict:
     """The billing page's numbers: plan, this month's count, and the cap (None = uncapped)."""
     period = current_period()
-    used, limit = await _snapshot_from_pg(project_id, period, session)
-    plan = await session.scalar(select(Project.plan).where(Project.id == project_id))
+    used, limit, plan, pooled = await _usage_from_pg(project_id, period, session)
     return {
         "billing_enabled": settings.billing_enabled,
-        "plan": plan or "free",
+        "plan": plan,
         "period": period,
         "traces_used": used,
         "trace_limit": limit,
+        # "account" = the free pool, summed across every free workspace this account owns
+        # (creating workspaces mints no extra quota); "workspace" = this project alone.
+        "quota_scope": "account" if pooled else "workspace",
     }
 
 
 async def _snapshot_from_pg(
     project_id: str, period: str, session: AsyncSession
 ) -> tuple[int, int | None]:
-    plan = await session.scalar(select(Project.plan).where(Project.id == project_id))
-    limit = trace_limit_for(
-        plan or "free", settings.free_trace_limit, settings.pro_trace_limit
-    )
-    used = await session.scalar(
-        select(UsageCounter.traces).where(
-            UsageCounter.project_id == project_id, UsageCounter.period == period
+    used, limit, _plan, _pooled = await _usage_from_pg(project_id, period, session)
+    return used, limit
+
+
+async def _usage_from_pg(
+    project_id: str, period: str, session: AsyncSession
+) -> tuple[int, int | None, str, bool]:
+    """(used, limit, plan, pooled). Free-plan usage is summed across ALL free workspaces sharing
+    this project's `billing_owner_id` — the Langfuse/LangSmith model, where quota attaches to
+    the account so extra workspaces never mint extra free quota. Paid plans stay per-workspace
+    (each Pro workspace bought its own cap), and an ownerless project (dev mode, CLI seed)
+    falls back to its own counter."""
+    row = (
+        await session.execute(
+            select(Project.plan, Project.billing_owner_id).where(Project.id == project_id)
         )
-    )
-    return int(used or 0), limit
+    ).first()
+    plan = (row[0] if row else None) or PLAN_FREE
+    owner = row[1] if row else None
+    limit = trace_limit_for(plan, settings.free_trace_limit, settings.pro_trace_limit)
+    pooled = plan == PLAN_FREE and owner is not None
+    if pooled:
+        used = await session.scalar(
+            select(func.coalesce(func.sum(UsageCounter.traces), 0))
+            .select_from(UsageCounter)
+            .join(Project, Project.id == UsageCounter.project_id)
+            .where(
+                Project.billing_owner_id == owner,
+                Project.plan == PLAN_FREE,
+                UsageCounter.period == period,
+            )
+        )
+    else:
+        used = await session.scalar(
+            select(UsageCounter.traces).where(
+                UsageCounter.project_id == project_id, UsageCounter.period == period
+            )
+        )
+    return int(used or 0), limit, plan, pooled

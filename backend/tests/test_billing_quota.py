@@ -9,9 +9,14 @@ Counting invariants pinned here, all of which favor the customer:
 
 Enforcement: over the plan's cap → 429 + Retry-After before the body is read; under → the
 request proceeds; infra down → allow (a quota is a product limit, not a security boundary).
+
+The free quota pools per ACCOUNT (`projects.billing_owner_id`), Langfuse/LangSmith-style:
+creating more workspaces never mints more free quota. Paid plans stay per-workspace.
 """
 
 from __future__ import annotations
+
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine
@@ -183,6 +188,29 @@ async def _workspace_over_quota(client, make_workspace, session, traces: int):
     return proj, key
 
 
+async def _sibling_project(
+    session, owner_id: str | None, *, plan: str = "free", traces: int = 0, slug: str = "sib",
+    key: str | None = None,
+):
+    """Another workspace on the same account — the fan-out the pool exists to close."""
+    proj = models.Project(
+        id=str(uuid4()), slug=slug, name=slug, source="local", plan=plan,
+        billing_owner_id=owner_id,
+    )
+    session.add(proj)
+    await session.flush()
+    if traces:
+        session.add(
+            models.UsageCounter(project_id=proj.id, period=current_period(), traces=traces)
+        )
+    k = None
+    if key:
+        k = models.IngestKey(id=str(uuid4()), project_id=proj.id, key=key)
+        session.add(k)
+    await session.commit()
+    return proj, k
+
+
 async def test_over_quota_returns_429_with_retry_after(
     client, make_workspace, session, monkeypatch
 ):
@@ -276,16 +304,91 @@ async def test_unlimited_plan_is_never_gated(client, make_workspace, session, mo
     assert r.status_code == 200
 
 
+async def test_free_quota_pools_across_owned_workspaces(
+    client, make_workspace, session, monkeypatch
+):
+    """6 traces here + 5 in a second workspace on the same account = one exhausted 10-pool."""
+    monkeypatch.setattr(settings, "billing_enabled", True)
+    monkeypatch.setattr(settings, "free_trace_limit", 10)
+    monkeypatch.setattr(quota_service, "async_redis", lambda: _BoomAsyncRedis())
+    import tracely.api.routers.otlp as otlp_router
+
+    monkeypatch.setattr(
+        otlp_router, "ingest_otlp",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("gate must reject first")),
+    )
+    proj, key = await _workspace_over_quota(client, make_workspace, session, traces=6)
+    await _sibling_project(session, proj.billing_owner_id, traces=5, slug="pool-sib")
+
+    r = await client.post(
+        "/v1/traces", content=b"{}", headers={"Authorization": f"Bearer {key.key}"}
+    )
+    assert r.status_code == 429
+
+
+async def test_pro_workspaces_do_not_share_the_free_pool(
+    client, make_workspace, session, monkeypatch
+):
+    """Paid caps are per-workspace: Pro usage never drains the free pool, and an exhausted
+    free pool never gates a Pro workspace on the same account."""
+    monkeypatch.setattr(settings, "billing_enabled", True)
+    monkeypatch.setattr(settings, "free_trace_limit", 10)
+    monkeypatch.setattr(quota_service, "async_redis", lambda: _BoomAsyncRedis())
+    import tracely.api.routers.otlp as otlp_router
+
+    monkeypatch.setattr(otlp_router, "ingest_otlp", lambda *a: "batch-1")
+    proj, key = await _workspace_over_quota(client, make_workspace, session, traces=2)
+    _, pro_key = await _sibling_project(
+        session, proj.billing_owner_id, plan="pro", traces=500_000, slug="pro-sib",
+        key="key-pro-sib",
+    )
+
+    r = await client.post(
+        "/v1/traces", content=b"{}", headers={"Authorization": f"Bearer {key.key}"}
+    )
+    assert r.status_code == 200  # free workspace at 2/10 — the Pro 500k doesn't count here
+
+    counter = await session.get(models.UsageCounter, (proj.id, current_period()))
+    counter.traces = 100  # free pool now exhausted
+    await session.commit()
+    r = await client.post(
+        "/v1/traces", content=b"{}", headers={"Authorization": f"Bearer {pro_key.key}"}
+    )
+    assert r.status_code == 200  # Pro workspace judged on its own 500k/1M
+
+
+async def test_ownerless_project_keeps_per_workspace_accounting(
+    client, make_workspace, session, monkeypatch
+):
+    """CLI-seeded / dev projects (billing_owner_id NULL) must never pool with each other."""
+    monkeypatch.setattr(settings, "billing_enabled", True)
+    monkeypatch.setattr(settings, "free_trace_limit", 10)
+    monkeypatch.setattr(quota_service, "async_redis", lambda: _BoomAsyncRedis())
+    import tracely.api.routers.otlp as otlp_router
+
+    monkeypatch.setattr(otlp_router, "ingest_otlp", lambda *a: "batch-1")
+    proj, key = await _workspace_over_quota(client, make_workspace, session, traces=5)
+    proj.billing_owner_id = None
+    await _sibling_project(session, None, traces=999, slug="orphan-sib")
+
+    r = await client.post(
+        "/v1/traces", content=b"{}", headers={"Authorization": f"Bearer {key.key}"}
+    )
+    assert r.status_code == 200  # 5/10 on its own counter; the other orphan's 999 is unrelated
+
+
 async def test_usage_endpoint_reports_the_snapshot(client, make_workspace, session, monkeypatch):
     monkeypatch.setattr(settings, "billing_enabled", True)
     monkeypatch.setattr(settings, "free_trace_limit", 20_000)
-    _, key = await _workspace_over_quota(client, make_workspace, session, traces=1234)
+    proj, key = await _workspace_over_quota(client, make_workspace, session, traces=1234)
+    await _sibling_project(session, proj.billing_owner_id, traces=234, slug="usage-sib")
 
     r = await client.get("/api/billing/usage", headers={"Authorization": f"Bearer {key.key}"})
     assert r.status_code == 200
     body = r.json()
     assert body["billing_enabled"] is True
     assert body["plan"] == "free"
-    assert body["traces_used"] == 1234
+    assert body["traces_used"] == 1234 + 234  # the account pool, not this workspace alone
     assert body["trace_limit"] == 20_000
     assert body["period"] == current_period()
+    assert body["quota_scope"] == "account"

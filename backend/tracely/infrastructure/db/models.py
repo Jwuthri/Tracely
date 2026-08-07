@@ -62,6 +62,12 @@ class Project(Base):
     # operator workspaces (set via SQL) and is never written by webhooks. Both defaults (Python +
     # server) so none of the Project-creation sites need to name the column.
     plan: Mapped[str] = mapped_column(String(16), default="free", server_default="free")
+    # The account this workspace's FREE quota draws from (migration 0022): the creating user.
+    # The gate pools usage across all free-plan projects sharing an owner, so spinning up more
+    # workspaces never mints more free quota. NULL (dev mode / CLI seed) = per-workspace.
+    billing_owner_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     subscription_status: Mapped[str | None] = mapped_column(String(32), nullable=True)

@@ -103,6 +103,7 @@ def make_workspace(session):
         )
         session.add_all([proj, user])
         await session.flush()
+        proj.billing_owner_id = user.id  # mirrors provisioning: creator anchors the free pool
         k = models.IngestKey(id=str(uuid4()), project_id=proj.id, key=key)
         m = models.Membership(id=str(uuid4()), user_id=user.id, project_id=proj.id, role=role)
         session.add_all([k, m])

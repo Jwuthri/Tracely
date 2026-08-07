@@ -131,6 +131,13 @@ the plan changes; enforcement is fail-open (a Redis/Postgres outage admits trace
 them). Redis sizing: one set per project-month of trace ids (≈ tens of MB per million traces) —
 it shares the Celery broker, which runs `noeviction`, so give it headroom.
 
+**The free quota pools per account, not per workspace** (the Langfuse/LangSmith model): each
+workspace stores its creator as `projects.billing_owner_id`, and a free workspace's usage is
+summed across *every* free workspace that account owns — creating workspaces mints no extra
+quota. Paid plans stay per-workspace (each Pro workspace buys its own cap). Projects without an
+owning user (CLI-seeded, dev mode) fall back to per-workspace accounting; migration 0022
+backfills owners from the earliest OWNER membership.
+
 **Stripe setup (dashboard):** create the Pro product + monthly price → `STRIPE_PRICE_PRO`; add a
 webhook endpoint at `https://<api-domain>/api/billing/webhook` with events
 `checkout.session.completed`, `customer.subscription.updated`,

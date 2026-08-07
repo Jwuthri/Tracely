@@ -118,6 +118,8 @@ function BillingUsageCard({
         <p className="text-[12.5px] leading-relaxed text-fg-faint">
           A trace counts once per month, on ingest. Tracely&apos;s own recordings (evaluations,
           scenario drives) never count against your quota.
+          {usage.quota_scope === "account" &&
+            " The free quota is shared across every workspace you own — creating workspaces doesn't add quota."}
         </p>
 
         <BillingActions plan={usage.plan} canManage={canManage} />

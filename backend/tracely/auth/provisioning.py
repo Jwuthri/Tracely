@@ -129,6 +129,7 @@ async def bootstrap_owner(
     )
     session.add(user)
     await session.flush()
+    project.billing_owner_id = user.id  # free quota pools on the founding account
     session.add(
         Membership(id=str(uuid4()), user_id=user.id, project_id=project.id, role="OWNER")
     )
@@ -154,6 +155,8 @@ async def create_workspace(
         slug=f"{_slugify(name)}-{secrets.token_hex(3)}",
         name=name,
         source="local",
+        # every workspace this user creates draws from the SAME free quota pool
+        billing_owner_id=owner_user_id,
     )
     session.add(project)
     await session.flush()
@@ -290,6 +293,8 @@ async def upsert_clerk_principal(
             name=(f"Org {org_id}" if org_id else email),
             source="clerk",
             external_id=external_project,
+            # first account to touch the org (its creator, in practice) anchors the free pool
+            billing_owner_id=user.id,
         ),
     )
     await _ensure_ingest_key(session, project.id)
