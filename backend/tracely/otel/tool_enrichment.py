@@ -117,13 +117,22 @@ def _enrich_tool_io(events: list[dict[str, Any]]) -> None:
     for siblings in children.values():
         siblings.sort(key=lambda x: x.get("start_time") or "")
 
-    # Index GENERATION spans by trace_id so the lookup is per-trace.
+    # Index GENERATION spans by trace_id so the lookup is per-trace. Two indexes: the one keyed
+    # on `output` supplies a tool's ARGUMENTS (the call the model made), the one keyed on `input`
+    # supplies its RESULT (the tool message fed back on the next turn).
     gens_by_trace: dict[str, list[dict[str, Any]]] = {}
+    gens_with_input_by_trace: dict[str, list[dict[str, Any]]] = {}
     for e in events:
-        if e.get("type") == GENERATION and e.get("output") and e.get("start_time"):
-            gens_by_trace.setdefault(e.get("trace_id") or "", []).append(e)
-    for gens in gens_by_trace.values():
-        gens.sort(key=lambda x: x["start_time"])
+        if e.get("type") != GENERATION or not e.get("start_time"):
+            continue
+        trace = e.get("trace_id") or ""
+        if e.get("output"):
+            gens_by_trace.setdefault(trace, []).append(e)
+        if e.get("input"):
+            gens_with_input_by_trace.setdefault(trace, []).append(e)
+    for index in (gens_by_trace, gens_with_input_by_trace):
+        for gens in index.values():
+            gens.sort(key=lambda x: x["start_time"])
 
     def _nearest_gen(tool_ev: dict[str, Any]) -> dict[str, Any] | None:
         st = tool_ev.get("start_time")
@@ -139,21 +148,23 @@ def _enrich_tool_io(events: list[dict[str, Any]]) -> None:
         return match
 
     def _next_gen_after(span: dict[str, Any]) -> dict[str, Any] | None:
+        """The next generation in the SAME trace. Scoping matters: one OTLP batch carries many
+        traces, and an unscoped scan let a tool span adopt a different conversation's tool result
+        as its own output — wrong data, silently, in whichever trace lost the race."""
         st = span.get("start_time")
         if not st:
             return None
-        candidates = [
-            e for e in events
-            if e.get("type") == GENERATION and e.get("input") and e.get("start_time")
-            and e["start_time"] > st
-        ]
-        candidates.sort(key=lambda x: x["start_time"])
-        return candidates[0] if candidates else None
+        for g in gens_with_input_by_trace.get(span.get("trace_id") or "", []):
+            if g["start_time"] > st:
+                return g
+        return None
 
     for ev in events:
         if ev.get("type") != TOOL:
             continue
-        has_full_input = ev.get("input") and ev["input"].startswith("{")
+        # `[` as well as `{`: a tool whose arguments are a list ("["a","b"]") had a perfectly good
+        # recorded input treated as missing and overwritten by the reconstruction below.
+        has_full_input = bool(ev.get("input")) and ev["input"].lstrip().startswith(("{", "["))
         if has_full_input and ev.get("output"):
             continue  # already complete
         gen = _nearest_gen(ev)

@@ -18,6 +18,7 @@ from tracely.otel.messages import (
     _looks_like_messages,
     _normalize_parsed,
     _parse_litellm_attr,
+    _retrieval_documents,
 )
 from tracely.otel.types import EMBEDDING, GENERATION
 
@@ -54,6 +55,9 @@ _MSG_PREFIXES = (
     "llm.output_messages.",
     "gen_ai.prompt.",
     "gen_ai.completion.",
+    # Retrieved documents are reassembled into `output`; leaving them here too would duplicate
+    # every chunk of retrieved text into the metadata map on every RAG span.
+    "retrieval.documents.",
 )
 _MSG_KEYS = frozenset({"gen_ai.input.messages", "gen_ai.output.messages"})
 
@@ -102,6 +106,10 @@ def _io_field(attrs: dict[str, Any], direction: str) -> str | None:
     manual = _first(attrs, [f"tracely.{direction}", f"langfuse.observation.{direction}"])
     if manual is not None:
         return _normalize_io_value(manual)
+    if direction == "output":
+        docs = _retrieval_documents(attrs)
+        if docs is not None:
+            return _to_str(docs)
     msgs = _io_messages(attrs, direction)
     if msgs is not None and _has_text(msgs):
         # Walk message contents to normalize Python-repr tool results re-injected by frameworks

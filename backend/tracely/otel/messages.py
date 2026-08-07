@@ -47,6 +47,12 @@ def _normalize_content(raw: Any) -> Any:
                 elif isinstance(p.get("content"), str) and p.get("type", "text") in ("text", None):
                     # OTel structured part: {type:'text', content:'…'}
                     blocks.append({"type": "text", "text": p["content"]})
+                elif isinstance(p.get("thinking"), str):
+                    # Anthropic extended thinking: `{type:'thinking', thinking:'…'}`. Keep the
+                    # type (renderers style reasoning differently) but mirror the prose into
+                    # `text`, which is the field every renderer reads — otherwise the model's
+                    # reasoning showed up as a raw JSON blob.
+                    blocks.append({"type": "thinking", "text": p["thinking"]})
                 else:
                     blocks.append(p)  # images / files / tool parts pass through
         return blocks
@@ -99,6 +105,27 @@ def _indices(attrs: dict[str, Any], prefix: str) -> list[int]:
             if head.isdigit():
                 seen.add(int(head))
     return sorted(seen)
+
+
+def _retrieval_documents(attrs: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """OpenInference `retrieval.documents.<i>.document.{id,score,content,metadata}` → a list.
+
+    What a RETRIEVER span *returned* is the entire point of a retrieval step, and it lives only
+    in these flattened keys — no `output.value`. Without this every RAG agent's retrieval showed
+    an empty Output, so neither a human nor a judge could tell a good retrieval from a bad one.
+    """
+    prefix = "retrieval.documents."
+    docs: list[dict[str, Any]] = []
+    for i in _indices(attrs, prefix):
+        base = f"{prefix}{i}.document."
+        doc: dict[str, Any] = {}
+        for field in ("id", "score", "content", "metadata"):
+            value = attrs.get(f"{base}{field}")
+            if value not in (None, ""):
+                doc[field] = _as_obj(value) if field == "metadata" else value
+        if doc:
+            docs.append(doc)
+    return docs or None
 
 
 def _flat_tool_calls(attrs: dict[str, Any], prefix: str, wrapped: bool) -> list[dict[str, Any]]:

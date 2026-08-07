@@ -526,3 +526,91 @@ def test_an_explicit_model_still_wins_over_the_blob():
         "llm.invocation_parameters": '{"model": "gpt-4o-mini"}',
     })
     assert e["model_id"] == "gpt-4o"
+
+
+def test_retriever_documents_become_the_span_output():
+    """What a retrieval returned is the point of the step, and it lives only in these flattened
+    keys — no `output.value`. Every RAG agent's retrieval used to render an empty Output, so
+    neither a human nor a judge could tell a good retrieval from a bad one."""
+    e = _event({
+        "openinference.span.kind": "RETRIEVER",
+        "input.value": "refund policy",
+        "retrieval.documents.0.document.id": "doc-1",
+        "retrieval.documents.0.document.score": 0.91,
+        "retrieval.documents.0.document.content": "Refunds within 30 days.",
+        "retrieval.documents.1.document.id": "doc-2",
+        "retrieval.documents.1.document.content": "Photograph damaged items.",
+    })
+    assert e["type"] == "RETRIEVER"
+    docs = json.loads(e["output"])
+    assert [d["id"] for d in docs] == ["doc-1", "doc-2"]
+    assert docs[0]["content"] == "Refunds within 30 days."
+    # and they must not also be dumped into metadata
+    assert not any(k.startswith("retrieval.documents") for k in e["metadata"])
+
+
+def test_anthropic_thinking_blocks_render_as_text():
+    """Extended thinking arrives as `{type:'thinking', thinking:'…'}`. The block keeps its type
+    (reasoning is styled differently) but mirrors into `text`, which is what renderers read —
+    otherwise the model's reasoning displayed as a raw JSON blob."""
+    e = _event({
+        "gen_ai.operation.name": "chat",
+        "gen_ai.request.model": "claude-sonnet-4-5",
+        "gen_ai.output.messages": json.dumps([{"role": "assistant", "content": [
+            {"type": "thinking", "thinking": "Policy says 30 days."},
+            {"type": "text", "text": "You can get a refund within 30 days."},
+        ]}]),
+    })
+    blocks = json.loads(e["output"])[0]["content"]
+    assert blocks[0] == {"type": "thinking", "text": "Policy says 30 days."}
+    assert blocks[1]["text"] == "You can get a refund within 30 days."
+
+
+# ── tool I/O reconstruction must not cross traces ────────────────────────────
+
+
+def _tool_batch() -> list[dict]:
+    """Two traces in ONE OTLP batch. Trace A's tool has no recorded output; trace B's later
+    generation carries a tool result. They must not be joined."""
+    return [
+        {"span_id": "a1", "trace_id": "A", "type": "GENERATION", "start_time": "1",
+         "parent_span_id": "", "output": json.dumps([{"role": "assistant", "tool_calls": [
+             {"id": "call_a", "function": {"name": "get_order", "arguments": '{"id":"A"}'}}]}])},
+        {"span_id": "a2", "trace_id": "A", "type": "TOOL", "name": "get_order",
+         "start_time": "2", "parent_span_id": "a1", "input": "", "output": ""},
+        {"span_id": "b1", "trace_id": "B", "type": "GENERATION", "start_time": "3",
+         "parent_span_id": "", "input": json.dumps([
+             {"role": "tool", "tool_call_id": "call_a", "content": "TRACE B SECRET"}])},
+    ]
+
+
+def test_a_tool_never_adopts_another_traces_result():
+    from tracely.otel.tool_enrichment import _enrich_tool_io
+
+    events = _tool_batch()
+    _enrich_tool_io(events)
+    tool = next(e for e in events if e["span_id"] == "a2")
+    assert "TRACE B SECRET" not in (tool.get("output") or "")
+
+
+def test_a_tool_still_gets_its_own_traces_result():
+    from tracely.otel.tool_enrichment import _enrich_tool_io
+
+    events = _tool_batch()
+    events[2]["trace_id"] = "A"  # same trace now — the join is correct here
+    events[2]["start_time"] = "3"
+    _enrich_tool_io(events)
+    tool = next(e for e in events if e["span_id"] == "a2")
+    assert tool["output"] == "TRACE B SECRET"
+
+
+def test_an_array_shaped_tool_input_is_not_overwritten():
+    """`has_full_input` tested `startswith("{")`, so a list-shaped argument payload looked
+    missing and was replaced by the reconstruction."""
+    from tracely.otel.tool_enrichment import _enrich_tool_io
+
+    events = _tool_batch()
+    tool = events[1]
+    tool["input"] = '["already", "recorded"]'
+    _enrich_tool_io(events)
+    assert json.loads(tool["input"]) == ["already", "recorded"]
