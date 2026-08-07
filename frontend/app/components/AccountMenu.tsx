@@ -224,24 +224,8 @@ export function AccountMenu({ me }: { me: Me | null }) {
             </div>
           )}
 
-          <a
-            href="/settings/api-keys"
-            className="block px-3 py-2 text-[12.5px] text-fg-muted transition-colors hover:bg-white/[0.04] hover:text-fg"
-          >
-            Settings · API keys
-          </a>
-          <a
-            href="/settings/data"
-            className="block px-3 py-2 text-[12.5px] text-fg-muted transition-colors hover:bg-white/[0.04] hover:text-fg"
-          >
-            Settings · Data
-          </a>
-          <a
-            href="/settings/llm"
-            className="block px-3 py-2 text-[12.5px] text-fg-muted transition-colors hover:bg-white/[0.04] hover:text-fg"
-          >
-            Settings · LLM key
-          </a>
+          {/* Workspace settings live in the sidebar's Configure group — this menu is the account:
+              who you're signed in as, which workspace, and how to leave. */}
           {MODE === "local" && me?.user_id && (
             <a
               href="/settings/account"

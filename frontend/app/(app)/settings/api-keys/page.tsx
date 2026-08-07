@@ -1,4 +1,5 @@
 import { CopyId } from "@/app/components/CopyId";
+import { LlmKeyPanel } from "@/app/components/LlmKeyPanel";
 import { getMe } from "@/app/lib/auth";
 
 function mask(k: string) {
@@ -15,7 +16,8 @@ export default async function ApiKeysPage() {
       <header className="reveal">
         <h1 className="font-display text-[24px] font-extrabold tracking-tight">API keys</h1>
         <p className="mt-1.5 text-[14px] text-fg-muted">
-          Send traces from the SDK or OTLP with an ingest key. Treat it like a password.
+          The keys this workspace sends traces with, and the one it runs AI features on. Treat
+          both like passwords.
         </p>
       </header>
 
@@ -35,6 +37,8 @@ export default async function ApiKeysPage() {
           ))
         )}
       </section>
+
+      <LlmKeyPanel />
 
       <section className="card p-5">
         <div className="mb-2 text-[13px] font-semibold text-fg">Send your first trace</div>
