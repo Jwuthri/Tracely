@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import structlog
+from celery import signals as celery_signals
 
 from tracely.config import settings
 from tracely.infrastructure.db import repositories
@@ -16,6 +17,19 @@ from tracely.services.failure_intel_service import FailureIntelService
 from tracely.services.ingestion_service import IngestionService
 
 log = structlog.get_logger()
+
+
+@celery_signals.worker_ready.connect
+def _warm_pricing_on_boot(**_kw) -> None:
+    """Load OpenRouter's price catalog once the worker is up.
+
+    This process is the one that prices spans (`IngestionService._attach_costs`), so a cold cache
+    means the first OTLP batch after every restart either waits on the fetch or — if it times
+    out — is written with no cost at all and never revisited. Best-effort; never blocks the worker.
+    """
+    from tracely.infrastructure.llm.provider import warm_pricing_catalog
+
+    warm_pricing_catalog()
 
 
 @celery_app.task(name="tracely.ingest_otlp_blob", bind=True, max_retries=6, default_retry_delay=5)

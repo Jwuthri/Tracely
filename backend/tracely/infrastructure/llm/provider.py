@@ -146,6 +146,8 @@ _MODELS_TTL_S = 3600
 # Pricing is per 1M tokens (OpenRouter publishes per-token strings; we multiply by 1M on parse so
 # every downstream consumer can do `tokens / 1_000_000 * per_mtok` symmetrically).
 _models_cache: dict[str, Any] = {"ts": 0.0, "by_id": None}
+# Derived from `_models_cache`, rebuilt when its timestamp moves — see `_price_index`.
+_price_index_cache: dict[str, Any] = {"stamp": None, "idx": None}
 
 
 def _fernet():
@@ -312,20 +314,22 @@ def _per_mtok(raw: Any) -> float | None:
 def _openrouter_models() -> dict[str, dict]:
     """`{model_id: {name, prompt_per_mtok, completion_per_mtok}}` from OpenRouter's /models,
     cached for an hour. On a failed refresh the last-known catalog keeps serving (with a 60s
-    retry cooldown so outages don't stack 10s-timeout fetches on every modal open). Empty when
-    no key is configured — callers fall back to the curated labels + static pricing table."""
+    retry cooldown so outages don't stack 10s-timeout fetches on every modal open).
+
+    Deliberately does NOT require a key: `/models` is a public catalog, and it is what prices
+    every ingested span (`resolve_rate`). Gating it on a key meant a self-hosted deployment with
+    no LLM configured showed $0.00 for all spend — the pricing of a model has nothing to do with
+    whether *we* can call it. A key is still sent when there is one."""
     now = time.monotonic()
     if _models_cache["by_id"] is not None and now - _models_cache["ts"] < _MODELS_TTL_S:
         return _models_cache["by_id"]
     key = effective_openrouter_key()
-    if not key:
-        return {}
     try:
         import httpx
 
         resp = httpx.get(
             f"{settings.openrouter_base_url.rstrip('/')}/models",
-            headers={"Authorization": f"Bearer {key}"},
+            headers={"Authorization": f"Bearer {key}"} if key else {},
             timeout=10,
         )
         resp.raise_for_status()
@@ -347,6 +351,91 @@ def _openrouter_models() -> dict[str, dict]:
         # serve stale (or nothing) and retry in 60s instead of on every request
         _models_cache["ts"] = now - _MODELS_TTL_S + 60
         return _models_cache["by_id"] or {}
+
+
+def _price_key(model_id: str) -> str:
+    """Canonical lookup key for a model id.
+
+    `.` and `_` fold to `-` because the same model is spelled differently by whoever reports it:
+    OpenRouter lists `anthropic/claude-sonnet-4.5` while Anthropic's own API — and therefore its
+    instrumentor — says `claude-sonnet-4-5-20250929`. Without folding, no Anthropic span is ever
+    priced.
+    """
+    return (model_id or "").strip().lower().replace(".", "-").replace("_", "-")
+
+
+def warm_pricing_catalog() -> int:
+    """Preload OpenRouter's model catalog at process start; returns how many models it holds.
+
+    Every ingested span is priced against this, so without a warm-up the first OTLP batch after a
+    restart pays for the fetch — and if that fetch times out, a whole batch of spans is written
+    with no cost and never revisited. Best-effort by design: a failure here logs and leaves the
+    static fallback in play, it never blocks startup.
+    """
+    try:
+        count = len(_openrouter_models())
+        log.info("pricing_catalog_loaded", models=count)
+        return count
+    except Exception as exc:  # noqa: BLE001 — pricing must never take a process down
+        log.warning("pricing_catalog_warm_failed", error=str(exc))
+        return 0
+
+
+def _price_index() -> dict[str, tuple[float | None, float | None]]:
+    """`{lookup_key: (prompt_per_mtok, completion_per_mtok)}` built from the live catalog plus the
+    static fallback, keyed by BOTH the full OpenRouter id (`openai/gpt-4o`) and its bare tail
+    (`gpt-4o`) — instrumentors report whichever they feel like. Rebuilt only when the underlying
+    catalog cache turns over, so the ingest path does a dict lookup, not a rebuild, per span."""
+    stamp = _models_cache["ts"]
+    if _price_index_cache.get("stamp") == stamp and _price_index_cache.get("idx") is not None:
+        return _price_index_cache["idx"]
+    idx: dict[str, tuple[float | None, float | None]] = {}
+
+    def put(key: str, rate: tuple[float | None, float | None]) -> None:
+        key = _price_key(key)
+        # First writer wins: the live catalog is registered before the static fallback, and a
+        # full id before the bare tail it shares with other providers' models.
+        if key and key not in idx:
+            idx[key] = rate
+
+    for mid, info in _openrouter_models().items():
+        rate = (info.get("prompt_per_mtok"), info.get("completion_per_mtok"))
+        put(mid, rate)
+        put(mid.split("/")[-1], rate)
+    for mid, rate in _FALLBACK_PRICING_USD_PER_MTOK.items():
+        put(mid, rate)
+        put(mid.split("/")[-1], rate)
+    _price_index_cache.update(stamp=stamp, idx=idx)
+    return idx
+
+
+def resolve_rate(model_id: str) -> tuple[float | None, float | None] | None:
+    """`(prompt_per_mtok, completion_per_mtok)` for a model id **as a tracer reported it**, or
+    None when it isn't in the catalog.
+
+    Not `model_pricing`, which normalizes a bare id by prefixing `openai/` — fine for a judge
+    model we chose, wrong for ingest, where a bare `claude-3-5-sonnet` from an Anthropic
+    instrumentor would become `openai/claude-3-5-sonnet` and price at zero. This tries, in order:
+    the id as given, the bare tail, the id minus a trailing date/version qualifier
+    (`gpt-4o-2024-11-20` → `gpt-4o`), and finally the longest catalog key it starts with.
+    """
+    raw = _price_key(model_id)
+    if not raw:
+        return None
+    idx = _price_index()
+    bare = raw.split("/")[-1]
+    for candidate in (raw, bare, raw.split(":")[0], bare.split(":")[0]):
+        hit = idx.get(candidate)
+        if hit:
+            return hit
+    # Trailing qualifiers: providers stamp dated snapshots (`-2024-11-20`, `-20250929`,
+    # `-latest`, `-v2`) that the catalog lists only in their base form.
+    parts = bare.split(":")[0].split("-")
+    for cut in range(len(parts) - 1, 0, -1):
+        hit = idx.get("-".join(parts[:cut]))
+        if hit:
+            return hit
+    return None
 
 
 def _openrouter_model_names() -> dict[str, str]:

@@ -15,11 +15,13 @@ from collections import defaultdict
 import structlog
 
 from tracely.config import settings
+from tracely.domain.cost import cost_details
 from tracely.infrastructure.blob import s3 as blobstore
 from tracely.infrastructure.clickhouse.client import get_client, insert_rows
 from tracely.infrastructure.clickhouse.events_schema import EVENT_COLUMNS, to_rows
 from tracely.infrastructure.db import repositories
 from tracely.infrastructure.db.engine import SyncSessionLocal
+from tracely.infrastructure.llm.provider import resolve_rate
 from tracely.infrastructure.registry import agents as registry
 from tracely.otel import parse_otlp_traces, parse_otlp_traces_json
 
@@ -54,6 +56,7 @@ class IngestionService:
 
         # agent-less traces -> fallback agent (inherits within a trace)
         self._attribute_default_agent(events)
+        self._attach_costs(events)
         self._resolve_registry_ids(project_id, events)
         # user-declared agent catalog (SDK `tracely.agents`) -> Postgres, stripped from ClickHouse
         self._extract_agent_definitions(project_id, events)
@@ -77,6 +80,29 @@ class IngestionService:
         }
 
     # ── internals ─────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _attach_costs(events: list[dict]) -> None:
+        """Derive each span's `cost_details` from its model + token counts.
+
+        Providers don't put a price on the wire, so this is the only way the money column exists.
+        Doing it at ingest (rather than in the reader) is what lets ClickHouse aggregate spend per
+        day, per agent and per gate — those all read `arraySum(mapValues(cost_details))`, which
+        was summing an always-empty map to a hard zero.
+
+        Rates come from OpenRouter's published catalog (refreshed hourly, warmed at startup) —
+        we don't maintain a price list. Unknown models get no cost rather than 0.0, so "not
+        priced" stays distinguishable from "free".
+
+        Lives here rather than in `otel/span_mapper` on purpose: the mapper is a serialization
+        rule over the wire format, and pricing is a policy that changes on its own schedule.
+        """
+        for ev in events:
+            if ev.get("cost_details") or not ev.get("usage_details"):
+                continue
+            model = str(ev.get("model_id") or "")
+            if model:
+                ev["cost_details"] = cost_details(resolve_rate(model), ev.get("usage_details"))
 
     @staticmethod
     def _attribute_default_agent(events: list[dict]) -> None:

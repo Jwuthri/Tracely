@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 import structlog
@@ -40,6 +41,14 @@ from tracely.log_config import configure_logging
 from tracely.services.seeding_service import DEFAULT_KEY
 
 log = structlog.get_logger()
+
+
+def _warm_pricing() -> None:
+    """Lazy import: `provider` pulls the LLM stack, which must stay off the import path of a
+    deployment that has no model configured (see the `llm_enabled()` rule)."""
+    from tracely.infrastructure.llm.provider import warm_pricing_catalog
+
+    warm_pricing_catalog()
 
 
 def _init_sentry() -> None:
@@ -85,6 +94,9 @@ async def lifespan(app: FastAPI):
     _init_sentry()
     log.info("api_startup", env=settings.tracely_env, auth_mode=settings.auth_mode)
     await _refuse_dev_key_in_prod()
+    # Model prices come from OpenRouter's published catalog, not a list we maintain. Loaded in the
+    # background — a 10s network timeout must never hold up the health check.
+    asyncio.create_task(asyncio.to_thread(_warm_pricing))
     yield
     # Release pooled connections so reloads/restarts/shutdowns don't leak sockets + file descriptors.
     await close_async_client()

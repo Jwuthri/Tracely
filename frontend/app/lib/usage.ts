@@ -1,6 +1,10 @@
 // Token + cost usage derivation, shared by the trace table (client) and the detail-page
-// headers (server). Pure functions — no React. Cost isn't traced, so price is derived from a
-// per-model rate table when token counts are present.
+// headers (server). Pure functions — no React.
+//
+// Cost isn't traced (no provider puts a price on the wire), so the backend derives it at ingest
+// and stores it on the span — `span.cost` wins wherever it's set. This table is the fallback for
+// rows written before that existed, and it powers the per-direction input/output breakdown. Keep
+// it roughly in step with `backend/tracely/domain/cost.py`, which is the source of truth.
 import type { ConvNode, FullTurn, SpanOut } from "./api";
 
 // Approx public list price, USD per 1M tokens: [input, output]. Matched as a SUBSTRING (not
@@ -11,7 +15,10 @@ const PRICES: [RegExp, number, number][] = [
   [/gpt-5\.?\d*-?nano/, 0.05, 0.4],
   [/gpt-5\.?\d*-?mini/, 0.25, 2],
   [/gpt-5/, 1.25, 10],
-  [/gpt-5.4-mini/, 0.15, 0.6],
+  // Must precede /gpt-4o/: without it `gpt-4o-mini` fell through to the full gpt-4o rate and
+  // was priced ~16x its real cost. (A dead `/gpt-5.4-mini/` entry used to sit here too — it was
+  // unreachable behind the gpt-5 mini pattern above, and disagreed with it.)
+  [/gpt-4o-?mini/, 0.15, 0.6],
   [/gpt-4o/, 2.5, 10],
   [/gpt-4\.1-nano/, 0.1, 0.4],
   [/gpt-4\.1-mini/, 0.4, 1.6],
