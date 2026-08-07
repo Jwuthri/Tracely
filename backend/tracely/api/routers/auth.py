@@ -13,13 +13,16 @@ from tracely.api.auth import get_principal, require_role
 from tracely.api.dto.auth import (
     AcceptInviteIn,
     ChangePasswordIn,
+    CreateOrgIn,
     CreateProjectIn,
     ForgotPasswordIn,
     InviteIn,
     InviteOut,
     InviteSummary,
     LoginIn,
+    MemberSummary,
     MeOut,
+    OrgRef,
     ProjectRef,
     RegisterIn,
     ResetPasswordIn,
@@ -27,6 +30,8 @@ from tracely.api.dto.auth import (
 )
 from tracely.auth import invitations, password_reset, passwords, provisioning, queries, tokens
 from tracely.auth.principal import Principal, select_membership
+from tracely.config import settings
+from tracely.domain.billing import KIND_COMPANY
 from tracely.infrastructure import mailer
 from tracely.infrastructure.db.session import get_session
 
@@ -40,14 +45,22 @@ async def _build_me(principal: Principal, session: AsyncSession) -> MeOut:
     keys = await queries.project_ingest_keys(session, principal.project_id)
     email = display_name = None
     projects: list[ProjectRef] = []
+    orgs: list[OrgRef] = []
     if principal.user_id:
         user = await queries.get_user(session, principal.user_id)
         if user:
             email, display_name = user.email, user.display_name
         projects = [
-            ProjectRef(id=p.id, name=p.name, slug=p.slug, role=m.role)
-            for (m, p) in await queries.user_memberships(session, principal.user_id)
+            ProjectRef(
+                id=p.id, name=p.name, slug=p.slug, role=role, organization_id=p.organization_id
+            )
+            for (p, role) in await queries.user_workspaces(session, principal.user_id)
         ]
+        orgs = [
+            OrgRef(id=o.id, name=o.name, slug=o.slug, kind=o.kind, plan=o.plan, role=role)
+            for (o, role) in await provisioning.user_organizations(session, principal.user_id)
+        ]
+    active_org = next((o for o in orgs if o.id == principal.organization_id), None)
     return MeOut(
         user_id=principal.user_id,
         email=email,
@@ -55,9 +68,25 @@ async def _build_me(principal: Principal, session: AsyncSession) -> MeOut:
         role=principal.role,
         project_id=principal.project_id,
         project_name=project.name if project else None,
+        organization_id=principal.organization_id,
+        organization_name=active_org.name if active_org else None,
+        organization_kind=active_org.kind if active_org else None,
+        organization_plan=active_org.plan if active_org else None,
         projects=projects,
+        organizations=orgs,
         ingest_keys=list(keys),
     )
+
+
+async def _require_org(principal: Principal, session: AsyncSession):
+    """The org backing the caller's active workspace, or a 400. Machine principals and the
+    org-less projects a CLI seed creates have no account to act on."""
+    if not principal.organization_id:
+        raise HTTPException(400, "this workspace has no organization (signed-in users only)")
+    org = await queries.get_organization(session, principal.organization_id)
+    if org is None:
+        raise HTTPException(404, "organization not found")
+    return org
 
 
 # ── common ────────────────────────────────────────────────────────────────────
@@ -79,19 +108,59 @@ async def logout() -> dict:
 @common_router.post("/auth/projects", response_model=ProjectRef)
 async def create_project(
     body: CreateProjectIn,
-    principal: Principal = Depends(get_principal),
+    principal: Principal = Depends(require_role("OWNER", "ADMIN")),
     session: AsyncSession = Depends(get_session),
 ) -> ProjectRef:
-    """Create a new workspace owned by the caller. Available in local/clerk modes (dev mode has no
-    signed-in user, so the ingest key already pins the single workspace)."""
+    """Add a workspace to the caller's organization. Bounded by the org's plan: a personal
+    account holds exactly one, so growing past it means creating an organization."""
+    org = await _require_org(principal, session)
+    await provisioning.assert_can_add_workspace(session, org)
+    project, _key = await provisioning.create_workspace(
+        session, name=body.name, organization_id=org.id
+    )
+    return ProjectRef(
+        id=project.id,
+        name=project.name,
+        slug=project.slug,
+        role=principal.role or "OWNER",
+        organization_id=org.id,
+    )
+
+
+@common_router.post("/auth/organizations", response_model=OrgRef)
+async def create_organization(
+    body: CreateOrgIn,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_session),
+) -> OrgRef:
+    """Create a company organization owned by the caller, with its first workspace. This is how a
+    solo account becomes a team: personal accounts can't be joined, companies can."""
     if not principal.user_id:
         raise HTTPException(
-            400, "creating a workspace requires a signed-in user (AUTH_MODE=local or clerk)"
+            400, "creating an organization requires a signed-in user (AUTH_MODE=local or clerk)"
         )
-    project, _key = await provisioning.create_workspace(
-        session, name=body.name, owner_user_id=principal.user_id
+    org = await provisioning.create_organization(
+        session, name=body.name, kind=KIND_COMPANY, owner_user_id=principal.user_id
     )
-    return ProjectRef(id=project.id, name=project.name, slug=project.slug, role="OWNER")
+    await provisioning.create_workspace(session, name=body.name, organization_id=org.id)
+    return OrgRef(
+        id=org.id, name=org.name, slug=org.slug, kind=org.kind, plan=org.plan, role="OWNER"
+    )
+
+
+@common_router.get("/auth/members", response_model=list[MemberSummary])
+async def list_members(
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_session),
+) -> list[MemberSummary]:
+    """Who is in the caller's organization. Any member may see their teammates."""
+    org = await _require_org(principal, session)
+    return [
+        MemberSummary(
+            user_id=u.id, email=u.email, display_name=u.display_name or "", role=role
+        )
+        for (u, role) in await queries.organization_members(session, org.id)
+    ]
 
 
 # ── local mode ────────────────────────────────────────────────────────────────
@@ -100,11 +169,19 @@ async def create_project(
 async def register(
     body: RegisterIn, session: AsyncSession = Depends(get_session)
 ) -> SessionOut:
-    if await provisioning.any_local_user(session):
+    """Create an account. On hosted cloud (`ALLOW_PUBLIC_SIGNUP`) anyone may register and gets
+    their own personal organization; self-hosted, the first registrant claims the deployment as a
+    company org and everyone else arrives by invite."""
+    email = body.email.lower().strip()
+    first_user = not await provisioning.any_local_user(session)
+    if not first_user and not settings.allow_public_signup:
         raise HTTPException(409, "registration is invite-only; ask an owner for an invite")
-    project, user = await provisioning.bootstrap_owner(
+    if not first_user and await queries.local_user_by_email(session, email):
+        raise HTTPException(409, "an account with that email already exists")
+    make = provisioning.bootstrap_owner if first_user else provisioning.signup_personal
+    project, user = await make(
         session,
-        email=body.email.lower().strip(),
+        email=email,
         password_hash=passwords.hash_password(body.password),
         display_name=body.display_name,
         workspace_name=body.workspace_name,
@@ -182,13 +259,18 @@ async def create_invitation(
     principal: Principal = Depends(require_role("OWNER", "ADMIN")),
     session: AsyncSession = Depends(get_session),
 ) -> InviteOut:
+    """Invite someone into the caller's ORGANIZATION — they get access to all of its workspaces.
+    409 when the org has no seat left, or when it's a personal account (which can never be
+    joined)."""
     role = body.role.upper()
     if role not in ("ADMIN", "MEMBER"):
         raise HTTPException(400, "role must be ADMIN or MEMBER")
+    org = await _require_org(principal, session)
+    await provisioning.assert_can_add_seat(session, org)
     raw, token_hash = invitations.new_invite_token()
     inv = await provisioning.create_invitation(
         session,
-        project_id=principal.project_id,
+        organization_id=org.id,
         email=body.email,
         role=role,
         invited_by=principal.user_id,
@@ -198,7 +280,6 @@ async def create_invitation(
     # so the UI can still surface the link manually (and as a fallback if delivery fails).
     emailed = False
     if mailer.email_enabled():
-        project = await queries.get_project(session, principal.project_id)
         inviter = None
         if principal.user_id:
             u = await queries.get_user(session, principal.user_id)
@@ -206,7 +287,7 @@ async def create_invitation(
         emailed = await mailer.send_invite_email(
             to=inv.email,
             raw_token=raw,
-            project_name=project.name if project else "Tracely",
+            project_name=org.name,
             inviter=inviter,
         )
     return InviteOut(
@@ -224,7 +305,8 @@ async def list_invitations(
     principal: Principal = Depends(require_role("OWNER", "ADMIN")),
     session: AsyncSession = Depends(get_session),
 ) -> list[InviteSummary]:
-    rows = await queries.invitations_for_project(session, principal.project_id)
+    org = await _require_org(principal, session)
+    rows = await queries.invitations_for_org(session, org.id)
     return [
         InviteSummary(
             id=i.id,
@@ -243,7 +325,8 @@ async def revoke_invitation(
     principal: Principal = Depends(require_role("OWNER", "ADMIN")),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    inv = await queries.invitation_get(session, principal.project_id, invite_id)
+    org = await _require_org(principal, session)
+    inv = await queries.invitation_get(session, org.id, invite_id)
     if not inv:
         raise HTTPException(404, "invitation not found")
     if inv.status == "PENDING":

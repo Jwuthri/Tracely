@@ -40,10 +40,12 @@ from tracely.infrastructure.db.session import get_session  # noqa: E402
 # which has no SQLite type compiler. Evaluators ride along because workspace provisioning seeds
 # the recommended catalog (and the /api/evaluators CRUD tests need it).
 _AUTH_TABLES = [
+    models.Organization.__table__,
+    models.OrgMembership.__table__,
     models.Project.__table__,
     models.IngestKey.__table__,
     models.User.__table__,
-    models.Membership.__table__,
+    models.Membership.__table__,  # legacy, still created so the table exists for rollback tests
     models.Invitation.__table__,
     models.PasswordReset.__table__,
     models.Evaluator.__table__,
@@ -91,21 +93,37 @@ async def client(sessionmaker):
 
 @pytest_asyncio.fixture
 def make_workspace(session):
-    """Create an isolated workspace (project + ingest key + OWNER user + membership), committed."""
+    """An isolated tenant: organization + workspace + ingest key + user with `role` in the org.
 
-    async def _make(slug: str, key: str, email: str, role: str = "OWNER", password: str = "pw-secret"):
-        proj = models.Project(id=str(uuid4()), slug=slug, name=slug, source="local")
+    Mirrors what provisioning builds, so tests exercise the same derived-access path the app
+    does (`kind="company"` by default — personal orgs refuse teammates)."""
+
+    async def _make(
+        slug: str,
+        key: str,
+        email: str,
+        role: str = "OWNER",
+        password: str = "pw-secret",
+        kind: str = "company",
+    ):
+        org = models.Organization(id=str(uuid4()), name=slug, slug=f"org-{slug}", kind=kind)
         user = models.User(
             id=str(uuid4()),
             email=email,
             source="local",
             password_hash=passwords.hash_password(password),
         )
-        session.add_all([proj, user])
+        session.add_all([org, user])
         await session.flush()
-        proj.billing_owner_id = user.id  # mirrors provisioning: creator anchors the free pool
+        proj = models.Project(
+            id=str(uuid4()), slug=slug, name=slug, source="local", organization_id=org.id
+        )
+        session.add(proj)
+        await session.flush()
         k = models.IngestKey(id=str(uuid4()), project_id=proj.id, key=key)
-        m = models.Membership(id=str(uuid4()), user_id=user.id, project_id=proj.id, role=role)
+        m = models.OrgMembership(
+            id=str(uuid4()), user_id=user.id, organization_id=org.id, role=role
+        )
         session.add_all([k, m])
         await session.commit()
         return proj, user, k

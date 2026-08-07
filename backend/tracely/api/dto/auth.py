@@ -53,20 +53,46 @@ class ProjectRef(BaseModel):
     name: str
     slug: str
     role: str
+    organization_id: str | None = None
+
+
+class OrgRef(BaseModel):
+    id: str
+    name: str
+    slug: str
+    kind: str  # personal | company
+    plan: str
+    role: str
 
 
 class CreateProjectIn(BaseModel):
     name: str = Field(min_length=1, max_length=256)
 
 
+class CreateOrgIn(BaseModel):
+    name: str = Field(min_length=1, max_length=256)
+
+
+class MemberSummary(BaseModel):
+    user_id: str
+    email: str
+    display_name: str = ""
+    role: str
+
+
 class MeOut(BaseModel):
     user_id: str | None
     email: str | None
     display_name: str | None
-    role: str | None
+    role: str | None  # the caller's role in the ACTIVE organization
     project_id: str
     project_name: str | None
+    organization_id: str | None = None
+    organization_name: str | None = None
+    organization_kind: str | None = None
+    organization_plan: str | None = None
     projects: list[ProjectRef] = []
+    organizations: list[OrgRef] = []
     ingest_keys: list[str] = []
 
 

@@ -33,6 +33,7 @@ from tracely.infrastructure.db.models import (
     IngestKey,
     MetaAnalysis,
     Monitor,
+    Organization,
     Project,
     RollingSummary,
     Scenario,
@@ -47,12 +48,16 @@ def project_get(s: Session, project_id: str) -> Project | None:
     return s.get(Project, project_id)
 
 
-def project_by_stripe_customer(s: Session, customer_id: str) -> Project | None:
-    """The workspace a Stripe customer id belongs to — the webhook's primary lookup."""
+def organization_get(s: Session, organization_id: str) -> Organization | None:
+    return s.get(Organization, organization_id) if organization_id else None
+
+
+def organization_by_stripe_customer(s: Session, customer_id: str) -> Organization | None:
+    """The account a Stripe customer id belongs to — the webhook's primary lookup."""
     if not customer_id:
         return None
     return s.execute(
-        select(Project).where(Project.stripe_customer_id == customer_id)
+        select(Organization).where(Organization.stripe_customer_id == customer_id)
     ).scalar_one_or_none()
 
 

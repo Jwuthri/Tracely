@@ -315,6 +315,8 @@ _ROUTER_TABLES = [
     models.IngestKey.__table__,
     models.User.__table__,
     models.Membership.__table__,
+    models.Organization.__table__,
+    models.OrgMembership.__table__,
     models.Invitation.__table__,
     models.PasswordReset.__table__,
     models.Evaluator.__table__,

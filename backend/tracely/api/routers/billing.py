@@ -7,7 +7,8 @@ when billing is off and 501 when Stripe isn't configured.
 Auth is deliberately uneven, per endpoint:
 - usage: any project principal (the page and banner read it).
 - checkout/portal: OWNER/ADMIN humans only — ingest keys have `role=None`, so an SDK credential
-  can never start a paid subscription.
+  can never start a paid subscription. The subscription belongs to the caller's ORGANIZATION,
+  which is what a workspace's quota is charged against.
 - webhook: NO bearer auth (precedent: `share.py`). Stripe authenticates with `Stripe-Signature`
   over the raw body bytes; a bad signature is 400, and transient processing failures are 5xx so
   Stripe's retry schedule redelivers (a swallowed DB blip must not eat a paid upgrade).
@@ -46,16 +47,25 @@ def _require_billing() -> None:
         raise HTTPException(status_code=501, detail="billing is not configured (Stripe keys unset)")
 
 
+def _organization_id(principal: Principal) -> str:
+    """The account being billed. Machine principals never get here (`require_role` rejects a
+    `role=None` ingest key first); an org-less project means a CLI-seeded/dev workspace."""
+    if not principal.organization_id:
+        raise HTTPException(400, "this workspace has no organization to bill")
+    return principal.organization_id
+
+
 @router.post("/billing/checkout")
 async def billing_checkout(
     principal: Principal = Depends(require_role("OWNER", "ADMIN")),
 ) -> dict:
-    """A Stripe Checkout URL upgrading this workspace to Pro. 409 when already subscribed."""
+    """A Stripe Checkout URL upgrading this organization to Pro. 409 when already subscribed."""
     _require_billing()
+    organization_id = _organization_id(principal)
 
     def work() -> str:
         with SyncSessionLocal() as s:
-            return billing_service.create_checkout_session(s, principal.project_id)
+            return billing_service.create_checkout_session(s, organization_id)
 
     try:
         return {"url": await run_in_threadpool(work)}
@@ -73,10 +83,11 @@ async def billing_portal(
 ) -> dict:
     """A Stripe Billing Portal URL — change card, cancel, download invoices."""
     _require_billing()
+    organization_id = _organization_id(principal)
 
     def work() -> str:
         with SyncSessionLocal() as s:
-            return billing_service.create_portal_session(s, principal.project_id)
+            return billing_service.create_portal_session(s, organization_id)
 
     try:
         return {"url": await run_in_threadpool(work)}

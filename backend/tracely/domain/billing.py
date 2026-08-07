@@ -12,9 +12,14 @@ from datetime import datetime, timezone
 
 PLAN_FREE = "free"
 PLAN_PRO = "pro"
-# Operator workspaces: no cap, set via SQL, and `plan_for_subscription_status` never returns it —
+# Operator orgs: no cap, set via SQL, and `plan_for_subscription_status` never returns it —
 # a stray Stripe event must not be able to downgrade (or grant) it.
 PLAN_UNLIMITED = "unlimited"
+
+# Organization kinds. A personal account is one human: 1 workspace, 1 seat, un-joinable — which
+# is what stops "invite yourself into a second free account" from being a quota loophole.
+KIND_PERSONAL = "personal"
+KIND_COMPANY = "company"
 
 # Subscription statuses that keep a workspace on the paid plan. `past_due` stays paid on
 # purpose: dunning (a failed card retry) must not flip a customer to free mid-cycle — Stripe
@@ -35,6 +40,25 @@ def trace_limit_for(plan: str, free_limit: int, pro_limit: int) -> int | None:
     if plan == PLAN_PRO:
         return pro_limit
     return free_limit
+
+
+def workspace_limit_for(plan: str, kind: str, free_limit: int, pro_limit: int) -> int | None:
+    """How many workspaces an org may hold; None = uncapped. A personal account is 1 by
+    definition — upgrading it doesn't buy more, converting to a company does."""
+    if plan == PLAN_UNLIMITED:
+        return None
+    if kind == KIND_PERSONAL:
+        return 1
+    return pro_limit if plan == PLAN_PRO else free_limit
+
+
+def seat_limit_for(plan: str, kind: str, free_limit: int, pro_limit: int) -> int | None:
+    """How many people an org may hold (members + pending invites); None = uncapped."""
+    if plan == PLAN_UNLIMITED:
+        return None
+    if kind == KIND_PERSONAL:
+        return 1
+    return pro_limit if plan == PLAN_PRO else free_limit
 
 
 def plan_for_subscription_status(status: str | None) -> str:

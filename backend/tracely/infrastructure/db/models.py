@@ -44,6 +44,59 @@ class AgentRole(str, enum.Enum):
     GENERIC = "GENERIC"
 
 
+class Organization(Base):
+    """The account a person or company signs up as — the tier ABOVE workspaces (migration 0023).
+
+    People are members of an organization, never of a single workspace: access to a project is
+    derived from membership in the project's organization (`auth/principal.select_membership`).
+    That makes cross-tenant access structurally impossible rather than policed — there is no
+    "invite someone to one workspace" path to get wrong.
+
+    `kind` decides the shape of the account:
+      - `personal` — one human, exactly 1 workspace and 1 seat. Cannot be joined, ever.
+      - `company`  — a team: several workspaces and seats, bounded by the plan.
+    Billing lives here too (plan + Stripe subscription): a company buys one subscription, not one
+    per workspace, and the monthly trace quota is the sum over the org's workspaces.
+    """
+
+    __tablename__ = "organizations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(256))
+    slug: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="personal", server_default="personal")
+    # `free | pro | unlimited` — `unlimited` is for operator orgs (set via SQL) and is never
+    # written by webhooks.
+    plan: Mapped[str] = mapped_column(String(16), default="free", server_default="free")
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    subscription_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    projects: Mapped[list["Project"]] = relationship(back_populates="organization")
+    members: Mapped[list["OrgMembership"]] = relationship(back_populates="organization")
+
+
+class OrgMembership(Base):
+    """A user's seat in an organization, with the role that applies to all of its workspaces."""
+
+    __tablename__ = "organization_memberships"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", name="uq_org_membership_org_user"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(16), default="MEMBER")  # OWNER | ADMIN | MEMBER
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    organization: Mapped[Organization] = relationship(back_populates="members")
+    user: Mapped["User"] = relationship()
+
+
 class Project(Base):
     __tablename__ = "projects"
     __table_args__ = (UniqueConstraint("source", "external_id", name="uq_projects_source_external"),)
@@ -51,6 +104,13 @@ class Project(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     slug: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(256))
+    # The account this workspace belongs to (migration 0023). Everyone who can reach this project
+    # reaches it through an OrgMembership here. NULL only for projects with no human owner at all
+    # (CLI-seeded, dev mode): unreachable by session auth, usable by ingest key, quota-counted on
+    # its own.
+    organization_id: Mapped[str | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     # tenancy source: "local" (self-host workspace) or "clerk" (org/personal provisioned from Clerk)
     source: Mapped[str] = mapped_column(String(16), default="local")
     # Clerk org_id, or "user:<clerk_user_id>" for a personal workspace; NULL for local single-workspace
@@ -61,10 +121,10 @@ class Project(Base):
     # Hosted-cloud billing (migration 0021). `free | pro | unlimited` — `unlimited` is for
     # operator workspaces (set via SQL) and is never written by webhooks. Both defaults (Python +
     # server) so none of the Project-creation sites need to name the column.
+    # Legacy billing columns (migrations 0021/0022), superseded by the same fields on
+    # Organization. No code reads them any more; kept one release so a rollback still finds its
+    # data, dropped in a later cleanup migration.
     plan: Mapped[str] = mapped_column(String(16), default="free", server_default="free")
-    # The account this workspace's FREE quota draws from (migration 0022): the creating user.
-    # The gate pools usage across all free-plan projects sharing an owner, so spinning up more
-    # workspaces never mints more free quota. NULL (dev mode / CLI seed) = per-workspace.
     billing_owner_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -73,6 +133,7 @@ class Project(Base):
     subscription_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    organization: Mapped[Organization | None] = relationship(back_populates="projects")
     ingest_keys: Mapped[list["IngestKey"]] = relationship(back_populates="project")
     agents: Mapped[list["Agent"]] = relationship(back_populates="project")
     memberships: Mapped[list["Membership"]] = relationship(back_populates="project")
@@ -141,8 +202,11 @@ class User(Base):
 
 
 class Membership(Base):
-    """Maps a user to a project (the tenant) with a role. The unique (user, project) constraint makes
-    Clerk role-sync and `X-Tracely-Project` selection safe idempotent operations."""
+    """LEGACY per-project membership, superseded by `OrgMembership` (migration 0023).
+
+    Access is now derived from the organization, so nothing reads or writes this table. Its rows
+    are kept for one release as the rollback path for the 0023 backfill; a later migration drops
+    it."""
 
     __tablename__ = "memberships"
     __table_args__ = (UniqueConstraint("user_id", "project_id", name="uq_membership_user_project"),)
@@ -177,14 +241,24 @@ class PasswordReset(Base):
 
 
 class Invitation(Base):
-    """A pending invite to join a project (local mode only; Clerk owns invites in hosted mode).
-    Only the sha256 of the raw token is stored; the raw token is shown once at creation."""
+    """A pending invite to join an ORGANIZATION (local mode only; Clerk owns invites in hosted
+    mode). Only the sha256 of the raw token is stored; the raw token is shown once at creation.
+
+    Accepting grants an `OrgMembership`, i.e. access to every workspace in that org — there is no
+    way to invite someone into a single workspace, which is what keeps tenants from bleeding into
+    each other."""
 
     __tablename__ = "invitations"
     __table_args__ = (UniqueConstraint("token_hash", name="uq_invitations_token_hash"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    organization_id: Mapped[str | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # Legacy: what invites targeted before 0023. NULL on every invite created since.
+    project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.id"), nullable=True, index=True
+    )
     email: Mapped[str] = mapped_column(String(320), index=True)
     role: Mapped[str] = mapped_column(String(16), default="MEMBER")
     token_hash: Mapped[str] = mapped_column(String(64))

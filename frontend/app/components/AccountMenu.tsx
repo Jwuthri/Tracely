@@ -18,11 +18,20 @@ export function AccountMenu({ me }: { me: Me | null }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const workspace = me?.project_name || "Workspace";
   const role = me?.role || (MODE === "dev" ? "dev" : "");
   const canInvite = MODE === "local" && (me?.role === "OWNER" || me?.role === "ADMIN");
   const projects = me?.projects ?? [];
-  const canCreate = MODE === "local" && !!me?.user_id;
+  const orgs = me?.organizations ?? [];
+  const canCreate = MODE === "local" && (me?.role === "OWNER" || me?.role === "ADMIN");
+  // Workspaces are listed under the account that owns them — with several accounts (a personal
+  // one plus companies you've joined) the flat list gave no clue which tenant you were entering.
+  const groups = orgs.map((o) => ({
+    org: o,
+    items: projects.filter((p) => p.organization_id === o.id),
+  }));
+  const ungrouped = projects.filter((p) => !orgs.some((o) => o.id === p.organization_id));
 
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -50,12 +59,15 @@ export function AccountMenu({ me }: { me: Me | null }) {
     }
   }
 
-  async function createWorkspace() {
-    const name = window.prompt("New workspace name")?.trim();
+  /** POST a create action, surfacing the backend's message — the plan caps answer 409 with copy
+   *  that tells the user what to do about it ("upgrade", "create an organization"). */
+  async function create(path: string, promptText: string) {
+    const name = window.prompt(promptText)?.trim();
     if (!name) return;
     setBusy(true);
+    setError("");
     try {
-      const r = await fetch("/api/auth/projects", {
+      const r = await fetch(path, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name }),
@@ -63,6 +75,9 @@ export function AccountMenu({ me }: { me: Me | null }) {
       if (r.ok) {
         setOpen(false);
         router.refresh();
+      } else {
+        const body = await r.json().catch(() => null);
+        setError(body?.detail || "Could not create that. Try again.");
       }
     } finally {
       setBusy(false);
@@ -77,8 +92,8 @@ export function AccountMenu({ me }: { me: Me | null }) {
       >
         <div className="min-w-0 leading-tight">
           <div className="truncate text-[12.5px] text-fg">{workspace}</div>
-          <div className="font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">
-            {role || "workspace"}
+          <div className="truncate font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">
+            {me?.organization_name ? `${me.organization_name} · ${role}` : role || "workspace"}
           </div>
         </div>
         {MODE === "clerk" && ClerkUserButton ? (
@@ -100,37 +115,65 @@ export function AccountMenu({ me }: { me: Me | null }) {
 
           {projects.length > 0 && (
             <div className="border-b border-line/60 py-1">
-              <div className="px-3 pb-1 pt-1.5 font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">
-                Workspaces
-              </div>
-              {projects.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => switchTo(p.id)}
-                  disabled={busy}
-                  className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left transition-colors hover:bg-white/[0.04] disabled:opacity-50"
-                >
-                  <span
-                    className={clsx(
-                      "truncate text-[12.5px]",
-                      p.id === me?.project_id ? "text-fg" : "text-fg-muted",
-                    )}
-                  >
-                    {p.name}
-                  </span>
-                  {p.id === me?.project_id && (
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-signal" />
-                  )}
-                </button>
-              ))}
+              {[...groups, ...(ungrouped.length ? [{ org: null, items: ungrouped }] : [])].map(
+                ({ org, items }) =>
+                  items.length === 0 ? null : (
+                    <div key={org?.id ?? "_"}>
+                      <div className="flex items-baseline justify-between gap-2 px-3 pb-1 pt-1.5">
+                        <span className="truncate font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">
+                          {org?.name ?? "Workspaces"}
+                        </span>
+                        {org && (
+                          <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-fg-faint">
+                            {org.kind === "personal" ? "personal" : org.plan}
+                          </span>
+                        )}
+                      </div>
+                      {items.map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => switchTo(p.id)}
+                          disabled={busy}
+                          className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left transition-colors hover:bg-white/[0.04] disabled:opacity-50"
+                        >
+                          <span
+                            className={clsx(
+                              "truncate pl-1.5 text-[12.5px]",
+                              p.id === me?.project_id ? "text-fg" : "text-fg-muted",
+                            )}
+                          >
+                            {p.name}
+                          </span>
+                          {p.id === me?.project_id && (
+                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-signal" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  ),
+              )}
               {canCreate && (
                 <button
-                  onClick={createWorkspace}
+                  onClick={() => create("/api/auth/projects", "New workspace name")}
                   disabled={busy}
                   className="block w-full px-3 py-1.5 text-left text-[12.5px] text-signal transition-colors hover:bg-signal/10 disabled:opacity-50"
                 >
                   + New workspace
                 </button>
+              )}
+              {MODE === "local" && !!me?.user_id && (
+                <button
+                  onClick={() => create("/api/auth/organizations", "New organization name")}
+                  disabled={busy}
+                  className="block w-full px-3 py-1.5 text-left text-[12.5px] text-signal transition-colors hover:bg-signal/10 disabled:opacity-50"
+                >
+                  + New organization
+                </button>
+              )}
+              {error && (
+                <p role="alert" className="px-3 py-1.5 text-[11.5px] leading-snug text-fail">
+                  {error}
+                </p>
               )}
             </div>
           )}

@@ -20,8 +20,9 @@ so driving scenarios doesn't consume quota — unless the customer's own instrum
 exports spans for those turns, which are their spans arriving like any other trace.
 
 Counting stays per-project (exact, dedup'd per project-month); only the gate's READ side pools:
-a free workspace's `used` is the sum across every free workspace sharing its
-`billing_owner_id`, so creating workspaces never mints extra free quota (see `_usage_from_pg`).
+usage is summed across every workspace in the project's ORGANIZATION, and the org's plan sets
+the cap. Workspaces are containers, accounts are what's billed — so adding workspaces never adds
+quota (see `_usage_from_pg`).
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tracely.config import settings
 from tracely.domain.billing import PLAN_FREE, current_period, trace_limit_for
-from tracely.infrastructure.db.models import Project, UsageCounter
+from tracely.infrastructure.db.models import Organization, Project, UsageCounter
 from tracely.infrastructure.redis_client import async_redis, sync_redis
 
 log = structlog.get_logger()
@@ -141,8 +142,8 @@ async def usage_snapshot(project_id: str, session: AsyncSession) -> dict:
         "period": period,
         "traces_used": used,
         "trace_limit": limit,
-        # "account" = the free pool, summed across every free workspace this account owns
-        # (creating workspaces mints no extra quota); "workspace" = this project alone.
+        # "account" = summed across every workspace in this organization (adding workspaces
+        # adds no quota); "workspace" = an org-less project counted on its own.
         "quota_scope": "account" if pooled else "workspace",
     }
 
@@ -157,30 +158,27 @@ async def _snapshot_from_pg(
 async def _usage_from_pg(
     project_id: str, period: str, session: AsyncSession
 ) -> tuple[int, int | None, str, bool]:
-    """(used, limit, plan, pooled). Free-plan usage is summed across ALL free workspaces sharing
-    this project's `billing_owner_id` — the Langfuse/LangSmith model, where quota attaches to
-    the account so extra workspaces never mint extra free quota. Paid plans stay per-workspace
-    (each Pro workspace bought its own cap), and an ownerless project (dev mode, CLI seed)
-    falls back to its own counter."""
+    """(used, limit, plan, pooled). The billed entity is the ORGANIZATION: its plan sets the cap
+    and its usage is the sum over all of its workspaces, so a team on one subscription can split
+    work across workspaces freely and nobody mints quota by creating more. A project with no org
+    (dev mode, CLI seed) falls back to its own counter on the free cap."""
     row = (
         await session.execute(
-            select(Project.plan, Project.billing_owner_id).where(Project.id == project_id)
+            select(Project.organization_id, Organization.plan)
+            .join(Organization, Organization.id == Project.organization_id, isouter=True)
+            .where(Project.id == project_id)
         )
     ).first()
-    plan = (row[0] if row else None) or PLAN_FREE
-    owner = row[1] if row else None
+    org_id = row[0] if row else None
+    plan = (row[1] if row else None) or PLAN_FREE
     limit = trace_limit_for(plan, settings.free_trace_limit, settings.pro_trace_limit)
-    pooled = plan == PLAN_FREE and owner is not None
+    pooled = org_id is not None
     if pooled:
         used = await session.scalar(
             select(func.coalesce(func.sum(UsageCounter.traces), 0))
             .select_from(UsageCounter)
             .join(Project, Project.id == UsageCounter.project_id)
-            .where(
-                Project.billing_owner_id == owner,
-                Project.plan == PLAN_FREE,
-                UsageCounter.period == period,
-            )
+            .where(Project.organization_id == org_id, UsageCounter.period == period)
         )
     else:
         used = await session.scalar(

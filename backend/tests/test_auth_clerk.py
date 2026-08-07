@@ -74,40 +74,39 @@ async def test_clerk_jwt_upserts_and_is_idempotent(session, clerk_mode):
         return (await session.execute(select(func.count()).select_from(model))).scalar_one()
 
     assert await _count(models.User) == 1
+    assert await _count(models.Organization) == 1
     assert await _count(models.Project) == 1
-    assert await _count(models.Membership) == 1
+    assert await _count(models.OrgMembership) == 1
     assert await _count(models.IngestKey) == 1  # provisioned a key for the new workspace
 
 
-async def test_clerk_personal_account_is_owner(session, clerk_mode):
+async def test_clerk_org_is_a_company_account(session, clerk_mode):
+    """A Clerk org maps to a company organization, and everyone in it lands in the SAME one —
+    which is what makes their workspaces shared and their quota a single pool."""
+    priv, _ = clerk_mode
+    admin = _token(priv, sub="user_admin", org_id="org_9", org_role="org:admin")
+    member = _token(priv, sub="user_member", org_id="org_9", org_role="org:member")
+
+    p_admin = await resolve_principal(token=admin, x_project=None, session=session)
+    p_member = await resolve_principal(token=member, x_project=None, session=session)
+
+    assert p_admin.organization_id == p_member.organization_id
+    assert p_admin.project_id == p_member.project_id
+    assert p_admin.role == "ADMIN" and p_member.role == "MEMBER"
+    org = await session.get(models.Organization, p_admin.organization_id)
+    assert org.kind == "company"
+    n = (
+        await session.execute(select(func.count()).select_from(models.Organization))
+    ).scalar_one()
+    assert n == 1  # the second sign-in joined the org, it didn't mint another
+
+
+async def test_clerk_personal_account_is_a_personal_org(session, clerk_mode):
     priv, _ = clerk_mode
     p = await resolve_principal(token=_token(priv, sub="solo"), x_project=None, session=session)
     assert p.role == "OWNER"  # no org → personal workspace owned by the user
-    proj = await session.get(models.Project, p.project_id)
-    assert proj.billing_owner_id == p.user_id  # personal workspace anchors the user's free pool
-
-
-async def test_clerk_billing_owner_anchors_to_admin_not_first_toucher(session, clerk_mode):
-    """An invited MEMBER opening Tracely before the org admin must NOT become the org's quota
-    anchor — that would couple their personal free pool to someone else's org by ordering
-    accident. The pool stays unanchored (per-workspace fallback) until an admin touches."""
-    priv, _ = clerk_mode
-    member = _token(priv, sub="user_member", org_id="org_9", org_role="org:member")
-    admin = _token(priv, sub="user_admin", org_id="org_9", org_role="org:admin")
-
-    p_member = await resolve_principal(token=member, x_project=None, session=session)
-    proj = await session.get(models.Project, p_member.project_id)
-    assert proj.billing_owner_id is None  # member touch anchors nothing
-
-    p_admin = await resolve_principal(token=admin, x_project=None, session=session)
-    assert p_admin.project_id == p_member.project_id
-    await session.refresh(proj)
-    assert proj.billing_owner_id == p_admin.user_id  # first ADMIN anchors…
-
-    other_admin = _token(priv, sub="user_admin2", org_id="org_9", org_role="org:admin")
-    await resolve_principal(token=other_admin, x_project=None, session=session)
-    await session.refresh(proj)
-    assert proj.billing_owner_id == p_admin.user_id  # …and later admins never re-anchor
+    org = await session.get(models.Organization, p.organization_id)
+    assert org.kind == "personal"  # 1 workspace, 1 seat, un-joinable
 
 
 async def test_clerk_alg_confusion_rejected(session, clerk_mode):

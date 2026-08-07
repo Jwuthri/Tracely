@@ -9,7 +9,14 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tracely.infrastructure.db.models import IngestKey, Invitation, Membership, Project, User
+from tracely.infrastructure.db.models import (
+    IngestKey,
+    Invitation,
+    Organization,
+    OrgMembership,
+    Project,
+    User,
+)
 
 
 async def get_project(session: AsyncSession, project_id: str) -> Project | None:
@@ -42,27 +49,50 @@ async def local_user_by_email(session: AsyncSession, email: str) -> User | None:
     ).scalar_one_or_none()
 
 
-async def user_memberships(
+async def user_workspaces(
     session: AsyncSession, user_id: str
-) -> list[tuple[Membership, Project]]:
+) -> list[tuple[Project, str]]:
+    """Every workspace the user can reach, with their role in it — derived from org membership,
+    the same join `select_membership` authorizes with."""
     rows = (
         await session.execute(
-            select(Membership, Project)
-            .join(Project, Project.id == Membership.project_id)
-            .where(Membership.user_id == user_id)
+            select(Project, OrgMembership.role)
+            .join(OrgMembership, OrgMembership.organization_id == Project.organization_id)
+            .where(OrgMembership.user_id == user_id)
+            .order_by(Project.created_at, Project.id)
         )
     ).all()
-    return [(m, p) for m, p in rows]
+    return [(p, role) for p, role in rows]
 
 
-async def invitations_for_project(
-    session: AsyncSession, project_id: str
+async def organization_members(
+    session: AsyncSession, organization_id: str
+) -> list[tuple[User, str]]:
+    rows = (
+        await session.execute(
+            select(User, OrgMembership.role)
+            .join(OrgMembership, OrgMembership.user_id == User.id)
+            .where(OrgMembership.organization_id == organization_id)
+            .order_by(OrgMembership.created_at)
+        )
+    ).all()
+    return [(u, role) for u, role in rows]
+
+
+async def get_organization(
+    session: AsyncSession, organization_id: str
+) -> Organization | None:
+    return await session.get(Organization, organization_id)
+
+
+async def invitations_for_org(
+    session: AsyncSession, organization_id: str
 ) -> list[Invitation]:
     return list(
         (
             await session.execute(
                 select(Invitation)
-                .where(Invitation.project_id == project_id)
+                .where(Invitation.organization_id == organization_id)
                 .order_by(Invitation.created_at.desc())
             )
         ).scalars()
@@ -70,12 +100,12 @@ async def invitations_for_project(
 
 
 async def invitation_get(
-    session: AsyncSession, project_id: str, invite_id: str
+    session: AsyncSession, organization_id: str, invite_id: str
 ) -> Invitation | None:
     return (
         await session.execute(
             select(Invitation).where(
-                Invitation.id == invite_id, Invitation.project_id == project_id
+                Invitation.id == invite_id, Invitation.organization_id == organization_id
             )
         )
     ).scalar_one_or_none()

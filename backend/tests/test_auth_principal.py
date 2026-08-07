@@ -49,19 +49,42 @@ async def test_jwt_for_unknown_user_is_401(session):
 
 
 async def test_multi_membership_x_project_selection(session, make_workspace):
+    """Joining a second ORGANIZATION grants its workspaces — access is derived from the org, so
+    there is no per-workspace grant to hand out separately."""
     p1, user, _ = await make_workspace("w1", "tk_1", "u@x.test", role="OWNER")
     p2, _, _ = await make_workspace("w2", "tk_2", "owner2@x.test", role="OWNER")
-    session.add(models.Membership(id=str(uuid4()), user_id=user.id, project_id=p2.id, role="MEMBER"))
+    session.add(
+        models.OrgMembership(
+            id=str(uuid4()), user_id=user.id, organization_id=p2.organization_id, role="MEMBER"
+        )
+    )
     await session.commit()
     token = tokens.issue_session(user.id)
 
-    # no header → a project the user is a member of
+    # no header → a project the user can reach
     default = await resolve_principal(token=token, x_project=None, session=session)
     assert default.project_id in {p1.id, p2.id}
 
-    # explicit header → that exact project, with the membership's role
+    # explicit header → that exact project, with the role held in THAT project's org
     sel = await resolve_principal(token=token, x_project=p2.id, session=session)
     assert sel.project_id == p2.id and sel.role == "MEMBER"
+    assert sel.organization_id == p2.organization_id
+
+
+async def test_a_second_workspace_in_my_org_is_reachable(session, make_workspace):
+    """The org is the grant: a workspace added to it needs no membership row of its own."""
+    p1, user, _ = await make_workspace("w1", "tk_1", "u@x.test")
+    sibling = models.Project(
+        id=str(uuid4()), slug="w1-sib", name="sib", source="local",
+        organization_id=p1.organization_id,
+    )
+    session.add(sibling)
+    await session.commit()
+
+    sel = await resolve_principal(
+        token=tokens.issue_session(user.id), x_project=sibling.id, session=session
+    )
+    assert sel.project_id == sibling.id and sel.role == "OWNER"
 
 
 async def test_x_project_non_member_is_403(session, make_workspace):

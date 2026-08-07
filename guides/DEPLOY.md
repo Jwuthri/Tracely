@@ -116,13 +116,35 @@ backend-only flag reads counters nobody writes, and the limit silently never fir
 
 ```dotenv
 BILLING_ENABLED=true
+ALLOW_PUBLIC_SIGNUP=true           # multi-tenant signup; see "Accounts" below
 REQUIRE_PROJECT_LLM_KEY=true       # server LLM keys never serve customer work — see below
-FREE_TRACE_LIMIT=20000             # per project, per UTC month
+FREE_TRACE_LIMIT=20000             # per organization, per UTC month
 PRO_TRACE_LIMIT=1000000
+FREE_WORKSPACE_LIMIT=3             # per company org (personal accounts are always 1)
+PRO_WORKSPACE_LIMIT=10
+FREE_SEAT_LIMIT=3                  # members + pending invites
+PRO_SEAT_LIMIT=10
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...    # REQUIRED with the secret key — boot refuses without it
 STRIPE_PRICE_PRO=price_...         # the Pro plan's monthly price id
 ```
+
+**Accounts (the tenancy model).** Every user belongs to an **organization**, and a workspace is
+reachable exactly when you're a member of the org that owns it — there is no way to be invited
+into a single workspace, which is what keeps tenants apart:
+
+| | Workspaces | Seats | Joinable |
+| --- | --- | --- | --- |
+| Personal (every signup) | 1 | 1 | never |
+| Company, Free | `FREE_WORKSPACE_LIMIT` | `FREE_SEAT_LIMIT` | by invite |
+| Company, Pro | `PRO_WORKSPACE_LIMIT` | `PRO_SEAT_LIMIT` | by invite |
+| `unlimited` (operator) | ∞ | ∞ | by invite |
+
+A solo user turns into a team by creating an organization (account menu → New organization).
+`ALLOW_PUBLIC_SIGNUP=false` (the self-host default) keeps registration first-user-only, with
+everyone else arriving by invite; set it to `true` for hosted cloud, where each signup gets its
+own personal organization. Caps are only enforced when `BILLING_ENABLED=true`, so a self-hosted
+deployment is never limited.
 
 **What counts as a trace:** externally-POSTed OTLP traces, once per (project, month) however
 many batches carry their spans. Tracely's own recordings (evaluations, scenario drives) never
@@ -131,12 +153,12 @@ the plan changes; enforcement is fail-open (a Redis/Postgres outage admits trace
 them). Redis sizing: one set per project-month of trace ids (≈ tens of MB per million traces) —
 it shares the Celery broker, which runs `noeviction`, so give it headroom.
 
-**The free quota pools per account, not per workspace** (the Langfuse/LangSmith model): each
-workspace stores its creator as `projects.billing_owner_id`, and a free workspace's usage is
-summed across *every* free workspace that account owns — creating workspaces mints no extra
-quota. Paid plans stay per-workspace (each Pro workspace buys its own cap). Projects without an
-owning user (CLI-seeded, dev mode) fall back to per-workspace accounting; migration 0022
-backfills owners from the earliest OWNER membership.
+**The quota belongs to the organization, not the workspace.** Traces are counted per project
+(exactly once each) but compared against the org's cap after summing across all of its
+workspaces — so adding workspaces never adds quota, and a team on one Pro subscription can split
+work across workspaces without paying per workspace. Projects with no organization (CLI-seeded,
+dev mode) are counted on their own. Migration 0023 backfills organizations from existing
+memberships, one per owner, preserving exactly the access people already had.
 
 **Stripe setup (dashboard):** create the Pro product + monthly price → `STRIPE_PRICE_PRO`; add a
 webhook endpoint at `https://<api-domain>/api/billing/webhook` with events
@@ -144,14 +166,15 @@ webhook endpoint at `https://<api-domain>/api/billing/webhook` with events
 `customer.subscription.deleted` → `STRIPE_WEBHOOK_SECRET`. The webhook is signature-verified;
 plan state only ever changes through it.
 
-**Operator workspaces:** the free cap applies to every project the moment billing is enabled —
+**Operator accounts:** the free cap applies to every organization the moment billing is enabled —
 mark your own first:
 
 ```sql
-UPDATE projects SET plan='unlimited' WHERE slug IN ('default', 'demo');
+UPDATE organizations SET plan='unlimited' WHERE slug IN ('default', 'demo');
 ```
 
-`unlimited` is never touched by webhooks and is only settable via SQL.
+`unlimited` is never touched by webhooks and is only settable via SQL. (Before 0023 this was a
+column on `projects`; that column still exists but nothing reads it.)
 
 **`REQUIRE_PROJECT_LLM_KEY`** is the hosted hard gate for AI features: with it on, the
 server-wide `OPENROUTER_API_KEY`/`LLM_JUDGE_API_KEY`/`OPENAI_API_KEY` apply to *nothing* —

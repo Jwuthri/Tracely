@@ -1,8 +1,16 @@
-"""Workspace + identity provisioning for the auth flows. Generalizes services/seeding_service.py.
+"""Organization + workspace + identity provisioning for the auth flows.
 
-Local mode keeps a single workspace per deployment: the first registrant becomes its OWNER (reusing the
-seeded "default" project if present); everyone else joins by invite. The Clerk upsert path lives in
-`auth/clerk.py` and calls `upsert_clerk_principal` here."""
+Every account is an Organization: `personal` (one human, 1 workspace, un-joinable) or `company`
+(a team, several workspaces and seats). Users are members of the org, and a workspace is
+reachable exactly when the caller belongs to its org — see `principal.select_membership`.
+
+Two registration shapes, chosen by `ALLOW_PUBLIC_SIGNUP`:
+  - self-host (default): the first registrant claims the deployment, gets a COMPANY org (so they
+    can invite the team) and adopts the seeded "default" project; everyone else joins by invite.
+  - hosted cloud: anyone may sign up and gets their own PERSONAL org + workspace.
+
+The Clerk path lives in `auth/clerk.py` and calls `upsert_clerk_principal` here; a Clerk org maps
+to a company org, a Clerk personal account to a personal one."""
 
 from __future__ import annotations
 
@@ -17,8 +25,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tracely.auth.invitations import hash_token
 from tracely.auth.principal import AuthError, Principal
+from tracely.config import settings
+from tracely.domain.billing import (
+    KIND_COMPANY,
+    KIND_PERSONAL,
+    seat_limit_for,
+    workspace_limit_for,
+)
 from tracely.domain.evaluation.evaluators import TEMPLATES
-from tracely.infrastructure.db.models import Evaluator, IngestKey, Invitation, Membership, Project, User
+from tracely.infrastructure.db.models import (
+    Evaluator,
+    IngestKey,
+    Invitation,
+    Organization,
+    OrgMembership,
+    Project,
+    User,
+)
 
 
 def new_ingest_key() -> str:
@@ -71,6 +94,129 @@ async def _get_or_create(session: AsyncSession, model, *, where, defaults):
         return (await session.execute(select(model).where(*where))).scalar_one(), False
 
 
+def _slugify(name: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
+    return (base or "workspace")[:96]
+
+
+# ── organizations ─────────────────────────────────────────────────────────────
+
+async def workspace_count(session: AsyncSession, organization_id: str) -> int:
+    return (
+        await session.execute(
+            select(func.count())
+            .select_from(Project)
+            .where(Project.organization_id == organization_id)
+        )
+    ).scalar_one()
+
+
+async def seat_count(session: AsyncSession, organization_id: str) -> int:
+    """Members plus outstanding invites — a pending invite is a seat already spoken for, or an
+    org could invite past its cap and only discover it when people accept."""
+    members = (
+        await session.execute(
+            select(func.count())
+            .select_from(OrgMembership)
+            .where(OrgMembership.organization_id == organization_id)
+        )
+    ).scalar_one()
+    pending = (
+        await session.execute(
+            select(func.count())
+            .select_from(Invitation)
+            .where(
+                Invitation.organization_id == organization_id,
+                Invitation.status == "PENDING",
+            )
+        )
+    ).scalar_one()
+    return int(members) + int(pending)
+
+
+async def assert_can_add_workspace(session: AsyncSession, org: Organization) -> None:
+    """Raises 409 when the org is at its workspace cap. Caps only exist on the hosted plans —
+    a self-hosted deployment (BILLING_ENABLED off) is never limited."""
+    if not settings.billing_enabled:
+        return
+    limit = workspace_limit_for(
+        org.plan, org.kind, settings.free_workspace_limit, settings.pro_workspace_limit
+    )
+    if limit is None:
+        return
+    if await workspace_count(session, org.id) >= limit:
+        if org.kind == KIND_PERSONAL:
+            raise AuthError(
+                409,
+                "a personal account holds one workspace — create an organization to add more",
+            )
+        raise AuthError(
+            409,
+            f"this organization is at its workspace limit ({limit}) — upgrade to add more",
+        )
+
+
+async def assert_can_add_seat(session: AsyncSession, org: Organization) -> None:
+    """Raises 409 when the org has no seat left for another member or pending invite."""
+    if org.kind == KIND_PERSONAL:
+        # Not a billing limit: a personal account is one human by definition, so it stays
+        # un-joinable even on a self-hosted deployment where nothing else is capped.
+        raise AuthError(
+            409, "a personal account can't have teammates — create an organization to invite"
+        )
+    if not settings.billing_enabled:
+        return
+    limit = seat_limit_for(
+        org.plan, org.kind, settings.free_seat_limit, settings.pro_seat_limit
+    )
+    if limit is None:
+        return
+    if await seat_count(session, org.id) >= limit:
+        raise AuthError(
+            409, f"this organization is at its seat limit ({limit}) — upgrade to invite more"
+        )
+
+
+async def create_organization(
+    session: AsyncSession, *, name: str, kind: str, owner_user_id: str
+) -> Organization:
+    """A new org with `owner_user_id` as its OWNER. Does not create a workspace — callers that
+    need one call `create_workspace` next (inside the same transaction)."""
+    name = (name or "").strip() or ("Personal" if kind == KIND_PERSONAL else "Organization")
+    org = Organization(
+        id=str(uuid4()),
+        name=name,
+        slug=f"{_slugify(name)}-{secrets.token_hex(3)}",
+        kind=kind,
+    )
+    session.add(org)
+    await session.flush()
+    session.add(
+        OrgMembership(
+            id=str(uuid4()), organization_id=org.id, user_id=owner_user_id, role="OWNER"
+        )
+    )
+    return org
+
+
+async def get_organization(session: AsyncSession, organization_id: str) -> Organization | None:
+    return await session.get(Organization, organization_id)
+
+
+async def user_organizations(
+    session: AsyncSession, user_id: str
+) -> list[tuple[Organization, str]]:
+    rows = (
+        await session.execute(
+            select(Organization, OrgMembership.role)
+            .join(OrgMembership, OrgMembership.organization_id == Organization.id)
+            .where(OrgMembership.user_id == user_id)
+            .order_by(Organization.created_at)
+        )
+    ).all()
+    return [(o, role) for o, role in rows]
+
+
 # ── local mode ────────────────────────────────────────────────────────────────
 
 async def any_local_user(session: AsyncSession) -> bool:
@@ -103,6 +249,16 @@ async def _ensure_ingest_key(session: AsyncSession, project_id: str) -> None:
         session.add(IngestKey(id=str(uuid4()), project_id=project_id, key=new_ingest_key()))
 
 
+def _new_local_user(email: str, password_hash: str, display_name: str) -> User:
+    return User(
+        id=str(uuid4()),
+        email=email,
+        source="local",
+        password_hash=password_hash,
+        display_name=display_name,
+    )
+
+
 async def bootstrap_owner(
     session: AsyncSession,
     *,
@@ -111,60 +267,74 @@ async def bootstrap_owner(
     display_name: str = "",
     workspace_name: str = "Tracely",
 ) -> tuple[Project, User]:
-    """First-run: make `email` the OWNER of the singleton local workspace (reusing the seeded project
-    if one exists, else creating it) and ensure it has an ingest key."""
+    """Self-host first-run: make `email` the OWNER of a COMPANY org holding the singleton local
+    workspace (reusing the seeded project if one exists). Company, not personal, because the
+    point of a self-hosted deployment is that the owner invites their team into it."""
+    user = _new_local_user(email, password_hash, display_name)
+    session.add(user)
+    await session.flush()
+    org = await create_organization(
+        session, name=workspace_name, kind=KIND_COMPANY, owner_user_id=user.id
+    )
     project = await get_singleton_local_project(session)
     if project is None:
         project = Project(id=str(uuid4()), slug="default", name=workspace_name, source="local")
         session.add(project)
         await session.flush()
+    project.organization_id = org.id
     await _ensure_ingest_key(session, project.id)
     await seed_recommended_evaluators(session, project.id)
-    user = User(
-        id=str(uuid4()),
-        email=email,
-        source="local",
-        password_hash=password_hash,
-        display_name=display_name,
-    )
-    session.add(user)
-    await session.flush()
-    project.billing_owner_id = user.id  # free quota pools on the founding account
-    session.add(
-        Membership(id=str(uuid4()), user_id=user.id, project_id=project.id, role="OWNER")
-    )
     await session.commit()
     return project, user
 
 
-def _slugify(name: str) -> str:
-    base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    return (base or "workspace")[:96]
+async def signup_personal(
+    session: AsyncSession,
+    *,
+    email: str,
+    password_hash: str,
+    display_name: str = "",
+    workspace_name: str = "",
+) -> tuple[Project, User]:
+    """Hosted public signup: a personal org with exactly one workspace. Never adopts the seeded
+    project — every signup is its own tenant."""
+    user = _new_local_user(email, password_hash, display_name)
+    session.add(user)
+    await session.flush()
+    org = await create_organization(
+        session,
+        name=(display_name or email.split("@")[0]),
+        kind=KIND_PERSONAL,
+        owner_user_id=user.id,
+    )
+    project, _key = await create_workspace(
+        session, name=(workspace_name or "My workspace"), organization_id=org.id
+    )
+    return project, user
 
 
 async def create_workspace(
-    session: AsyncSession, *, name: str, owner_user_id: str
+    session: AsyncSession, *, name: str, organization_id: str
 ) -> tuple[Project, IngestKey]:
-    """Create a new workspace (Project) owned by `owner_user_id`, with its own ingest key. Backs the
-    UI's "New workspace" action: the user can then switch to it (X-Tracely-Project) and push traces
-    with the returned key. The slug gets a short random suffix so same-named workspaces never collide
-    on the unique constraint."""
+    """Create a workspace inside an org, with its own ingest key. Backs the UI's "New workspace"
+    action: any member of the org can then switch to it (X-Tracely-Project) and push traces with
+    the returned key. The slug gets a short random suffix so same-named workspaces never collide
+    on the unique constraint.
+
+    Callers that act on a user's request must call `assert_can_add_workspace` first — this
+    function is also used by signup, where the org is empty by construction."""
     name = (name or "").strip() or "Workspace"
     project = Project(
         id=str(uuid4()),
         slug=f"{_slugify(name)}-{secrets.token_hex(3)}",
         name=name,
         source="local",
-        # every workspace this user creates draws from the SAME free quota pool
-        billing_owner_id=owner_user_id,
+        organization_id=organization_id,
     )
     session.add(project)
     await session.flush()
     key = IngestKey(id=str(uuid4()), project_id=project.id, key=new_ingest_key())
     session.add(key)
-    session.add(
-        Membership(id=str(uuid4()), user_id=owner_user_id, project_id=project.id, role="OWNER")
-    )
     await seed_recommended_evaluators(session, project.id)
     await session.commit()
     return project, key
@@ -173,17 +343,34 @@ async def create_workspace(
 async def create_invitation(
     session: AsyncSession,
     *,
-    project_id: str,
+    organization_id: str,
     email: str,
     role: str,
     invited_by: str | None,
     token_hash: str,
     ttl_seconds: int = 7 * 24 * 3600,
 ) -> Invitation:
+    """Invite someone into an ORG (never a single workspace). The caller has already checked the
+    seat cap via `assert_can_add_seat`."""
+    email = email.lower().strip()
+    already = (
+        await session.execute(
+            select(func.count())
+            .select_from(OrgMembership)
+            .join(User, User.id == OrgMembership.user_id)
+            .where(
+                OrgMembership.organization_id == organization_id,
+                User.email == email,
+                User.source == "local",
+            )
+        )
+    ).scalar_one()
+    if already:
+        raise AuthError(409, "that person is already a member of this organization")
     inv = Invitation(
         id=str(uuid4()),
-        project_id=project_id,
-        email=email.lower().strip(),
+        organization_id=organization_id,
+        email=email,
         role=role,
         token_hash=token_hash,
         invited_by=invited_by,
@@ -219,37 +406,46 @@ async def accept_invitation(
     )
     if res.rowcount != 1:
         raise AuthError(400, "invalid or used invitation")
+    if not inv.organization_id:
+        raise AuthError(400, "invalid or used invitation")
     user = (
         await session.execute(
             select(User).where(User.source == "local", User.email == inv.email)
         )
     ).scalar_one_or_none()
     if user is None:
-        user = User(
-            id=str(uuid4()),
-            email=inv.email,
-            source="local",
-            password_hash=password_hash,
-            display_name=display_name,
-        )
+        user = _new_local_user(inv.email, password_hash, display_name)
         session.add(user)
         await session.flush()
     existing = (
         await session.execute(
-            select(Membership).where(
-                Membership.user_id == user.id, Membership.project_id == inv.project_id
+            select(OrgMembership).where(
+                OrgMembership.user_id == user.id,
+                OrgMembership.organization_id == inv.organization_id,
             )
         )
     ).scalar_one_or_none()
     if existing is None:
         session.add(
-            Membership(
-                id=str(uuid4()), user_id=user.id, project_id=inv.project_id, role=inv.role
+            OrgMembership(
+                id=str(uuid4()),
+                user_id=user.id,
+                organization_id=inv.organization_id,
+                role=inv.role,
             )
         )
+    # Land the new member in one of the org's workspaces (the oldest) so their session has an
+    # active project — an org always has at least one.
     project = (
-        await session.execute(select(Project).where(Project.id == inv.project_id))
-    ).scalar_one()
+        await session.execute(
+            select(Project)
+            .where(Project.organization_id == inv.organization_id)
+            .order_by(Project.created_at, Project.id)
+            .limit(1)
+        )
+    ).scalars().first()
+    if project is None:
+        raise AuthError(400, "this organization has no workspace yet")
     await session.commit()
     return user, project
 
@@ -265,8 +461,9 @@ async def upsert_clerk_principal(
     org_id: str | None,
     role: str,
 ) -> Principal:
-    """Idempotently upsert User + Project (+ IngestKey) + Membership from verified Clerk claims.
-    Concurrent first-requests can't create duplicates (unique constraints + race-safe get-or-create)."""
+    """Idempotently upsert User + Organization + Project (+ IngestKey) + OrgMembership from
+    verified Clerk claims. Concurrent first-requests can't create duplicates (unique constraints
+    + race-safe get-or-create)."""
     external_project = org_id or f"user:{clerk_user_id}"
 
     user, _ = await _get_or_create(
@@ -282,7 +479,21 @@ async def upsert_clerk_principal(
         ),
     )
 
-    # the tenant — one project per org, or a personal workspace per user
+    # A Clerk org is a company account; a Clerk personal account is a personal one. Keying the
+    # org on the Clerk id (its unique slug) is what makes this idempotent under concurrency.
+    org, _ = await _get_or_create(
+        session,
+        Organization,
+        where=(Organization.slug == f"clerk-{external_project}"[:128],),
+        defaults=dict(
+            id=str(uuid4()),
+            name=(f"Org {org_id}" if org_id else (email or "Personal")),
+            slug=f"clerk-{external_project}"[:128],
+            kind=(KIND_COMPANY if org_id else KIND_PERSONAL),
+        ),
+    )
+
+    # the workspace — one per Clerk org / personal account
     project, project_created = await _get_or_create(
         session,
         Project,
@@ -293,14 +504,11 @@ async def upsert_clerk_principal(
             name=(f"Org {org_id}" if org_id else email),
             source="clerk",
             external_id=external_project,
+            organization_id=org.id,
         ),
     )
-    # The free-quota pool anchors to the org's admin (its creator, in Clerk), never to an
-    # invited MEMBER who merely opened Tracely first — otherwise ordering accidents couple an
-    # invitee's personal quota to someone else's org. Until an admin touches, NULL = the
-    # per-workspace fallback.
-    if project.billing_owner_id is None and role in ("OWNER", "ADMIN"):
-        project.billing_owner_id = user.id
+    if project.organization_id is None:  # a pre-0023 row meeting the org layer for the first time
+        project.organization_id = org.id
     await _ensure_ingest_key(session, project.id)
     if project_created:
         await seed_recommended_evaluators(session, project.id)
@@ -308,14 +516,14 @@ async def upsert_clerk_principal(
     # membership — role synced from Clerk on every request (Clerk is source of truth)
     membership, _ = await _get_or_create(
         session,
-        Membership,
-        where=(Membership.user_id == user.id, Membership.project_id == project.id),
-        defaults=dict(
-            id=str(uuid4()), user_id=user.id, project_id=project.id, role=role
-        ),
+        OrgMembership,
+        where=(OrgMembership.user_id == user.id, OrgMembership.organization_id == org.id),
+        defaults=dict(id=str(uuid4()), user_id=user.id, organization_id=org.id, role=role),
     )
     if membership.role != role:
         membership.role = role
 
     await session.commit()
-    return Principal(project_id=project.id, user_id=user.id, role=role, kind="clerk")
+    return Principal(
+        project_id=project.id, user_id=user.id, role=role, kind="clerk", organization_id=org.id
+    )

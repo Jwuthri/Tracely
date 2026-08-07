@@ -26,11 +26,9 @@ export default function RegisterPage() {
       router.refresh();
     } else {
       const d = await r.json().catch(() => ({}));
-      setErr(
-        r.status === 409
-          ? "This workspace is already set up — ask an owner for an invite."
-          : d.detail || "Registration failed",
-      );
+      // 409 means two different things now: signup is closed on this deployment, or the email is
+      // taken. The backend distinguishes them, so show its message rather than guessing.
+      setErr(d.detail || (r.status === 409 ? "That didn't work — try signing in." : "Registration failed"));
       setLoading(false);
     }
   }

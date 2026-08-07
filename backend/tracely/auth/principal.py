@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tracely.auth import classify, tokens
 from tracely.config import settings
-from tracely.infrastructure.db.models import IngestKey, Membership, User
+from tracely.infrastructure.db.models import IngestKey, OrgMembership, Project, User
 
 
 class AuthError(Exception):
@@ -31,8 +31,12 @@ class AuthError(Exception):
 class Principal:
     project_id: str
     user_id: str | None  # None for machine (ingest-key) principals
-    role: str | None  # OWNER | ADMIN | MEMBER | None
+    role: str | None  # the caller's role in the ORG owning project_id; None for ingest keys
     kind: Literal["ingest", "local", "clerk"]
+    # The account the active workspace belongs to. None for ingest keys (machine credentials
+    # carry no human identity — billing/team endpoints reject them on `role` anyway) and for
+    # org-less projects (CLI-seeded / dev mode).
+    organization_id: str | None = None
 
 
 async def resolve_principal(
@@ -80,21 +84,28 @@ async def select_membership(
     *,
     kind: Literal["local", "clerk"],
 ) -> Principal:
-    """Pick the active project for a user: the one named by `X-Tracely-Project` (membership enforced),
-    else their first membership. Raises 403 if they have none / aren't a member of the requested one."""
+    """Pick the active workspace for a user: the one named by `X-Tracely-Project`, else their
+    oldest. Raises 403 if they can reach none / can't reach the requested one.
+
+    Reachability is derived, never stored: a workspace is reachable exactly when the user is a
+    member of the organization owning it. That is the whole cross-tenant boundary — there is no
+    per-workspace grant that could drift from it."""
     rows = (
         await session.execute(
-            select(Membership)
-            .where(Membership.user_id == user_id)
-            .order_by(Membership.created_at)
+            select(Project.id, Project.organization_id, OrgMembership.role)
+            .join(OrgMembership, OrgMembership.organization_id == Project.organization_id)
+            .where(OrgMembership.user_id == user_id)
+            .order_by(Project.created_at, Project.id)
         )
-    ).scalars().all()
+    ).all()
     if not rows:
         raise AuthError(403, "no workspace membership")
     if x_project:
-        m = next((r for r in rows if r.project_id == x_project), None)
-        if m is None:
+        row = next((r for r in rows if r[0] == x_project), None)
+        if row is None:
             raise AuthError(403, "not a member of the requested project")
     else:
-        m = rows[0]
-    return Principal(project_id=m.project_id, user_id=user_id, role=m.role, kind=kind)
+        row = rows[0]
+    return Principal(
+        project_id=row[0], user_id=user_id, role=row[2], kind=kind, organization_id=row[1]
+    )

@@ -1,7 +1,8 @@
 """Stripe billing: the webhook state machine, endpoint auth, and the config guard.
 
 The webhook handler is unit-tested against a real (SQLite) session — it is the only thing that
-may change a workspace's plan, and it must converge under replay and out-of-order delivery.
+may change an organization's plan, and it must converge under replay and out-of-order
+delivery.
 Router tests go through the app for the parts HTTP owns: signature rejection, role gates, and
 the flag/config responses. No test talks to Stripe.
 """
@@ -27,11 +28,19 @@ def db():
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     Base.metadata.create_all(
-        eng, tables=[models.Project.__table__, models.UsageCounter.__table__]
+        eng,
+        tables=[
+            models.Organization.__table__,
+            models.Project.__table__,
+            models.UsageCounter.__table__,
+        ],
     )
     maker = sessionmaker(eng)
     with maker() as s:
-        s.add(models.Project(id="p1", slug="acme", name="Acme", source="local"))
+        s.add(models.Organization(id="o1", slug="acme", name="Acme", kind="company"))
+        s.add(
+            models.Project(id="p1", slug="acme", name="Acme", source="local", organization_id="o1")
+        )
         s.commit()
         yield s
     eng.dispose()
@@ -46,16 +55,16 @@ def test_checkout_completed_upgrades_and_stores_ids(db):
         db,
         _event(
             "checkout.session.completed",
-            {"client_reference_id": "p1", "customer": "cus_1", "subscription": "sub_1"},
+            {"client_reference_id": "o1", "customer": "cus_1", "subscription": "sub_1"},
         ),
     )
-    p = db.get(models.Project, "p1")
+    p = db.get(models.Organization, "o1")
     assert out["handled"] is True
     assert (p.plan, p.stripe_customer_id, p.stripe_subscription_id) == ("pro", "cus_1", "sub_1")
     assert p.subscription_status == "active"
 
 
-def test_checkout_for_unknown_project_is_a_permanent_noop(db):
+def test_checkout_for_unknown_org_is_a_permanent_noop(db):
     out = billing_service.handle_webhook_event(
         db, _event("checkout.session.completed", {"client_reference_id": "nope"})
     )
@@ -71,10 +80,10 @@ def test_subscription_event_before_checkout_resolves_via_metadata(db):
         _event(
             "customer.subscription.updated",
             {"id": "sub_1", "customer": "cus_1", "status": "active",
-             "metadata": {"project_id": "p1"}},
+             "metadata": {"organization_id": "o1"}},
         ),
     )
-    p = db.get(models.Project, "p1")
+    p = db.get(models.Organization, "o1")
     assert out["handled"] is True
     assert p.plan == "pro" and p.stripe_customer_id == "cus_1"
 
@@ -83,51 +92,51 @@ def test_deleted_subscription_downgrades(db):
     billing_service.handle_webhook_event(
         db,
         _event("checkout.session.completed",
-               {"client_reference_id": "p1", "customer": "cus_1", "subscription": "sub_1"}),
+               {"client_reference_id": "o1", "customer": "cus_1", "subscription": "sub_1"}),
     )
     billing_service.handle_webhook_event(
         db, _event("customer.subscription.deleted", {"id": "sub_1", "customer": "cus_1"})
     )
-    p = db.get(models.Project, "p1")
+    p = db.get(models.Organization, "o1")
     assert p.plan == "free" and p.subscription_status == "canceled"
 
 
 def test_past_due_keeps_the_customer_paid(db):
-    """Dunning: a failed card retry moves the subscription to past_due — the workspace stays
+    """Dunning: a failed card retry moves the subscription to past_due — the account stays
     pro until Stripe gives up (canceled/unpaid)."""
     billing_service.handle_webhook_event(
         db,
         _event("checkout.session.completed",
-               {"client_reference_id": "p1", "customer": "cus_1", "subscription": "sub_1"}),
+               {"client_reference_id": "o1", "customer": "cus_1", "subscription": "sub_1"}),
     )
     billing_service.handle_webhook_event(
         db,
         _event("customer.subscription.updated",
                {"id": "sub_1", "customer": "cus_1", "status": "past_due"}),
     )
-    assert db.get(models.Project, "p1").plan == "pro"
+    assert db.get(models.Organization, "o1").plan == "pro"
 
 
 def test_unlimited_plan_is_never_overwritten(db):
-    p = db.get(models.Project, "p1")
+    p = db.get(models.Organization, "o1")
     p.plan = "unlimited"
     db.commit()
     billing_service.handle_webhook_event(
         db,
         _event("customer.subscription.deleted",
-               {"id": "sub_x", "customer": "cus_x", "metadata": {"project_id": "p1"}}),
+               {"id": "sub_x", "customer": "cus_x", "metadata": {"organization_id": "o1"}}),
     )
-    assert db.get(models.Project, "p1").plan == "unlimited"  # status recorded, plan untouched
+    assert db.get(models.Organization, "o1").plan == "unlimited"  # status recorded, plan untouched
 
 
 def test_replay_is_idempotent(db):
     ev = _event(
         "checkout.session.completed",
-        {"client_reference_id": "p1", "customer": "cus_1", "subscription": "sub_1"},
+        {"client_reference_id": "o1", "customer": "cus_1", "subscription": "sub_1"},
     )
     billing_service.handle_webhook_event(db, ev)
     billing_service.handle_webhook_event(db, ev)  # Stripe redelivers — same end state
-    p = db.get(models.Project, "p1")
+    p = db.get(models.Organization, "o1")
     assert (p.plan, p.stripe_customer_id) == ("pro", "cus_1")
 
 
@@ -137,11 +146,11 @@ def test_unknown_event_type_is_ignored(db):
 
 
 def test_already_subscribed_checkout_is_refused(db):
-    p = db.get(models.Project, "p1")
+    p = db.get(models.Organization, "o1")
     p.subscription_status = "active"
     db.commit()
     with pytest.raises(ValueError, match="already subscribed"):
-        billing_service.create_checkout_session(db, "p1")
+        billing_service.create_checkout_session(db, "o1")
 
 
 # ── the router (HTTP shapes: signature, roles, flags) ─────────────────────────

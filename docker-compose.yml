@@ -78,6 +78,15 @@ x-app-env: &app-env
   BILLING_ENABLED: ${BILLING_ENABLED:-false}
   FREE_TRACE_LIMIT: ${FREE_TRACE_LIMIT:-20000}
   PRO_TRACE_LIMIT: ${PRO_TRACE_LIMIT:-1000000}
+  # Per-organization caps on workspaces and seats (company accounts; personal ones are always
+  # 1/1). Only enforced when BILLING_ENABLED.
+  FREE_WORKSPACE_LIMIT: ${FREE_WORKSPACE_LIMIT:-3}
+  PRO_WORKSPACE_LIMIT: ${PRO_WORKSPACE_LIMIT:-10}
+  FREE_SEAT_LIMIT: ${FREE_SEAT_LIMIT:-3}
+  PRO_SEAT_LIMIT: ${PRO_SEAT_LIMIT:-10}
+  # Multi-tenant signup: off means the first registrant claims the deployment and everyone else
+  # arrives by invite (the safe self-host default).
+  ALLOW_PUBLIC_SIGNUP: ${ALLOW_PUBLIC_SIGNUP:-false}
   REQUIRE_PROJECT_LLM_KEY: ${REQUIRE_PROJECT_LLM_KEY:-false}
   STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
   STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}

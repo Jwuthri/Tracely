@@ -157,14 +157,15 @@ async def test_create_workspace_adds_membership_and_own_key(client):
 
 
 async def test_create_workspace_rejects_ingest_key_principal(client):
-    # an ingest-key principal (SDK/dev) has no user — the endpoint must 400, not 500
+    # an ingest-key principal (SDK/dev) has role=None — `require_role` rejects it outright, so an
+    # SDK credential can never mint workspaces (or seats) on the account it belongs to
     reg = await client.post(
         "/auth/register", json={"email": "owner@x.test", "password": "hunter2-pw"}
     )
     me = (await client.get("/auth/me", headers=_bearer(reg.json()["token"]))).json()
     ingest_key = me["ingest_keys"][0]
     r = await client.post("/auth/projects", json={"name": "Nope"}, headers=_bearer(ingest_key))
-    assert r.status_code == 400
+    assert r.status_code == 403
 
 
 async def test_missing_credentials_is_401(client):

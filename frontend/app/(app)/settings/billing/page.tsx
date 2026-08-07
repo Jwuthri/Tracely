@@ -31,7 +31,13 @@ export default async function BillingPage() {
         <h1 className="font-display text-[24px] font-extrabold tracking-tight">Usage &amp; billing</h1>
         <p className="mt-1.5 max-w-2xl text-[14px] text-fg-muted">
           Traces ingested this month, your plan, and — on the hosted cloud — the subscription
-          behind it.
+          behind it. Billing belongs to{" "}
+          {me?.organization_name ? (
+            <span className="text-fg">{me.organization_name}</span>
+          ) : (
+            "your account"
+          )}
+          , not to a single workspace.
         </p>
       </header>
 
@@ -55,6 +61,7 @@ export default async function BillingPage() {
         <BillingUsageCard
           usage={usage}
           canManage={canManage}
+          personal={me?.organization_kind === "personal"}
         />
       )}
     </div>
@@ -64,9 +71,11 @@ export default async function BillingPage() {
 function BillingUsageCard({
   usage,
   canManage,
+  personal,
 }: {
   usage: NonNullable<Awaited<ReturnType<typeof getBillingUsage>>>;
   canManage: boolean;
+  personal: boolean;
 }) {
   const capped = usage.trace_limit != null && usage.trace_limit > 0;
   const frac = capped ? usage.traces_used / (usage.trace_limit as number) : 0;
@@ -119,7 +128,9 @@ function BillingUsageCard({
           A trace counts once per month, on ingest. Tracely&apos;s own recordings (evaluations,
           scenario drives) never count against your quota.
           {usage.quota_scope === "account" &&
-            " The free quota is shared across every workspace you own — creating workspaces doesn't add quota."}
+            (personal
+              ? " Your personal account holds one workspace; create an organization to run several on one plan."
+              : " Every workspace in this organization shares the quota and the subscription — adding workspaces doesn't add quota.")}
         </p>
 
         <BillingActions plan={usage.plan} canManage={canManage} />

@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     # (`Project.openrouter_api_key_encrypted`). Only needed once a workspace sets its own key —
     # blank deployments (server-wide key only) are unaffected.
     secrets_encryption_key: str = ""
+    # Multi-tenant signup (AUTH_MODE=local). Off by default: a self-hosted deployment is claimed
+    # by its first registrant and everyone else arrives by invite, so an exposed URL can't be
+    # used to mint accounts. Hosted cloud turns it on — each signup gets its own personal
+    # organization and workspace.
+    allow_public_signup: bool = False
     # Hosted-cloud hard gate: when true, the server-wide LLM/embedding credentials
     # (OPENROUTER_API_KEY / LLM_JUDGE_API_KEY / OPENAI_API_KEY) never apply to ANY call — scoped
     # or not. Every AI feature then runs exclusively on the workspace's own OpenRouter key
@@ -84,6 +89,13 @@ class Settings(BaseSettings):
     # never count). `unlimited` plan = no cap.
     free_trace_limit: int = 20_000
     pro_trace_limit: int = 1_000_000
+    # Per-organization caps on workspaces and seats (members + pending invites). Personal
+    # accounts are always 1/1 — these apply to company orgs. Only enforced when billing is on, so
+    # a self-hosted deployment stays uncapped.
+    free_workspace_limit: int = 3
+    pro_workspace_limit: int = 10
+    free_seat_limit: int = 3
+    pro_seat_limit: int = 10
     # Stripe (subscription billing). Secret key + the Pro plan's monthly price id, plus the
     # webhook signing secret — required whenever the secret key is set, because an unverified
     # webhook endpoint would let anyone flip a workspace's plan with a curl.
