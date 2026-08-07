@@ -18,6 +18,68 @@ const btnPrimary =
 const btnGhost =
   "inline-flex items-center gap-2 rounded-full border border-line-bright/70 bg-white/[0.04] px-5 py-2.5 text-sm font-medium text-fg transition duration-300 hover:border-line-bright hover:bg-white/[0.08]";
 
+/* Plans. Deliberately three: self-host is the honest default (it's MIT and complete), Free is
+   the hosted on-ramp, Team is the paid tier. Prices live here rather than in a CMS because
+   there's exactly one page that shows them. */
+const PLANS: {
+  name: string;
+  blurb: string;
+  price: string;
+  per?: string;
+  features: string[];
+  cta: string;
+  href: string;
+  featured?: boolean;
+}[] = [
+  {
+    name: "Self-host",
+    blurb: "The entire product, MIT-licensed, on your own infrastructure.",
+    price: "$0",
+    per: "forever",
+    features: [
+      "Every feature — no paywalled internals",
+      "Your traces never leave your network",
+      "One-click deploy to Railway, or docker compose",
+      "Unlimited traces, agents and seats",
+      "Community support on GitHub",
+    ],
+    cta: "Deploy your own",
+    href: GITHUB,
+  },
+  {
+    name: "Free",
+    blurb: "Hosted, for trying it on a real agent without running ClickHouse.",
+    price: "$0",
+    per: "/month",
+    features: [
+      "50k spans / month",
+      "7-day trace retention",
+      "All evaluators + failure clustering",
+      "CI gate on one agent",
+      "1 workspace, 2 seats",
+    ],
+    cta: "Start free",
+    href: APP,
+    featured: true,
+  },
+  {
+    name: "Team",
+    blurb: "For teams gating real releases on real production failures.",
+    price: "$49",
+    per: "/month",
+    features: [
+      "1M spans / month, then usage-based",
+      "90-day retention",
+      "Unlimited agents + CI gates",
+      "Multi-workspace with team invites",
+      "Judge calibration + adversarial scenarios",
+      "Email support",
+    ],
+    cta: "Start free, upgrade later",
+    href: APP,
+  },
+];
+
 type P = SVGProps<SVGSVGElement>;
 const base = (p: P) => ({
   viewBox: "0 0 24 24",
@@ -484,6 +546,7 @@ export default function Landing() {
             <a className="transition hover:text-fg" href="#features">Features</a>
             <a className="transition hover:text-fg" href="#gate">CI gate</a>
             <a className="transition hover:text-fg" href="#sdk">SDK</a>
+            <a className="transition hover:text-fg" href="#pricing">Pricing</a>
             <a className="transition hover:text-fg" href={DOCS} target="_blank" rel="noreferrer">Docs</a>
           </div>
           <div className="flex items-center gap-3">
@@ -890,6 +953,75 @@ export default function Landing() {
                 ))}
               </pre>
             </div>
+          </div>
+        </section>
+
+        {/* ================================= pricing ================================= */}
+        <section id="pricing" className="scroll-mt-24 px-6 py-28">
+          <div className="mx-auto max-w-[1200px]">
+            <div className="sec-reveal flex items-center gap-4">
+              <span className="eyebrow whitespace-nowrap">Pricing</span>
+              <div className="hairline-x flex-1" />
+            </div>
+            <h2 className="sec-reveal mt-6 max-w-3xl font-display text-4xl font-bold tracking-tight sm:text-5xl">
+              Free to self-host.
+              <br />
+              Free to start hosted.
+            </h2>
+            <p className="sec-reveal mt-5 max-w-2xl leading-relaxed text-fg-muted">
+              The whole product is MIT-licensed — API, worker, UI, evaluators, the CI gate. Run it
+              yourself and pay nobody. The hosted plan exists so you don&apos;t have to run
+              ClickHouse.
+            </p>
+
+            <div className="mt-14 grid gap-6 lg:grid-cols-3">
+              {PLANS.map((plan) => (
+                <div
+                  key={plan.name}
+                  className={`sec-reveal glass relative flex flex-col rounded-2xl p-7 ${
+                    plan.featured ? "border-signal/40 shadow-glow" : ""
+                  }`}
+                >
+                  {plan.featured && (
+                    <span className="absolute -top-3 left-7 rounded-full bg-signal px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-ink-950">
+                      Most popular
+                    </span>
+                  )}
+                  <h3 className="font-display text-xl font-bold tracking-tight">{plan.name}</h3>
+                  <p className="mt-2 min-h-[40px] text-[13.5px] leading-relaxed text-fg-muted">
+                    {plan.blurb}
+                  </p>
+                  <div className="mt-6 flex items-baseline gap-1.5">
+                    <span className="font-display text-4xl font-extrabold tracking-tight">
+                      {plan.price}
+                    </span>
+                    {plan.per && <span className="text-[13px] text-fg-faint">{plan.per}</span>}
+                  </div>
+                  <ul className="mt-7 flex-1 space-y-2.5">
+                    {plan.features.map((f) => (
+                      <li key={f} className="flex gap-2.5 text-[13.5px] leading-relaxed text-fg-muted">
+                        <IconCheck className="mt-[3px] h-3.5 w-3.5 flex-none text-signal" />
+                        <span>{f}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <a
+                    className={`${plan.featured ? btnPrimary : btnGhost} mt-8 justify-center`}
+                    href={plan.href}
+                    {...(plan.href.startsWith("http") ? { target: "_blank", rel: "noreferrer" } : {})}
+                  >
+                    {plan.cta} <IconArrow className="h-3.5 w-3.5" />
+                  </a>
+                </div>
+              ))}
+            </div>
+
+            <p className="sec-reveal mt-10 max-w-3xl text-[13px] leading-relaxed text-fg-faint">
+              <span className="text-fg-muted">Bring your own model key.</span> LLM judges run on
+              your OpenRouter key, scoped to your workspace and encrypted at rest — we never bill
+              you a markup on inference, and we never use a shared key. No key configured? The
+              structural evaluators still grade every run; the LLM ones switch off cleanly.
+            </p>
           </div>
         </section>
 
