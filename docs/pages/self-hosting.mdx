@@ -1,0 +1,72 @@
+import { Callout, Steps } from "nextra/components";
+
+# Self-hosting
+
+Tracely is MIT-licensed and self-hosts completely — the same code that runs the hosted cloud.
+Two paths: **docker compose** on a box you own, or **Railway** with checked-in configs.
+(Or skip all of it: [tracely-studio.xyz](https://tracely-studio.xyz) has a free plan.)
+
+## Docker compose (one machine, 5 minutes)
+
+```bash
+git clone https://github.com/Jwuthri/Tracely && cd Tracely
+docker compose up -d --build --wait
+```
+
+That brings up everything: the API (**:8000**), the worker, the UI (**:3001**), Postgres+pgvector,
+ClickHouse, Redis and MinIO — migrations and seeding included. Open `http://localhost:3001`,
+create your workspace, grab your ingest key from **Settings → API keys**, and point the SDK at
+`http://localhost:8000`.
+
+```bash
+docker compose --profile demo up -d   # optional: populate demo traces, clusters, cases and gates
+```
+
+## Railway (managed infra, ~15 minutes)
+
+The repo ships a pre-defined Railway deployment: four one-click database templates
+(Postgres+pgvector, ClickHouse, Redis, MinIO) plus three app services (API, worker, UI) that
+deploy straight from the repo via config-as-code files — Dockerfile, start command, health check
+and the migration pre-deploy chain all included.
+
+<Steps>
+
+### Add the four databases
+
+**New → Template**: Postgres-with-pgvector, ClickHouse, Redis, MinIO. Each gets a persistent
+volume automatically; keep them all private.
+
+### Add the three app services
+
+**New → GitHub Repo** (a fork of `Jwuthri/Tracely`) three times, setting each service's
+config-as-code path: `deploy/railway/backend.json`, `deploy/railway/worker.json`,
+`deploy/railway/frontend.json`. Give **backend** and **frontend** public domains; leave the
+worker private.
+
+### Paste the variables
+
+Every variable — including the `${{Service.VAR}}` cross-references — is pre-written in
+[`deploy/railway/.env.railway.example`](https://github.com/Jwuthri/Tracely/blob/master/deploy/railway/.env.railway.example).
+Generate two secrets with `openssl rand -hex 32`: `SESSION_SECRET` (login) and
+`SECRETS_ENCRYPTION_KEY` (encrypts each workspace's OpenRouter key and scenario endpoint tokens
+at rest).
+
+### Deploy
+
+Railway builds on push; the backend's pre-deploy chain runs ClickHouse DDL → Alembic → seeding →
+S3 bucket creation before traffic cuts over. Open the frontend's public domain, create your
+workspace, and point the SDK at the backend's public domain.
+
+</Steps>
+
+The full walkthrough (IPv6 gotchas, private networking, scaling the worker, publishing your
+project as a reusable one-click template) lives in
+[`deploy/railway/README.md`](https://github.com/Jwuthri/Tracely/blob/master/deploy/railway/README.md);
+the production-hardening runbook (auth guards, backups, post-deploy verification) is
+[`guides/DEPLOY.md`](https://github.com/Jwuthri/Tracely/blob/master/guides/DEPLOY.md).
+
+<Callout type="info">
+  **LLM judges on self-host.** Each workspace brings its own OpenRouter key (**Settings →
+  OpenRouter key**), encrypted with your `SECRETS_ENCRYPTION_KEY`. No key = structural checks
+  still run; the LLM judges, failure analysis and summaries switch off gracefully.
+</Callout>

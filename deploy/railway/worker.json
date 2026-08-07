@@ -5,7 +5,7 @@
     "dockerfilePath": "Dockerfile.backend"
   },
   "deploy": {
-    "startCommand": "celery -A tracely_workers.worker worker --pool=solo --loglevel=info",
+    "startCommand": "sh -c \"exec celery -A tracely_workers.worker worker --pool=${CELERY_POOL:-solo} --concurrency=${CELERY_CONCURRENCY:-1} --loglevel=info\"",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }

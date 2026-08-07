@@ -62,6 +62,9 @@ then reference `${{shared.NAME}}`. Then the per-service extras.
 
 Must-set by hand:
 - **`SESSION_SECRET`** on backend+worker (for `AUTH_MODE=local`) — `openssl rand -hex 32`.
+- **`SECRETS_ENCRYPTION_KEY`** on backend+worker (same value on both) — `openssl rand -hex 32`.
+  Without it, workspaces can't save their OpenRouter key (no LLM judges) and scenario endpoints
+  can't store a bearer token; the forms refuse rather than persisting plaintext.
 - **`AUTH_MODE`** (backend+worker) and **`NEXT_PUBLIC_AUTH_MODE`** (frontend) — keep them equal
   (`local` for self-host, `clerk` for hosted SaaS, `dev` to run open with no login).
 - For the frontend, also add `NEXT_PUBLIC_AUTH_MODE` (and any `NEXT_PUBLIC_CLERK_*`) as **Build**
@@ -130,8 +133,9 @@ to its `RAILWAY_PRIVATE_DOMAIN` (HTTP port 8123, not the 9000 native port), then
   `DATABASE_URL`.
 - **Rotate the dev key.** Seeding creates the well-known `tracely_dev_key` for continuity. On a public
   deployment, mint a fresh ingest key and retire it (it's a project secret).
-- **Scaling the worker** is `numReplicas` in the dashboard; it uses `--pool=solo`, so add replicas
-  rather than threads.
+- **Scaling the worker.** The start command honors `CELERY_POOL` / `CELERY_CONCURRENCY` (defaults
+  `solo` / `1`). First knob: set `CELERY_POOL=prefork CELERY_CONCURRENCY=4` on the worker service;
+  beyond that, add `numReplicas` in the dashboard.
 
 ## Optional: publish as a reusable template
 
