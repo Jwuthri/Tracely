@@ -100,10 +100,19 @@ class TraceReader:
         self, project_id: str, agent_id: str, env: str, limit: int = 300
     ) -> list[str]:
         """Recent trace_ids for `(agent_id, env)`, newest first. The gate uses this to find
-        candidate traces when no explicit `tracely replay` pairing was provided."""
+        candidate traces when no explicit `tracely replay` pairing was provided.
+
+        Two kinds of Tracely-made traces are excluded, because every simulate run emits both
+        under this agent in env `ci` and on a busy project they crowd the real CI candidates out
+        of the window — every case then SKIPs and the gate lands on NO_COVERAGE, worse the more
+        the product is used: internal recordings (`internal_kind`), and the emulated scenario
+        turns themselves (`emulated.turn` spans — those are graded as conversations, never as
+        replay candidates)."""
         rows = self.client.query(
             "SELECT trace_id FROM events FINAL WHERE project_id = {p:String} AND agent_id = {a:String} "
-            "AND env = {e:String} GROUP BY trace_id ORDER BY max(start_time) DESC LIMIT {n:UInt32}",
+            "AND env = {e:String} AND internal_kind = '' "
+            "GROUP BY trace_id HAVING countIf(name = 'emulated.turn') = 0 "
+            "ORDER BY max(start_time) DESC LIMIT {n:UInt32}",
             parameters={"p": project_id, "a": agent_id, "e": env, "n": limit},
         ).result_rows
         return [tid for (tid,) in rows]

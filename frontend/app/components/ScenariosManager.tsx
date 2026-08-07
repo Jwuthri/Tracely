@@ -46,7 +46,12 @@ export function ScenariosManager({
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!r.ok) return;
+    if (!r.ok) {
+      // A silently ignored toggle reads as "it worked" while the suite keeps its old shape.
+      const d = await r.json().catch(() => null);
+      setErr(d?.detail ?? `Could not update the scenario (HTTP ${r.status}).`);
+      return;
+    }
     const updated: Scenario = await r.json();
     setRows((prev) => prev.map((s) => (s.id === id ? updated : s)));
   }

@@ -135,9 +135,14 @@ def run_scenario_gate_task(
     Tracely's turn spans.
     """
     from tracely.infrastructure.db.engine import SyncSessionLocal
+    from tracely.infrastructure.db.models import GateRun
     from tracely.services.gate_service import GateService
 
     with SyncSessionLocal() as s:
+        # `task_acks_late` redelivery: a run that already finalized must not be driven again.
+        done = s.get(GateRun, gate_run_id)
+        if done is not None and done.finished_at is not None:
+            return {"gate_run_id": gate_run_id, "status": done.status}
         try:
             gate = GateService(s).run_gate(
                 project_id, agent_id, env=env, git_ref=git_ref, pr_number=pr_number,
@@ -150,10 +155,17 @@ def run_scenario_gate_task(
             _mark_gate_error(s, gate_run_id)
             raise
 
-    grade_scenario_gate_task.apply_async(
-        (project_id, gate_run_id, min_pass_rate),
-        countdown=settings.gate_scenario_span_grace_s,
-    )
+    try:
+        grade_scenario_gate_task.apply_async(
+            (project_id, gate_run_id, min_pass_rate),
+            countdown=settings.gate_scenario_span_grace_s,
+        )
+    except Exception:
+        # A broker blip here would otherwise leave the row RUNNING forever, with CI polling it.
+        log.exception("scenario_gate_grade_enqueue_failed", gate_run_id=gate_run_id)
+        with SyncSessionLocal() as s:
+            _mark_gate_error(s, gate_run_id)
+        raise
     return {"gate_run_id": gate.id, "status": "RUNNING"}
 
 
@@ -171,7 +183,7 @@ def grade_scenario_gate_task(
 
     with SyncSessionLocal() as s:
         try:
-            gate = GateService(s).grade_scenarios(gate_run_id, min_pass_rate)
+            gate = GateService(s).grade_scenarios(gate_run_id, min_pass_rate, project_id=project_id)
         except Exception:
             s.rollback()
             log.exception("scenario_gate_grade_failed", gate_run_id=gate_run_id)
@@ -238,27 +250,62 @@ def run_scenario_task(
         if endpoint is None:
             return {"error": "no endpoint configured for this agent"}
         agent_slug = repositories.agent_slug(s, project_id, scenario.agent_id)
-        result = SimulationService().run_scenario(
-            project_id, agent_slug, scenario, endpoint, env=env,
-            conversation_id=conversation_id,
-        )
+        try:
+            result = SimulationService().run_scenario(
+                project_id, agent_slug, scenario, endpoint, env=env,
+                conversation_id=conversation_id,
+            )
+        except Exception as exc:
+            # The drive crashed mid-run (blob store, mapper). Any turns that DID land are real
+            # traces — still schedule grading so they don't sit ungraded forever, but without the
+            # per-turn trace ids the grader falls back to grading the thread as-is.
+            log.exception("scenario_run_failed", scenario_id=scenario_id)
+            grade_scenario_turns_task.apply_async(
+                (project_id, conversation_id), countdown=settings.gate_scenario_span_grace_s
+            )
+            return {"conversation_id": conversation_id, "error": f"{type(exc).__name__}: {exc}"}
 
     grade_scenario_turns_task.apply_async(
-        (project_id, conversation_id), countdown=settings.gate_scenario_span_grace_s
+        (
+            project_id, conversation_id, scenario_id,
+            result.get("trace_ids") or [], result.get("error") or "",
+        ),
+        countdown=settings.gate_scenario_span_grace_s,
     )
     return {"conversation_id": conversation_id, "turns": len(result.get("turns") or []),
             "error": result.get("error") or ""}
 
 
 @celery_app.task(name="tracely.grade_scenario_turns", bind=True, max_retries=0)
-def grade_scenario_turns_task(self, project_id: str, conversation_id: str) -> dict:
+def grade_scenario_turns_task(
+    self,
+    project_id: str,
+    conversation_id: str,
+    scenario_id: str = "",
+    trace_ids: list[str] | None = None,
+    error: str = "",
+) -> dict:
     """Phase 2 of a one-click run: grade the conversation the drive produced.
 
     A standalone run has no gate to grade it, and the turns were ingested inline (blob → mapper,
-    NOT via Celery), so nothing scheduled an evaluation for them. Without this the Run button
-    produces a conversation with no scores, which reads as "the evaluators are broken".
+    NOT via Celery), so nothing scheduled an evaluation for them. Grading goes through the SAME
+    path as the gate's phase 2 — the project's evaluators (targeting off), the authored
+    expectations, and the attack judge for an ADVERSARIAL scenario. `evaluate_thread` alone
+    skipped all of that, so a successful jailbreak run from the UI rendered green.
+
+    The legacy `(project_id, conversation_id)` form (no scenario id — e.g. a task queued by an
+    older backend, or a drive that crashed before returning trace ids) falls back to plain
+    evaluation of whatever landed.
     """
+    from tracely.infrastructure.db.engine import SyncSessionLocal
+    from tracely.services.gate_service import GateService
+
     try:
+        if scenario_id:
+            with SyncSessionLocal() as s:
+                return GateService(s).grade_standalone_scenario(
+                    project_id, scenario_id, conversation_id, trace_ids or [], error=error
+                )
         return EvaluationService().evaluate_thread(project_id, conversation_id)
     except Exception as exc:
         log.warning("scenario_grade_failed", conversation_id=conversation_id, error=str(exc))

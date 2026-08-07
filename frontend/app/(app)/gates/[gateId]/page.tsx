@@ -62,8 +62,10 @@ export default async function GatePage({ params }: { params: Promise<{ gateId: s
             )}
             {nocov && (
               <div className="mt-2 max-w-md text-[12px] leading-snug text-warn/90">
-                Exercised 0 of {g.total} promoted case(s) — no CI trace matched (misconfigured
-                replay, renamed agent, or input-digest drift). A gate that tests nothing is not a pass.
+                The gate exercised nothing that produced a verdict — no CI trace matched a
+                promoted case (misconfigured replay, renamed agent, input-digest drift), or every
+                scenario was skipped/ungraded (no endpoint configured, no LLM key to judge). A
+                gate that tests nothing is not a pass.
               </div>
             )}
           </div>
@@ -78,7 +80,10 @@ export default async function GatePage({ params }: { params: Promise<{ gateId: s
       {(g.warnings?.length ?? 0) > 0 && (
         <div className="reveal card border-warn/30 bg-warn/[0.05] p-4" style={{ animationDelay: "40ms" }}>
           <div className="mb-2 flex items-center gap-2 text-[12.5px] font-semibold text-warn">
-            ⚠️ Soft warnings <span className="font-mono text-[10px] text-fg-faint">(non-blocking · fail-to-pass still green)</span>
+            ⚠️ Warnings{" "}
+            <span className="font-mono text-[10px] text-fg-faint">
+              (blocking when the run is FAIL/NO_COVERAGE or strict mode is on — otherwise advisory)
+            </span>
           </div>
           <ul className="space-y-1">
             {g.warnings.map((w, i) => (

@@ -53,6 +53,11 @@ _REPLY_PATHS = (
     "result",
 )
 
+# Hard ceiling on driven turns, whatever the scenario says. A 200-turn import at the default
+# 60s endpoint timeout is hours of one Celery slot — under `--pool=solo` that starves customer
+# OTLP ingest, and under prefork the hard time limit kills the task without a terminal record.
+_MAX_DRIVEN_TURNS = 30
+
 class SimulationService:
     """Runs one scenario against one agent endpoint. Stateless — construct per run."""
 
@@ -173,11 +178,19 @@ class SimulationService:
                 if error:
                     break  # a dead endpoint won't get healthier on turn 4
 
+        # An adversarial scenario that produced zero turns is a SKIP downstream — say why, or the
+        # PR comment shows a bare SKIP row next to a green result and nobody knows the attacker
+        # never ran (the usual cause: no LLM key configured for this workspace).
+        reason = ""
+        if not turns and scenario.kind == "ADVERSARIAL":
+            reason = "the attacker produced no turns — is an LLM key configured for this workspace?"
+
         return {
             "conversation_id": conversation_id,
             "trace_ids": trace_ids,
             "turns": turns,
             "error": next((t["error"] for t in turns if t["error"]), ""),
+            **({"reason": reason} if reason else {}),
         }
 
     # ── turn planning ─────────────────────────────────────────────────────────
@@ -185,8 +198,8 @@ class SimulationService:
     @staticmethod
     def _planned_turn_count(scenario: Scenario) -> int:
         if scenario.kind == "ADVERSARIAL":
-            return max(1, scenario.max_turns or 6)
-        return len(normalize_turns(scenario.turns))
+            return min(max(1, scenario.max_turns or 6), _MAX_DRIVEN_TURNS)
+        return min(len(normalize_turns(scenario.turns)), _MAX_DRIVEN_TURNS)
 
     def _next_message(
         self, project_id: str, scenario: Scenario, history: list[dict], index: int
@@ -277,6 +290,13 @@ class SimulationService:
             **(endpoint.extra_headers or {}),
         }
         token = decrypt_secret(endpoint.token_encrypted) if endpoint.token_encrypted else None
+        if endpoint.token_encrypted and token is None:
+            # A stored token that no longer decrypts (rotated SECRETS_ENCRYPTION_KEY) must be
+            # loud: silently omitting auth turns every turn into a 401 that blames the PR.
+            return "", session, (
+                "the stored endpoint token cannot be decrypted "
+                "(SECRETS_ENCRYPTION_KEY changed?) — re-save the endpoint token"
+            )
         if token:
             scheme = (endpoint.auth_scheme or "").strip()
             headers[endpoint.auth_header or "Authorization"] = (

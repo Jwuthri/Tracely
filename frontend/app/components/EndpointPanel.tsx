@@ -46,7 +46,9 @@ export function EndpointPanel({
         setUrl(d.url ?? "");
         setReplyPath(d.reply_path ?? "");
         setSessionPath(d.session_path ?? "");
-        setSessionKey(d.session_key || "conversation_id");
+        // A configured endpoint's session key is taken verbatim — "" is a deliberate choice
+        // (no session field at all), and re-arming the default here made it unpersistable.
+        setSessionKey(d.configured ? (d.session_key ?? "") : "conversation_id");
         setExtraBody(
           d.extra_body && Object.keys(d.extra_body).length
             ? JSON.stringify(d.extra_body, null, 2)

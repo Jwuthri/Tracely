@@ -23,6 +23,18 @@ from tracely.services.gate_service import GateService
 
 router = APIRouter(prefix="/api")
 
+# Hard ceiling on a scenario's driven turns — matches `_MAX_DRIVEN_TURNS` in the simulation
+# service. One turn can hold an endpoint timeout (up to 300s), so unbounded turn counts pin a
+# Celery slot for hours and starve OTLP ingest behind it.
+_TURN_CAP = 30
+
+
+def _clamp_turns(value) -> int:
+    try:
+        return min(max(int(value or 6), 1), _TURN_CAP)
+    except (TypeError, ValueError):
+        return 6
+
 
 def _scenario_dict(sc: Scenario, agent_slug: str | None = None) -> dict[str, Any]:
     return {
@@ -93,7 +105,7 @@ async def create_scenario(project_id: str = Depends(get_project_id), body: dict 
                 id=str(uuid.uuid4()), project_id=project_id, agent_id=aid,
                 title=(body.get("title") or "").strip()[:512], kind=kind,
                 turns=serialize_turns(turns), goal=goal,
-                max_turns=int(body.get("max_turns") or 6),
+                max_turns=_clamp_turns(body.get("max_turns")),
                 source_thread_id=body.get("source_thread_id") or "",
                 enabled=bool(body.get("enabled", True)),
             )
@@ -125,8 +137,10 @@ async def import_scenario(project_id: str = Depends(get_project_id), body: dict 
             sc = Scenario(
                 id=str(uuid.uuid4()), project_id=project_id, agent_id=aid,
                 title=(body.get("title") or f"Imported · {messages[0][:80]}")[:512],
-                kind="SCRIPTED", turns=serialize_turns([Turn(message=m) for m in messages]),
-                max_turns=len(messages),
+                # Capped: importing a 200-turn production thread would otherwise drive for hours.
+                kind="SCRIPTED",
+                turns=serialize_turns([Turn(message=m) for m in messages[:_TURN_CAP]]),
+                max_turns=min(len(messages), _TURN_CAP),
                 source_thread_id=thread_id, created_by="import",
             )
             s.add(sc)
@@ -163,7 +177,7 @@ async def update_scenario(
             if "turns" in body:
                 sc.turns = serialize_turns(normalize_turns(body["turns"] or []))
             if "max_turns" in body:
-                sc.max_turns = max(1, int(body["max_turns"]))
+                sc.max_turns = _clamp_turns(body["max_turns"])
             if "enabled" in body:
                 sc.enabled = bool(body["enabled"])
 
@@ -258,7 +272,13 @@ async def set_endpoint(
     agent_ref: str, project_id: str = Depends(get_project_id), body: dict = Body(...)
 ):
     """Register where Tracely should call this agent. `token` is write-only: encrypted at rest
-    and never echoed back. Omit it on an update to keep the stored one."""
+    and never echoed back. Omit it on an update to keep the stored one.
+
+    Partial on purpose: only the keys PRESENT in the body are written. The UI edits five of the
+    nine fields — a full replace meant one Save wiped `auth_header`, `auth_scheme`, `timeout_s`
+    and `extra_headers` configured via the API, and every turn after that 401'd or timed out
+    blaming the PR. Present-but-null resets a key to its default; absent keeps the stored value.
+    """
     url = (body.get("url") or "").strip()
     if not url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="url must be http(s)")
@@ -279,16 +299,27 @@ async def set_endpoint(
     def work():
         with SyncSessionLocal() as s:
             aid = _resolve_agent(s, project_id, agent_ref)
-            ep = s.get(AgentEndpoint, aid) or AgentEndpoint(agent_id=aid, project_id=project_id)
+            ep = s.get(AgentEndpoint, aid)
+            created = ep is None
+            if created:
+                ep = AgentEndpoint(agent_id=aid, project_id=project_id)
             ep.url = url
-            ep.auth_header = (body.get("auth_header") or "Authorization")[:64]
-            ep.auth_scheme = body.get("auth_scheme", "Bearer")[:32]
-            ep.reply_path = (body.get("reply_path") or "")[:200]
-            ep.session_key = body.get("session_key", "conversation_id")[:120]
-            ep.session_path = (body.get("session_path") or "")[:200]
-            ep.timeout_s = int(body.get("timeout_s") or 60)
-            ep.extra_headers = body.get("extra_headers") or {}
-            ep.extra_body = body.get("extra_body") or {}
+
+            def put(attr: str, key: str, default, cast):
+                if key in body or created:
+                    raw = body.get(key)
+                    setattr(ep, attr, cast(default if raw is None else raw))
+
+            put("auth_header", "auth_header", "Authorization", lambda v: (str(v) or "Authorization")[:64])
+            # "" is meaningful for the scheme (raw token, no prefix) — only null/absent defaults.
+            put("auth_scheme", "auth_scheme", "Bearer", lambda v: str(v)[:32])
+            put("reply_path", "reply_path", "", lambda v: str(v)[:200])
+            # "" is meaningful for the session key too: it disables the session field entirely.
+            put("session_key", "session_key", "conversation_id", lambda v: str(v)[:120])
+            put("session_path", "session_path", "", lambda v: str(v)[:200])
+            put("timeout_s", "timeout_s", 60, lambda v: min(max(int(v or 60), 1), 300))
+            put("extra_headers", "extra_headers", {}, lambda v: v or {})
+            put("extra_body", "extra_body", {}, lambda v: v or {})
             if encrypted:
                 ep.token_encrypted = encrypted
             s.add(ep)

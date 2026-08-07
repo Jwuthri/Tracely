@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 import structlog
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from tracely.config import settings
@@ -206,6 +206,16 @@ class GateService:
                 env=env, git_ref=git_ref, pr_number=pr_number, status="RUNNING",
             )
             self.session.add(gate)
+        else:
+            # Redelivered task (`task_acks_late` + a worker death re-runs phase 1): replay cases
+            # are hermetic so re-recording them is fine, but the stale rows must go first or the
+            # gate shows every case twice. Scenario cases are kept — `_drive_scenarios` skips the
+            # ones already driven rather than re-POSTing a live endpoint.
+            self.session.execute(
+                delete(GateCase).where(
+                    GateCase.gate_run_id == gate.id, GateCase.scenario_id.is_(None)
+                )
+            )
         gate.total = len(cases)
         self.session.commit()
 
@@ -226,6 +236,7 @@ class GateService:
 
         baseline = self._baseline_gate(project_id, agent_id, gate.id)
         warnings += delta_warnings(total_lat, total_tok, baseline)
+        warnings = list(dict.fromkeys(warnings))  # a redelivered run must not stack duplicates
         if misconfigured:
             case_status = _worst(case_status, "NO_COVERAGE")
 
@@ -240,7 +251,12 @@ class GateService:
         self.session.commit()
         return gate
 
-    def grade_scenarios(self, gate_run_id: str, min_pass_rate: float | None = None) -> GateRun | None:
+    def grade_scenarios(
+        self,
+        gate_run_id: str,
+        min_pass_rate: float | None = None,
+        project_id: str | None = None,
+    ) -> GateRun | None:
         """Phase 2: grade the conversations phase 1 drove, then finalize the run.
 
         Separate task on purpose. The agent's own spans reach Tracely as ordinary OTLP, so their
@@ -251,15 +267,25 @@ class GateService:
         what lets the queue drain first.
         """
         gate = self.session.get(GateRun, gate_run_id)
-        if gate is None:
+        if gate is None or (project_id and gate.project_id != project_id):
             return None
-        pending = [
-            gc
-            for gc in self.session.execute(
+        if gate.finished_at is not None:
+            # `task_acks_late` redelivery after the run already finalized: grading again would
+            # re-run every judge and add the scenario counts to the totals a second time.
+            return gate
+        all_cases = list(
+            self.session.execute(
                 select(GateCase).where(GateCase.gate_run_id == gate_run_id)
             ).scalars()
-            if gc.scenario_id
-        ]
+        )
+        pending = [gc for gc in all_cases if gc.scenario_id]
+        # A scenario deleted while the gate ran leaves its case with `scenario_id` nulled and the
+        # verdict still PENDING — sweep those to SKIP or they render as in-flight forever and
+        # skew every count below. (Replay cases are never PENDING, so this matches exactly.)
+        orphaned = [gc for gc in all_cases if not gc.scenario_id and gc.verdict == "PENDING"]
+        for gc in orphaned:
+            gc.verdict = "SKIP"
+            gc.detail = {**(gc.detail or {}), "reason": "scenario deleted while the gate was running"}
         outcomes = [
             ScenarioOutcome(
                 scenario_id=gc.scenario_id or "",
@@ -300,22 +326,63 @@ class GateService:
             gate.project_id, gate.agent_id
         ):
             scenario_status = "NO_COVERAGE"
-            gate.warnings = ["scenarios are enabled but this agent has no endpoint configured"]
+            # Merge, don't replace: phase 1 may have left delta/stateless warnings on the row.
+            gate.warnings = list(dict.fromkeys([
+                *(gate.warnings or []),
+                "scenarios are enabled but this agent has no endpoint configured",
+            ]))
         # Settle the CASE half from the counters phase 1 left behind, BEFORE folding the scenario
         # counts in — otherwise the regression verdict is computed from the combined totals and a
         # failing conversation would read as a failing case.
         case_status = self._final_status(
-            gate.passed, gate.failed, gate.skipped, gate.total - len(outcomes), gate.warnings or []
+            gate.passed, gate.failed, gate.skipped,
+            gate.total - len(outcomes) - len(orphaned), gate.warnings or [],
         )
         gate.passed += sum(o.verdict == "PASS" for o in outcomes)
         gate.failed += sum(o.verdict in ("FAIL", "UNGRADED") for o in outcomes)
-        gate.skipped += sum(o.verdict == "SKIP" for o in outcomes)
+        gate.skipped += sum(o.verdict == "SKIP" for o in outcomes) + len(orphaned)
         # A gate is only as good as its worst half.
         gate.status = _worst(case_status, scenario_status)
         gate.finished_at = datetime.now(timezone.utc)
         self.session.commit()
         log.info("scenario_gate", gate_id=gate.id, status=gate.status, **summary)
         return gate
+
+    def grade_standalone_scenario(
+        self,
+        project_id: str,
+        scenario_id: str,
+        conversation_id: str,
+        trace_ids: list[str],
+        error: str = "",
+    ) -> dict:
+        """Grade a one-click scenario run (the Scenarios page's Run button) exactly like the gate
+        grades its conversations: the project's evaluators with targeting/sampling off, the
+        scripted turns' authored expectations, and — for an ADVERSARIAL scenario — the attack
+        judge on the full transcript.
+
+        This used to be `evaluate_thread` alone, which meant the Run button never applied
+        expectations at all and a fully successful jailbreak rendered as a clean green
+        conversation — the exact false-green the attack judge exists to kill.
+        """
+        sc = self.session.get(Scenario, scenario_id)
+        if sc is None or sc.project_id != project_id:
+            return {"error": "scenario not found"}
+        outcome = ScenarioOutcome(
+            scenario_id=scenario_id,
+            title=sc.title or "",
+            conversation_id=conversation_id,
+            trace_ids=list(trace_ids or []),
+            detail={"error": error} if error else {},
+        )
+        turns = {} if sc.kind == "ADVERSARIAL" else {scenario_id: normalize_turns(sc.turns)}
+        goals = {scenario_id: sc.goal or ""} if sc.kind == "ADVERSARIAL" else {}
+        self._grade_conversations(project_id, [outcome], turns, goals)
+        log.info(
+            "scenario_standalone_graded",
+            scenario_id=scenario_id, conversation_id=conversation_id, verdict=outcome.verdict,
+        )
+        return {"conversation_id": conversation_id, "verdict": outcome.verdict, **outcome.detail}
 
     # ── emulated conversations ────────────────────────────────────────────────
 
@@ -370,6 +437,17 @@ class GateService:
         sim = SimulationService()
         self._warn_if_multi_turn_is_stateless(gate, scenarios, endpoint)
 
+        # Redelivered task: a scenario that already has a GateCase on this run was driven —
+        # its conversation went over the wire once and must never be silently re-sent.
+        already_driven = {
+            sid
+            for (sid,) in self.session.execute(
+                select(GateCase.scenario_id).where(
+                    GateCase.gate_run_id == gate.id, GateCase.scenario_id.is_not(None)
+                )
+            )
+        }
+
         # Looked up once per gate, not per turn: the attacker gets the same leverage all run.
         weaknesses = (
             self._known_weaknesses(project_id, agent_id)
@@ -377,9 +455,18 @@ class GateService:
             else []
         )
         for scenario in scenarios:
-            run = sim.run_scenario(
-                project_id, slug, scenario, endpoint, env=env, weaknesses=weaknesses
-            )
+            if scenario.id in already_driven:
+                continue
+            try:
+                run = sim.run_scenario(
+                    project_id, slug, scenario, endpoint, env=env, weaknesses=weaknesses
+                )
+            except Exception as exc:  # one raising scenario must not sink the other four
+                log.exception("scenario_drive_failed", scenario_id=scenario.id)
+                run = {
+                    "conversation_id": "", "trace_ids": [], "turns": [],
+                    "error": f"{type(exc).__name__}: {str(exc)[:300]}",
+                }
             self.session.add(GateCase(
                 id=str(uuid.uuid4()), gate_run_id=gate.id, scenario_id=scenario.id,
                 candidate_trace_id=run["conversation_id"], verdict="PENDING",
@@ -387,9 +474,12 @@ class GateService:
                     "turns": len(run["turns"]),
                     "error": run["error"],
                     "trace_ids": run["trace_ids"],
+                    **({"reason": run["reason"]} if run.get("reason") else {}),
                 },
             ))
-        self.session.commit()
+            # Commit per scenario: these conversations made real HTTP calls, and a crash on
+            # scenario 3 of 5 must not discard the record that 1 and 2 already ran.
+            self.session.commit()
         log.info("scenario_gate_driven", gate_id=gate.id, scenarios=len(scenarios))
         return len(scenarios)
 
@@ -418,6 +508,8 @@ class GateService:
             "multi-turn scenarios are running against an endpoint with no session key — "
             "turn context depends entirely on the endpoint reading the `messages` array"
         )
+        if warning in (gate.warnings or []):
+            return  # redelivered run — already recorded
         log.warning("scenario_gate_no_session_key", agent_id=gate.agent_id)
         gate.warnings = [*(gate.warnings or []), warning]
 
@@ -456,12 +548,31 @@ class GateService:
         scores_by_trace = self.trace_reader.scores_by_trace(project_id, all_traces)
         advisory = repositories.advisory_score_names(self.session, project_id)
         for o in outcomes:
+            error = str((o.detail or {}).get("error") or "")
             if not o.trace_ids:
-                o.verdict = "SKIP"  # scenario produced no turns at all
+                if error:
+                    # The drive itself failed (endpoint unreachable, scenario crashed): that is
+                    # a red conversation with a cause, not an invisible SKIP.
+                    o.verdict = "FAIL"
+                    o.detail = {**o.detail, "failed_expectations": [f"could not drive the endpoint: {error}"]}
+                else:
+                    o.verdict = "SKIP"  # scenario produced no turns at all
                 continue
             pooled = [s for tid in o.trace_ids for s in scores_by_trace.get(tid, [])]
             o.verdict = conversation_verdict(pooled, advisory)
             o.detail = {**o.detail, "scores": len(pooled)}
+            if error and o.verdict != "FAIL":
+                # A conversation cut short by a transport error must never pass — the judges only
+                # saw the turns that made it, and for an adversarial run an empty reply reads as
+                # "the agent held". The error is the verdict.
+                o.verdict = "FAIL"
+                o.detail = {
+                    **o.detail,
+                    "failed_expectations": [
+                        *(o.detail.get("failed_expectations") or []),
+                        f"the conversation errored mid-run: {error}",
+                    ],
+                }
             # Name the evaluators that sank it. A conversation can fail purely on the project's
             # own evaluators — no authored expectation involved — and without this the gate detail
             # and the PR comment show a red row with no cause at all.
@@ -508,6 +619,16 @@ class GateService:
         """
         if not outcome.trace_ids:
             return
+        if (outcome.detail or {}).get("error"):
+            # A transcript cut short by a transport error is not evidence the agent held —
+            # judging it would write a PASS for an attack that never fully ran. The conversation
+            # itself fails on the error (see `_grade_conversations`).
+            result = attack_skipped("the conversation errored mid-run, so the attack wasn't judged")
+            last = outcome.trace_ids[-1]
+            self.score_writer.write_eval_scores(
+                project_id, last, last, [result], thread_id=outcome.conversation_id
+            )
+            return
         transcript = self._transcript(project_id, outcome.trace_ids)
         with use_project_key(project_id):
             if not llm_enabled():
@@ -538,13 +659,23 @@ class GateService:
                                         result.comment],
             }
 
+    @staticmethod
+    def _turn_io(spans: list[dict]) -> tuple[str, str]:
+        """The emulated turn's own (user message, agent reply). Reads the `emulated.turn` span
+        specifically: falling back to "any span with output" graded a nested customer span's
+        output as "the agent's reply" whenever reply extraction came back empty — a silently
+        wrong verdict. An empty reply is the truth, and the judges should see it."""
+        turn = next((s for s in spans if s.get("name") == "emulated.turn"), None)
+        if turn is None:
+            turn = next((s for s in spans if s.get("input") or s.get("output")), {})
+        return str(turn.get("input") or ""), str(turn.get("output") or "")
+
     def _transcript(self, project_id: str, trace_ids: list[str]) -> str:
         """The emulated conversation as plain text, for the attack judge."""
         lines: list[str] = []
         for i, trace_id in enumerate(trace_ids, start=1):
             spans = self.trace_reader.read_spans(project_id, trace_id)
-            user = next((str(s.get("input") or "") for s in spans if s.get("input")), "")
-            agent = next((str(s.get("output") or "") for s in spans if s.get("output")), "")
+            user, agent = self._turn_io(spans)
             lines.append(f"[turn {i}] user: {user}\n[turn {i}] agent: {agent}")
         return "\n".join(lines)[:20000]
 
@@ -598,7 +729,7 @@ class GateService:
         self, project_id: str, turn: Turn, spans: list[dict], index: int, outcome: ScenarioOutcome
     ) -> ExpectationResult:
         """LLM-judge one free-text turn expectation against the agent's reply."""
-        reply = next((str(s.get("output") or "") for s in spans if s.get("output")), "")
+        _, reply = self._turn_io(spans)
         with use_project_key(project_id):
             if not llm_enabled():
                 return expect_skipped("no LLM key configured, so the expectation wasn't judged")
@@ -775,6 +906,9 @@ class GateService:
                 GateRun.agent_id == agent_id,
                 GateRun.status == "PASS",
                 GateRun.id != exclude_id,
+                # A gate with no replay metrics (a simulate-only run records 0/0) is not a
+                # baseline — comparing against it silences delta warnings forever after.
+                or_(GateRun.latency_ms > 0, GateRun.total_tokens > 0),
             )
             .order_by(GateRun.created_at.desc())
             .limit(1)

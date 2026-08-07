@@ -35,9 +35,15 @@ EMOJI = {"PASS": "✅", "FAIL": "❌", "SKIP": "⏭️", "NO_COVERAGE": "⚠️"
 # ── Tracely API ──────────────────────────────────────────────────────────────
 
 
+# Per-request socket timeout. Without one, a single hung connection ignores the polling
+# budget entirely (that budget is only checked *between* requests) and the CI job hangs
+# forever with no output and no exit code.
+_HTTP_TIMEOUT_S = 60
+
+
 def _get_json(url: str, key: str):
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
-    return json.load(urllib.request.urlopen(req))
+    return json.load(urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_S))
 
 
 def _post_json(url: str, key: str, body: dict):
@@ -46,7 +52,7 @@ def _post_json(url: str, key: str, body: dict):
         data=json.dumps(body).encode(),
         headers={"Authorization": f"Bearer {key}", "content-type": "application/json"},
     )
-    return json.load(urllib.request.urlopen(req))
+    return json.load(urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_S))
 
 
 def trigger_gate(
@@ -374,9 +380,10 @@ def post_pr_check(
     target = ""
     if web_url:
         base = web_url.rstrip("/")
-        # One agent links straight to its run; several link to the list, since there is no single
-        # run to open.
-        target = f"{base}/gates/{results[0]['id']}" if len(results) == 1 else f"{base}/gates"
+        # One agent links straight to its run; several (or a run that never got an id) link to
+        # the list, since there is no single run to open.
+        one = results[0].get("id") if len(results) == 1 else ""
+        target = f"{base}/gates/{one}" if one else f"{base}/gates"
     if sha:
         gh.commit_status(repo, sha, state, desc, target)
     if pr:
@@ -503,7 +510,11 @@ def cmd_simulate(args: argparse.Namespace) -> int:
 
     api, key, web_url, _ = _conn(args)
     agents = agent_list(args)
-    if not agents and getattr(args, "all_agents", False):
+    if getattr(args, "all_agents", False):
+        # `--all` always wins. CI envs routinely export TRACELY_AGENT, and letting that ambient
+        # value silently shrink `--all` to one agent gates a fraction of the suite while exiting 0.
+        if agents:
+            print(f"note: --all overrides {', '.join(agents)} — gating every agent with an enabled scenario")
         try:
             agents = discover_agents(api, key)
         except (urllib.error.HTTPError, urllib.error.URLError) as e:
@@ -555,11 +566,13 @@ def cmd_simulate(args: argparse.Namespace) -> int:
         print(f"  {passed}/{len(results)} agents passed · Result: {worst}\n")
     write_step_summary(render_markdown_all(results, web_url, sha))
     post_pr_check(args, results, web_url, repo, sha, pr)
-    # 0 pass · 1 the gate said no · 2 we never got an answer (timeout, unreachable API). All
-    # non-zero, so the merge blocks either way — the split just says whose fault it was.
+    # 0 pass · 1 the gate said no · 2 we never got an answer (timeout, unreachable API, or the
+    # server marked the run ERROR). All non-zero, so the merge blocks either way — the split just
+    # says whose fault it was.
     if worst_status(results) == "PASS":
         return 0
-    return 2 if any(r.get("unreachable") for r in results) else 1
+    infra = any(r.get("unreachable") or r.get("status") == "ERROR" for r in results)
+    return 2 if infra else 1
 
 
 def _load_entrypoint(spec: str):

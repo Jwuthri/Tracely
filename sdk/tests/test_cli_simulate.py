@@ -135,7 +135,9 @@ def test_poll_raises_rather_than_reporting_green(monkeypatch):
 
 @pytest.mark.parametrize(
     "status,code",
-    [("PASS", 0), ("FAIL", 1), ("NO_COVERAGE", 1), ("ERROR", 1)],
+    # 1 = the gate said no · 2 = we never got a verdict (a server-side ERROR is an infra
+    # failure, not a red suite — same bucket as timeout/unreachable, per the module docstring).
+    [("PASS", 0), ("FAIL", 1), ("NO_COVERAGE", 1), ("ERROR", 2)],
 )
 def test_exit_code_blocks_the_merge_on_anything_but_pass(monkeypatch, status, code):
     monkeypatch.setattr(cli, "start_simulation", lambda *a, **k: {"id": "g1"})
@@ -198,6 +200,23 @@ def test_all_with_nothing_to_run_is_an_error_not_a_pass(monkeypatch):
 
 def test_all_gates_every_discovered_agent(monkeypatch):
     monkeypatch.delenv("TRACELY_AGENT", raising=False)
+    monkeypatch.setattr(cli, "discover_agents", lambda api, key: ["planner", "support"])
+    started = []
+    monkeypatch.setattr(
+        cli, "start_simulation",
+        lambda api, key, agent, *a, **k: started.append(agent) or {"id": f"g-{agent}"},
+    )
+    monkeypatch.setattr(cli, "poll_gate", lambda api, key, gid, *a, **k: _data(status="PASS"))
+    monkeypatch.setattr(cli, "gh_context", lambda: ("", "", None))
+
+    assert cli.cmd_simulate(_args(agent=None, all_agents=True)) == 0
+    assert started == ["planner", "support"]
+
+
+def test_all_overrides_an_ambient_tracely_agent(monkeypatch):
+    """CI envs routinely export TRACELY_AGENT. `--all` must still gate every agent — silently
+    shrinking to the env var's one agent exits 0 having tested a fraction of the suite."""
+    monkeypatch.setenv("TRACELY_AGENT", "planner")
     monkeypatch.setattr(cli, "discover_agents", lambda api, key: ["planner", "support"])
     started = []
     monkeypatch.setattr(

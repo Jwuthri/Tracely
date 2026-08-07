@@ -47,7 +47,10 @@ export function Badge({
 
 export function verdictVariant(v?: string | null): Variant {
   if (v === "PASS") return "ok";
-  if (v === "FAIL") return "fail";
+  if (v === "FAIL" || v === "ERROR") return "fail";
+  // UNGRADED and NO_COVERAGE block the merge — rendering them the same grey as SKIP/PENDING
+  // made a blocking gate look idle.
+  if (v === "UNGRADED" || v === "NO_COVERAGE") return "warn";
   return "neutral";
 }
 

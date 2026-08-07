@@ -107,6 +107,13 @@ async def run_simulated_gate(
     if not agent_ref:
         raise HTTPException(status_code=400, detail="agent required")
     min_pass_rate = body.get("min_pass_rate")
+    if min_pass_rate is not None:
+        try:
+            min_pass_rate = float(min_pass_rate)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="min_pass_rate must be a number") from None
+        if not 0.0 <= min_pass_rate <= 1.0:
+            raise HTTPException(status_code=400, detail="min_pass_rate must be between 0 and 1")
 
     def work():
         with SyncSessionLocal() as s:
@@ -128,8 +135,7 @@ async def run_simulated_gate(
 
     gate_id, aid, env, git_ref, pr_number = payload
     run_scenario_gate_task.delay(
-        project_id, aid, gate_id, env, git_ref, pr_number,
-        float(min_pass_rate) if min_pass_rate is not None else None,
+        project_id, aid, gate_id, env, git_ref, pr_number, min_pass_rate,
     )
     return {"id": gate_id, "status": "RUNNING", "agent": agent_ref, "env": env}
 
