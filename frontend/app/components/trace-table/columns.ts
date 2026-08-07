@@ -1,6 +1,7 @@
 // Column definitions + static visual tokens for the trace table. No React, no I/O — these are the
 // stable shape of the table (the dynamic metric columns get appended at runtime from `evaluators`).
 // Extracted from TraceTable.tsx so the static layout is one short, readable file.
+import type { SessionSort } from "../../lib/api";
 import type { EvaluatorDef } from "../../lib/evaluators";
 
 // ── shape ─────────────────────────────────────────────────────────────────────
@@ -106,3 +107,14 @@ export const COLUMNS: Col[] = [
   { key: "srsummary", label: "Rolling summary", group: "S", width: 240 },
   { key: "susage", label: "Usage", group: "S", width: 180 },
 ];
+
+// Which headers are clickable, and the server-side sort each one asks for (mirrors
+// `async_reader.SESSION_SORTS`). C-group only, for two reasons: the list is a page of
+// *conversations*, so only a C column has something global to order by — and the S rows are a
+// parent/child span tree that any reordering would flatten into nonsense. `ctime` renders
+// `first_ts`, so it sorts on when the conversation STARTED, not on last activity.
+export const SORTABLE: Record<string, SessionSort> = {
+  ctime: "started",
+  cdur: "duration",
+  cusage: "tokens",
+};

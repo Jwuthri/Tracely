@@ -2,13 +2,16 @@
 
 import clsx from "clsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ConvNode } from "../lib/api";
+import type { ConvNode, SessionSort, SortOrder } from "../lib/api";
 import { mergeMeta, metaText } from "../lib/meta";
 import { DateRangePicker } from "./DateRangePicker";
 import { TraceTable } from "./TraceTable";
 
 type Filter = "all" | "failing" | "multi";
 type Range = { from: string | null; to: string | null }; // ISO-8601 (UTC); null = unbounded
+type SortBy = { sort: SessionSort; order: SortOrder };
+
+const DEFAULT_SORT: SortBy = { sort: "recent", order: "desc" };
 
 const PRESETS: { key: string; label: string; hours: number | null }[] = [
   { key: "all", label: "All time", hours: null },
@@ -35,6 +38,9 @@ export function TracesExplorer({
   const [loading, setLoading] = useState(false);
   const [range, setRange] = useState<Range>({ from: null, to: null });
   const [preset, setPreset] = useState<string>("all");
+  // Sorting is server-side (see lib/api::SessionSort): the list is a page, so ordering only the
+  // loaded rows would make "longest first" mean "longest of the 50 already on screen".
+  const [sortBy, setSortBy] = useState<SortBy>(DEFAULT_SORT);
 
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
@@ -50,15 +56,22 @@ export function TracesExplorer({
     setRange({ from: null, to: null });
     setPreset("all");
     setFilter("all");
+    setSortBy(DEFAULT_SORT);
   }, [initial, initialHasMore]);
 
+  // `next` and `by` are passed in rather than read from state: every caller is reacting to a change
+  // that hasn't been committed yet, so reading state here would page with the previous window/order.
   const load = useCallback(
-    async (next: Range, offset: number, replace: boolean, limit = pageSize) => {
+    async (next: Range, by: SortBy, offset: number, replace: boolean, limit = pageSize) => {
       setLoading(true);
       try {
         const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
         if (next.from) qs.set("from", next.from);
         if (next.to) qs.set("to", next.to);
+        if (by.sort !== DEFAULT_SORT.sort || by.order !== DEFAULT_SORT.order) {
+          qs.set("sort", by.sort);
+          qs.set("order", by.order);
+        }
         const r = await fetch(`/api/sessions?${qs.toString()}`, { cache: "no-store" });
         const data: ConvNode[] = r.ok ? await r.json() : [];
         setRows((prev) => (replace ? data : [...prev, ...data]));
@@ -75,9 +88,23 @@ export function TracesExplorer({
   const onDeleted = useCallback(
     (threads: string[]) => {
       setRows((prev) => prev.filter((r) => !threads.includes(r.thread)));
-      void load(range, 0, true, Math.max(pageSize, rows.length - threads.length));
+      void load(range, sortBy, 0, true, Math.max(pageSize, rows.length - threads.length));
     },
-    [load, range, pageSize, rows.length],
+    [load, range, sortBy, pageSize, rows.length],
+  );
+
+  // A column header: same column toggles direction, a new column starts descending — newest /
+  // slowest / most-expensive first is what someone clicking "Duration" is looking for.
+  const onSort = useCallback(
+    (key: SessionSort) => {
+      const next: SortBy =
+        key === sortBy.sort
+          ? { sort: key, order: sortBy.order === "desc" ? "asc" : "desc" }
+          : { sort: key, order: "desc" };
+      setSortBy(next);
+      void load(range, next, 0, true);
+    },
+    [load, range, sortBy],
   );
 
   function applyPreset(p: (typeof PRESETS)[number]) {
@@ -87,7 +114,7 @@ export function TracesExplorer({
     };
     setPreset(p.key);
     setRange(next);
-    void load(next, 0, true);
+    void load(next, sortBy, 0, true);
   }
 
   // The picker hands back ISO bounds (or null/null when cleared). Clearing falls back to All time.
@@ -99,7 +126,7 @@ export function TracesExplorer({
     const next: Range = { from, to };
     setPreset("custom");
     setRange(next);
-    void load(next, 0, true);
+    void load(next, sortBy, 0, true);
   }
 
   // Every filter refines the rows already loaded — none of them needs the server.
@@ -215,7 +242,11 @@ export function TracesExplorer({
       ) : (
         <div className="reveal space-y-3" style={{ animationDelay: "80ms" }}>
           {shown.length > 0 ? (
-            <TraceTable conversations={shown} onDeleted={onDeleted} />
+            <TraceTable
+              conversations={shown}
+              onDeleted={onDeleted}
+              sort={{ ...sortBy, onSort, busy: loading }}
+            />
           ) : (
             <div className="card px-4 py-10 text-center text-[13px] text-fg-faint">
               No loaded threads match this filter{hasMore ? " — try Load more." : "."}
@@ -225,7 +256,7 @@ export function TracesExplorer({
           <div className="flex items-center justify-center gap-3 pt-1">
             {hasMore ? (
               <button
-                onClick={() => void load(range, rows.length, false)}
+                onClick={() => void load(range, sortBy, rows.length, false)}
                 disabled={loading}
                 className="rounded-lg border border-line bg-ink-800 px-4 py-2 text-[12.5px] font-medium text-fg-muted transition-colors hover:text-fg disabled:opacity-50"
               >

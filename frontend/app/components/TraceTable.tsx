@@ -3,7 +3,15 @@
 import clsx from "clsx";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import type { ConvNode, EvalScore, FullTurn, SpanOut, ThreadTurn } from "../lib/api";
+import type {
+  ConvNode,
+  EvalScore,
+  FullTurn,
+  SessionSort,
+  SortOrder,
+  SpanOut,
+  ThreadTurn,
+} from "../lib/api";
 import { convUsage, fmtUsd, spanUsage, turnUsage, usageSummary } from "../lib/usage";
 import {
   deleteEvaluator,
@@ -60,6 +68,7 @@ import {
   type MetricTint,
   PREFS_KEY,
   ROW_BG,
+  SORTABLE,
 } from "./trace-table/columns";
 import {
   Bot,
@@ -1414,7 +1423,23 @@ function HeaderEvalControls({ evaluator }: { evaluator: EvaluatorDef }) {
   );
 }
 
-function HeaderRow({ cols }: { cols: Col[] }) {
+/** Sort affordance on a C-group header. Inactive columns show a muted glyph on hover only, so the
+ *  header row stays quiet until you go looking for it. */
+function SortGlyph({ active, order }: { active: boolean; order: SortOrder }) {
+  return (
+    <span
+      aria-hidden
+      className={clsx(
+        "font-mono text-[9px] leading-none transition-opacity",
+        active ? "text-signal opacity-100" : "text-fg-faint opacity-0 group-hover:opacity-60",
+      )}
+    >
+      {active && order === "asc" ? "▲" : "▼"}
+    </span>
+  );
+}
+
+function HeaderRow({ cols, sort }: { cols: Col[]; sort?: SortHandle }) {
   const sel = useContext(SelectContext);
   return (
     <tr className="border-b border-line bg-ink-700">
@@ -1431,25 +1456,54 @@ function HeaderRow({ cols }: { cols: Col[] }) {
       {Array.from({ length: CTRL_CELLS }, (_, i) => (
         <th key={`ctrl-${i}`} style={CTRL} className={HEAD_TH} />
       ))}
-      {cols.map((col, i) => (
-        <th
-          key={col.key}
-          style={{ width: col.width, minWidth: 80 }}
-          className={clsx(
-            HEAD_TH,
-            (col.evaluator || (i > 0 && cols[i - 1].group !== col.group)) && "border-l border-line-bright/60",
-            col.tint?.th,
-          )}
-        >
-          <div className="flex items-center gap-1">
-            <span className={clsx(col.evaluator && "max-w-[150px] truncate")} title={col.evaluator ? `${col.label} — ${col.evaluator.description || "evaluation column"}` : undefined}>
-              {col.label}
-            </span>
-            <span className={clsx("rounded px-1.5 py-0.5 text-[10px] font-medium", LEVEL_BADGE[col.group])}>{col.group}</span>
-            {col.evaluator && <HeaderEvalControls evaluator={col.evaluator} />}
-          </div>
-        </th>
-      ))}
+      {cols.map((col, i) => {
+        // Sorting reorders the whole list server-side, so it is only offered where the parent owns
+        // the query (the /traces list). Embedded and shared views get plain headers.
+        const sortKey = sort ? SORTABLE[col.key] : undefined;
+        const active = sortKey !== undefined && sort!.sort === sortKey;
+        const label = (
+          <span
+            className={clsx(col.evaluator && "max-w-[150px] truncate")}
+            title={col.evaluator ? `${col.label} — ${col.evaluator.description || "evaluation column"}` : undefined}
+          >
+            {col.label}
+          </span>
+        );
+        return (
+          <th
+            key={col.key}
+            style={{ width: col.width, minWidth: 80 }}
+            aria-sort={active ? (sort!.order === "asc" ? "ascending" : "descending") : undefined}
+            className={clsx(
+              HEAD_TH,
+              (col.evaluator || (i > 0 && cols[i - 1].group !== col.group)) && "border-l border-line-bright/60",
+              col.tint?.th,
+            )}
+          >
+            <div className="flex items-center gap-1">
+              {sortKey ? (
+                <button
+                  type="button"
+                  onClick={() => sort!.onSort(sortKey)}
+                  disabled={sort!.busy}
+                  title={`Sort every conversation by ${col.label.toLowerCase()}${active ? (sort!.order === "desc" ? " (ascending)" : " (descending)") : ""}`}
+                  className={clsx(
+                    "group -mx-1 flex items-center gap-1 rounded px-1 py-0.5 uppercase tracking-wider transition-colors hover:bg-ink-600 disabled:opacity-50",
+                    active ? "text-signal" : "text-fg-muted hover:text-fg",
+                  )}
+                >
+                  {label}
+                  <SortGlyph active={active} order={sort!.order} />
+                </button>
+              ) : (
+                label
+              )}
+              <span className={clsx("rounded px-1.5 py-0.5 text-[10px] font-medium", LEVEL_BADGE[col.group])}>{col.group}</span>
+              {col.evaluator && <HeaderEvalControls evaluator={col.evaluator} />}
+            </div>
+          </th>
+        );
+      })}
     </tr>
   );
 }
@@ -1457,11 +1511,21 @@ function HeaderRow({ cols }: { cols: Col[] }) {
 // ── root ────────────────────────────────────────────────────────────────────────
 type Cache<T> = Record<string, T | "loading" | undefined>;
 
+/** Sorting is owned by whoever runs the query, because it happens server-side across the whole
+ *  list rather than over the loaded page. The table only renders the affordance and reports clicks. */
+export type SortHandle = {
+  sort: SessionSort;
+  order: SortOrder;
+  onSort: (key: SessionSort) => void;
+  busy?: boolean;
+};
+
 export function TraceTable({
   conversations,
   embedded = false,
   shared = false,
   onDeleted,
+  sort,
 }: {
   conversations: ConvNode[];
   // When embedded in a tabbed trace view, the parent owns the Enlarge/Concise control + the
@@ -1473,6 +1537,9 @@ export function TraceTable({
   shared?: boolean;
   // Passing this enables conversation multi-select + Delete; the parent drops the rows it gets back.
   onDeleted?: (threads: string[]) => void;
+  // Passing this makes the C-group headers clickable. Omitted (embedded/shared views) they render
+  // as plain labels — those views show one conversation, so there is nothing to order.
+  sort?: SortHandle;
 }) {
   const seed = useMemo(() => {
     const turns: Cache<FullTurn[]> = {};
@@ -1931,7 +1998,7 @@ export function TraceTable({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[800px] border-collapse">
             <thead>
-              <HeaderRow cols={cols} />
+              <HeaderRow cols={cols} sort={sort} />
             </thead>
             <tbody>
               {conversations.length === 0 ? (

@@ -304,6 +304,28 @@ async def evaluator_score_queue(project_id: str, name: str, limit: int = 100) ->
 
 # ── sessions / threads ────────────────────────────────────────────────────────
 
+# Sortable list columns → the aggregate each one displays. A whitelist, not a free-form column:
+# ORDER BY cannot be parameterized, so anything else here would be string-interpolated SQL.
+# Keys are the UI's sort ids; every expression is an alias from the outer SELECT below.
+SESSION_SORTS = {
+    "recent": "last_ts",  # default — last activity, what the list has always shown
+    "started": "first_ts",  # the Datetime column renders first_ts, so its header sorts on that
+    "duration": "dateDiff('millisecond', first_ts, last_ts)",
+    "tokens": "tokens",
+}
+
+
+def session_order_clause(sort: str, order: str) -> str:
+    """ORDER BY for the threads list. Unknown keys fall back to the default rather than raising:
+    a sort is a view preference, and 400-ing a stale link is worse than showing the usual order.
+
+    The `last_ts` tie-break is load-bearing, not cosmetic. Ties are the common case here (duration
+    0, tokens 0), and LIMIT/OFFSET over a non-deterministic order silently repeats some threads on
+    page 2 while dropping others entirely."""
+    expr = SESSION_SORTS.get(sort, SESSION_SORTS["recent"])
+    direction = "ASC" if str(order).lower() == "asc" else "DESC"
+    return f"ORDER BY {expr} {direction}, last_ts DESC"
+
 
 async def sessions_overview(
     project_id: str,
@@ -313,6 +335,8 @@ async def sessions_overview(
     to_ts: str | None = None,
     advisory: Sequence[str] = (),
     include_internal: bool = False,
+    sort: str = "recent",
+    order: str = "desc",
 ) -> list[dict]:
     """Traces grouped into threads by conversation (a trace with no conversation is its own
     1-turn thread), newest-last-activity first, with per-thread rollups + parsed metadata.
@@ -323,8 +347,13 @@ async def sessions_overview(
     The optional time window bounds each trace's start_time INSIDE the per-trace subquery so
     ClickHouse can prune by the `toYYYYMM(start_time)` partition. `advisory` excludes those
     evaluators' FAILs from the per-thread `failing` flag (see `_FAILING`). Content-less 1-turn
-    threads (no input, no output, not failing) are dropped entirely — see the HAVING clause."""
+    threads (no input, no output, not failing) are dropped entirely — see the HAVING clause.
+
+    `sort`/`order` reorder the whole list, not the page: the table's sortable headers have to see
+    past the loaded window, or "sort by slowest" would only ever surface the slowest of the 50 rows
+    already on screen."""
     client = await get_async_client()
+    order_clause = session_order_clause(sort, order)
     time_clause = ""
     internal_clause = "" if include_internal else f" AND {_REAL}"
     params: dict = {"p": project_id, "n": limit, "o": max(offset, 0), "adv": list(advisory)}
@@ -400,7 +429,7 @@ async def sessions_overview(
         -- span the output-normalizer couldn't map to text) unless an evaluator flagged it — pure
         -- ingestion noise, not a conversation worth listing.
         HAVING NOT (turns = 1 AND first_input = '' AND last_output = '' AND failing = 0)
-        ORDER BY last_ts DESC
+        {order_clause}
         LIMIT {{n:UInt32}} OFFSET {{o:UInt32}}
         """,
         parameters=params,

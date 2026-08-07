@@ -27,6 +27,8 @@ async def list_sessions(
     from_ts: str | None = None,
     to_ts: str | None = None,
     evals: bool = False,
+    sort: str = "recent",
+    order: str = "desc",
     project_id: str = Depends(get_project_id),
 ) -> list[dict]:
     """Traces grouped into threads by conversation/session (a trace with no conversation is its
@@ -38,10 +40,16 @@ async def list_sessions(
     `len(rows) == limit`.
 
     `evals=true` also lists Tracely's own runs — an evaluation, a scenario — as ordinary rows
-    tagged with `internal_kind`. That is the traces list's "Evals" toggle."""
+    tagged with `internal_kind`. That is the traces list's "Evals" toggle.
+
+    `sort` is one of `async_reader.SESSION_SORTS` (`recent` | `started` | `duration` | `tokens`)
+    with `order` `asc`/`desc` — the table's sortable column headers. An unknown
+    value falls back to `recent` rather than erroring: a sort is a view preference, and 400-ing a
+    saved link because a column was renamed is worse than showing the default order."""
     advisory = await advisory_score_names(project_id)
     rows = await async_reader.sessions_overview(
-        project_id, limit, offset, from_ts, to_ts, advisory, include_internal=evals
+        project_id, limit, offset, from_ts, to_ts, advisory,
+        include_internal=evals, sort=sort, order=order,
     )
     conv_scores = await async_reader.conversation_scores_by_thread(
         project_id, [r["thread"] for r in rows]

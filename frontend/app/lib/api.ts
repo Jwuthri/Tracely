@@ -125,18 +125,27 @@ export type Thread = {
   subject_id?: string; // what that run was about — the trace or conversation it graded/drove
 };
 
+// Mirrors `async_reader.SESSION_SORTS`. Sorting is server-side because the list is paginated:
+// ordering only the loaded window would make "slowest first" mean "slowest of the 50 on screen".
+export type SessionSort = "recent" | "started" | "duration" | "tokens";
+export type SortOrder = "asc" | "desc";
+
 export type SessionsQuery = {
   limit?: number;
   offset?: number;
   from?: string | null; // ISO-8601 (UTC) lower bound on a trace's start_time
   to?: string | null; // ISO-8601 (UTC) upper bound (exclusive)
+  sort?: SessionSort;
+  order?: SortOrder;
 };
 
 export async function getSessions(opts: SessionsQuery = {}): Promise<Thread[]> {
-  const { limit = 50, offset = 0, from, to } = opts;
+  const { limit = 50, offset = 0, from, to, sort, order } = opts;
   const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (from) qs.set("from_ts", from);
   if (to) qs.set("to_ts", to);
+  if (sort) qs.set("sort", sort);
+  if (order) qs.set("order", order);
   return getJson<Thread[]>(`/api/sessions?${qs.toString()}`);
 }
 

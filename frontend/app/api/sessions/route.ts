@@ -18,6 +18,12 @@ export async function GET(req: NextRequest) {
   if (to) qs.set("to_ts", to);
   // The Evals toggle: also list Tracely's own runs (evaluations, scenarios) as rows.
   if (sp.get("evals") === "1") qs.set("evals", "true");
+  // Sortable column headers. Forwarded as-is — the backend whitelists the sort key, so an unknown
+  // one falls back to the default order instead of reaching the query.
+  const sort = sp.get("sort");
+  const order = sp.get("order");
+  if (sort) qs.set("sort", sort);
+  if (order) qs.set("order", order);
   const r = await fetch(`${API}/api/sessions?${qs.toString()}`, {
     headers: await authHeaders(),
     cache: "no-store",

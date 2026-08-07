@@ -51,3 +51,39 @@ def test_events_reads_are_final():
     """Same rule for `events`: a span re-delivered by a retrying OTLP exporter is two rows until
     merged, and any `count()` over them reports a span total nothing else in the UI agrees with."""
     assert _offenders("events") == []
+
+
+# ── the threads list's sortable headers ───────────────────────────────────────
+# ORDER BY cannot be parameterized, so the sort key is the one piece of this query built by string
+# interpolation. These pin the whitelist that keeps it safe, and the tie-break that keeps
+# LIMIT/OFFSET paging honest once the sort column has ties (which is the normal case).
+
+from tracely.infrastructure.clickhouse.async_reader import (  # noqa: E402
+    SESSION_SORTS,
+    session_order_clause,
+)
+
+
+def test_every_sort_key_maps_to_a_known_expression():
+    for key in SESSION_SORTS:
+        assert session_order_clause(key, "desc").startswith(f"ORDER BY {SESSION_SORTS[key]} DESC")
+
+
+def test_unknown_sort_falls_back_instead_of_interpolating():
+    """A renamed column in a bookmarked URL shows the default order; it never reaches the query."""
+    for hostile in ("", "cost", "1; DROP TABLE events", "last_ts DESC, 1", None):
+        clause = session_order_clause(hostile, "desc")  # type: ignore[arg-type]
+        assert clause == "ORDER BY last_ts DESC, last_ts DESC"
+
+
+def test_direction_is_two_valued():
+    assert session_order_clause("tokens", "asc").endswith("ASC, last_ts DESC")
+    for junk in ("ASC; DELETE", "descending", "", None):
+        assert " DESC, last_ts DESC" in session_order_clause("tokens", junk)  # type: ignore[arg-type]
+
+
+def test_every_sort_is_tie_broken():
+    """Without this, page 2 of a duration-sorted list repeats rows from page 1 and drops others."""
+    for key in SESSION_SORTS:
+        for order in ("asc", "desc"):
+            assert session_order_clause(key, order).endswith(", last_ts DESC")
