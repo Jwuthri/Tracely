@@ -8,10 +8,14 @@ and the post-deploy verification.
 We target Railway (Postgres + ClickHouse + Redis + MinIO managed there), but the same checklist
 works on any host running the same two containers.
 
-> **Setting up on Railway from zero?** Follow the step-by-step walkthrough in
-> [`deploy/railway/README.md`](../deploy/railway/README.md) first — it wires all seven services from
-> checked-in config files, with every env var pre-written in
-> [`.env.railway.example`](../deploy/railway/.env.railway.example). Then come back here to harden it.
+> **Setting up on Railway from zero?** One click provisions all seven services pre-wired:
+>
+> [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/n5n_LE?referralCode=WCq5Cn&utm_medium=integration&utm_source=template&utm_campaign=generic)
+>
+> To wire it by hand instead, follow [`deploy/railway/README.md`](../deploy/railway/README.md) —
+> every env var is pre-written in
+> [`.env.railway.example`](../deploy/railway/.env.railway.example). Either way, come back here to
+> harden it for production.
 
 ---
 

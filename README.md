@@ -18,6 +18,10 @@ production trace  →  failure detection  →  regression test  →  CI gate
 
 [![CI](https://github.com/Jwuthri/Tracely/actions/workflows/ci.yml/badge.svg)](https://github.com/Jwuthri/Tracely/actions/workflows/ci.yml) [![PyPI](https://img.shields.io/pypi/v/tracely-ai?logo=pypi&logoColor=white)](https://pypi.org/project/tracely-ai/) [![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](https://pypi.org/project/tracely-ai/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Stars](https://img.shields.io/github/stars/Jwuthri/Tracely?style=flat&logo=github)](https://github.com/Jwuthri/Tracely/stargazers)
 
+**Self-host the whole stack in one click** — API, worker, UI, Postgres, ClickHouse, Redis and MinIO:
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/n5n_LE?referralCode=WCq5Cn&utm_medium=integration&utm_source=template&utm_campaign=generic)
+
 <img src=".github/assets/dashboard.png" alt="Tracely dashboard — traces, failure clusters, auto-detected failures and regression cases" width="100%" />
 
 </div>
@@ -138,15 +142,20 @@ make demo          # populate the WHOLE product: traces + clusters + cases + gat
 make test          # backend unit tests (no infra, ~6s)
 ```
 
-### Deploy your own (Railway, ~15 minutes)
+### Deploy your own
 
-Don't want to run servers by hand? The whole stack — API, worker, UI, Postgres, ClickHouse, Redis,
-MinIO — deploys to [Railway](https://railway.com) from the checked-in configs: four one-click
-database templates plus three services pointed at this repo, each with a config-as-code file that
-carries its Dockerfile, start command, health check and migrations. The step-by-step walkthrough is
-[`deploy/railway/README.md`](deploy/railway/README.md) (copy-paste env included:
-[`.env.railway.example`](deploy/railway/.env.railway.example)); the production-hardening runbook
-(auth guards, backups, worker pool, post-deploy checks) is
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/n5n_LE?referralCode=WCq5Cn&utm_medium=integration&utm_source=template&utm_campaign=generic)
+
+One click provisions the whole stack on [Railway](https://railway.com) — API, worker, UI, Postgres
+(pgvector), ClickHouse, Redis and MinIO, wired together with volumes and private networking.
+Migrations and seeding run on the first deploy; set `SESSION_SECRET` and `SECRETS_ENCRYPTION_KEY`
+(`openssl rand -hex 32` each) when prompted, then open the frontend's domain and create your
+workspace.
+
+Prefer to wire it yourself, or deploying somewhere else? The manual walkthrough is
+[`deploy/railway/README.md`](deploy/railway/README.md) (every variable pre-written in
+[`.env.railway.example`](deploy/railway/.env.railway.example)), and the production-hardening runbook
+— auth guards, backups, worker pool, post-deploy verification — is
 [`guides/DEPLOY.md`](guides/DEPLOY.md).
 
 ---

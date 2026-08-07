@@ -1,5 +1,16 @@
 # Deploy Tracely to Railway
 
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/n5n_LE?referralCode=WCq5Cn&utm_medium=integration&utm_source=template&utm_campaign=generic)
+
+**That button is the fast path** — it provisions all seven services below, pre-wired. Set
+`SESSION_SECRET` and `SECRETS_ENCRYPTION_KEY` when Railway prompts (`openssl rand -hex 32` each),
+deploy, then open the frontend's domain and create your workspace. Skip to [§5 Post-deploy](#5-post-deploy).
+
+The rest of this document is the **manual** path: how the stack is wired, so you can build it
+service by service, adapt it to another host, or debug a deploy that misbehaved.
+
+---
+
 A pre-defined deployment for the whole Tracely stack. Four stateful dependencies come from Railway's
 one-click templates; the three app services (backend API, Celery worker, Next.js frontend) deploy from
 this repo using the config files in this directory.
@@ -137,8 +148,13 @@ to its `RAILWAY_PRIVATE_DOMAIN` (HTTP port 8123, not the 9000 native port), then
   `solo` / `1`). First knob: set `CELERY_POOL=prefork CELERY_CONCURRENCY=4` on the worker service;
   beyond that, add `numReplicas` in the dashboard.
 
-## Optional: publish as a reusable template
+## The published template
 
-Once the project is wired and green, **Project → Settings → Generate Template** turns it into a
-one-click "Deploy on Railway" template (services + env wiring serialized). Share that URL to let others
-deploy the whole stack in one click.
+The button at the top points at Tracely's published Railway template
+(`railway.com/deploy/n5n_LE`) — the seven services above with their env wiring serialized.
+
+**Re-publishing after a change to the topology** (a new service, a renamed variable): wire it in a
+project, then **Project → Settings → Generate Template**. Railway mints a new template id, so
+update the button URL in this file, the root [`README.md`](../../README.md) and the docs site's
+[self-hosting page](../../docs/pages/self-hosting.mdx) together. Ordinary code changes need no
+re-publish — template deploys track the repo.

@@ -3,8 +3,10 @@ import { Callout, Steps } from "nextra/components";
 # Self-hosting
 
 Tracely is MIT-licensed and self-hosts completely — the same code that runs the hosted cloud.
-Two paths: **docker compose** on a box you own, or **Railway** with checked-in configs.
+Two paths: **one-click Railway**, or **docker compose** on a box you own.
 (Or skip all of it: [tracely-studio.xyz](https://tracely-studio.xyz) has a free plan.)
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/n5n_LE?referralCode=WCq5Cn&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 ## Docker compose (one machine, 5 minutes)
 
@@ -22,12 +24,33 @@ create your workspace, grab your ingest key from **Settings → API keys**, and 
 docker compose --profile demo up -d   # optional: populate demo traces, clusters, cases and gates
 ```
 
-## Railway (managed infra, ~15 minutes)
+## Railway — one click
 
-The repo ships a pre-defined Railway deployment: four one-click database templates
-(Postgres+pgvector, ClickHouse, Redis, MinIO) plus three app services (API, worker, UI) that
-deploy straight from the repo via config-as-code files — Dockerfile, start command, health check
-and the migration pre-deploy chain all included.
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/n5n_LE?referralCode=WCq5Cn&utm_medium=integration&utm_source=template&utm_campaign=generic)
+
+The template provisions all seven services pre-wired — API, worker, UI, Postgres (pgvector),
+ClickHouse, Redis and MinIO, with volumes and private networking. Railway prompts for two secrets;
+generate each with `openssl rand -hex 32`:
+
+| Variable | What it protects |
+|---|---|
+| `SESSION_SECRET` | Signs login sessions (`AUTH_MODE=local`). |
+| `SECRETS_ENCRYPTION_KEY` | Encrypts each workspace's OpenRouter key and scenario endpoint tokens at rest. Without it those forms refuse to save rather than storing plaintext. |
+
+The backend's pre-deploy chain runs ClickHouse DDL → Alembic → seeding → S3 bucket creation before
+traffic cuts over. When it's green, open the frontend's domain, create your workspace, and grab
+your ingest key from **Settings → API keys**.
+
+<Callout type="info">
+  On the very first deploy the worker may restart a couple of times while the backend creates the
+  schema. That's expected and self-heals.
+</Callout>
+
+## Railway — wiring it by hand
+
+Prefer to build it service by service (or adapt the topology)? Everything the template serializes
+is checked into the repo as config-as-code — Dockerfile, start command, health check and the
+migration pre-deploy chain per service.
 
 <Steps>
 
@@ -59,8 +82,8 @@ workspace, and point the SDK at the backend's public domain.
 
 </Steps>
 
-The full walkthrough (IPv6 gotchas, private networking, scaling the worker, publishing your
-project as a reusable one-click template) lives in
+The full walkthrough — IPv6 binding gotchas, private networking, scaling the worker, re-publishing
+the template — lives in
 [`deploy/railway/README.md`](https://github.com/Jwuthri/Tracely/blob/master/deploy/railway/README.md);
 the production-hardening runbook (auth guards, backups, post-deploy verification) is
 [`guides/DEPLOY.md`](https://github.com/Jwuthri/Tracely/blob/master/guides/DEPLOY.md).
