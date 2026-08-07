@@ -96,6 +96,11 @@ class Settings(BaseSettings):
     pro_workspace_limit: int = 10
     free_seat_limit: int = 3
     pro_seat_limit: int = 10
+    # How many COMPANY organizations one user may own. Without this the whole account tier is
+    # theatre: creating an org is free and each one is a fresh quota pool, so unlimited orgs is
+    # unlimited free quota. Personal accounts don't count (everyone gets exactly one).
+    free_org_limit: int = 1
+    pro_org_limit: int = 3
     # Stripe (subscription billing). Secret key + the Pro plan's monthly price id, plus the
     # webhook signing secret — required whenever the secret key is set, because an unverified
     # webhook endpoint would let anyone flip a workspace's plan with a curl.

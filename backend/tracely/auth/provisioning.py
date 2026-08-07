@@ -29,6 +29,7 @@ from tracely.config import settings
 from tracely.domain.billing import (
     KIND_COMPANY,
     KIND_PERSONAL,
+    PLAN_FREE,
     seat_limit_for,
     workspace_limit_for,
 )
@@ -174,6 +175,57 @@ async def assert_can_add_seat(session: AsyncSession, org: Organization) -> None:
     if await seat_count(session, org.id) >= limit:
         raise AuthError(
             409, f"this organization is at its seat limit ({limit}) — upgrade to invite more"
+        )
+
+
+async def owned_company_orgs(session: AsyncSession, user_id: str) -> int:
+    return (
+        await session.execute(
+            select(func.count())
+            .select_from(OrgMembership)
+            .join(Organization, Organization.id == OrgMembership.organization_id)
+            .where(
+                OrgMembership.user_id == user_id,
+                OrgMembership.role == "OWNER",
+                Organization.kind == KIND_COMPANY,
+            )
+        )
+    ).scalar_one()
+
+
+async def can_create_organization(session: AsyncSession, user_id: str | None) -> bool:
+    """Whether this user may create another company org. Uncapped when billing is off."""
+    if not user_id:
+        return False
+    if not settings.billing_enabled:
+        return True
+    return await owned_company_orgs(session, user_id) < await _org_limit(session, user_id)
+
+
+async def _org_limit(session: AsyncSession, user_id: str) -> int:
+    """Owning anything paid lifts the cap — otherwise a customer who needs a second org has no
+    self-serve path and every free account could mint quota pools for nothing."""
+    paid = (
+        await session.execute(
+            select(func.count())
+            .select_from(OrgMembership)
+            .join(Organization, Organization.id == OrgMembership.organization_id)
+            .where(
+                OrgMembership.user_id == user_id,
+                OrgMembership.role == "OWNER",
+                Organization.plan != PLAN_FREE,
+            )
+        )
+    ).scalar_one()
+    return settings.pro_org_limit if paid else settings.free_org_limit
+
+
+async def assert_can_create_organization(session: AsyncSession, user_id: str) -> None:
+    if not await can_create_organization(session, user_id):
+        raise AuthError(
+            409,
+            f"you can create {await _org_limit(session, user_id)} organization(s) on this plan — "
+            "upgrade an existing one to add more",
         )
 
 

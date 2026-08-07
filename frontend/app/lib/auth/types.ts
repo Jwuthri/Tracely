@@ -37,6 +37,8 @@ export type Me = {
   projects: ProjectRef[];
   organizations: OrgRef[];
   ingest_keys: string[];
+  /** Server-decided: false once the plan's organization cap is reached. */
+  can_create_organization: boolean;
 };
 
 export type Member = {

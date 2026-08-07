@@ -109,6 +109,49 @@ async def test_creating_an_organization_is_how_a_solo_account_grows(client, host
     assert len([p for p in me["projects"] if p["organization_id"] == org_id]) == 1
 
 
+async def test_orgs_are_capped_or_the_whole_tier_is_theatre(client, hosted):
+    """Each org is a fresh quota pool, so unlimited orgs would be unlimited free quota — the
+    exact fan-out this layer exists to close, one level up."""
+    await _signup(client, "founder@x.test")
+    token = await _signup(client, "solo@x.test")
+
+    assert (
+        await client.post("/auth/organizations", json={"name": "One"}, headers=_bearer(token))
+    ).status_code == 200
+    r = await client.post("/auth/organizations", json={"name": "Two"}, headers=_bearer(token))
+    assert r.status_code == 409 and "organization" in r.json()["detail"]
+
+    # and the menu stops offering it, rather than showing a button that always fails
+    me = (await client.get("/auth/me", headers=_bearer(token))).json()
+    assert me["can_create_organization"] is False
+
+
+async def test_owning_a_paid_org_lifts_the_org_cap(client, hosted, session, monkeypatch):
+    monkeypatch.setattr(settings, "pro_org_limit", 3)
+    await _signup(client, "founder@x.test")
+    token = await _signup(client, "solo@x.test")
+    first = await client.post(
+        "/auth/organizations", json={"name": "One"}, headers=_bearer(token)
+    )
+    org = await session.get(models.Organization, first.json()["id"])
+    org.plan = "pro"
+    await session.commit()
+
+    assert (
+        await client.post("/auth/organizations", json={"name": "Two"}, headers=_bearer(token))
+    ).status_code == 200
+
+
+async def test_self_hosted_org_creation_is_uncapped(client, monkeypatch):
+    monkeypatch.setattr(settings, "billing_enabled", False)
+    token = await _signup(client, "founder@x.test")
+    for i in range(3):
+        r = await client.post(
+            "/auth/organizations", json={"name": f"Org {i}"}, headers=_bearer(token)
+        )
+        assert r.status_code == 200
+
+
 # ── company caps ──────────────────────────────────────────────────────────────
 
 

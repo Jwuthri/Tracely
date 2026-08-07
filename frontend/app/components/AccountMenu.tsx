@@ -161,7 +161,7 @@ export function AccountMenu({ me }: { me: Me | null }) {
                   + New workspace
                 </button>
               )}
-              {MODE === "local" && !!me?.user_id && (
+              {MODE === "local" && !!me?.user_id && me.can_create_organization && (
                 <button
                   onClick={() => create("/api/auth/organizations", "New organization name")}
                   disabled={busy}

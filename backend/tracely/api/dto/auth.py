@@ -94,6 +94,8 @@ class MeOut(BaseModel):
     projects: list[ProjectRef] = []
     organizations: list[OrgRef] = []
     ingest_keys: list[str] = []
+    # Server-decided so the menu never offers an action the plan will reject.
+    can_create_organization: bool = False
 
 
 class InviteOut(BaseModel):

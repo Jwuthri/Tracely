@@ -75,6 +75,9 @@ async def _build_me(principal: Principal, session: AsyncSession) -> MeOut:
         projects=projects,
         organizations=orgs,
         ingest_keys=list(keys),
+        can_create_organization=await provisioning.can_create_organization(
+            session, principal.user_id
+        ),
     )
 
 
@@ -139,6 +142,8 @@ async def create_organization(
         raise HTTPException(
             400, "creating an organization requires a signed-in user (AUTH_MODE=local or clerk)"
         )
+    # Without this the account tier means nothing: each new org is a fresh free quota pool.
+    await provisioning.assert_can_create_organization(session, principal.user_id)
     org = await provisioning.create_organization(
         session, name=body.name, kind=KIND_COMPANY, owner_user_id=principal.user_id
     )

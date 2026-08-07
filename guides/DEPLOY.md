@@ -124,6 +124,8 @@ FREE_WORKSPACE_LIMIT=3             # per company org (personal accounts are alwa
 PRO_WORKSPACE_LIMIT=10
 FREE_SEAT_LIMIT=3                  # members + pending invites
 PRO_SEAT_LIMIT=10
+FREE_ORG_LIMIT=1                   # company orgs ONE USER may own — see below
+PRO_ORG_LIMIT=3
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...    # REQUIRED with the secret key — boot refuses without it
 STRIPE_PRICE_PRO=price_...         # the Pro plan's monthly price id
@@ -140,7 +142,10 @@ into a single workspace, which is what keeps tenants apart:
 | Company, Pro | `PRO_WORKSPACE_LIMIT` | `PRO_SEAT_LIMIT` | by invite |
 | `unlimited` (operator) | ∞ | ∞ | by invite |
 
-A solo user turns into a team by creating an organization (account menu → New organization).
+A solo user turns into a team by creating an organization (account menu → New organization) —
+but **`FREE_ORG_LIMIT` caps how many company orgs one user may own**, and that cap is what makes
+the whole tier real: an organization is a quota pool, so uncapped org creation would just be
+uncapped free quota one level up. Owning any paid org raises the cap to `PRO_ORG_LIMIT`.
 `ALLOW_PUBLIC_SIGNUP=false` (the self-host default) keeps registration first-user-only, with
 everyone else arriving by invite; set it to `true` for hosted cloud, where each signup gets its
 own personal organization. Caps are only enforced when `BILLING_ENABLED=true`, so a self-hosted
