@@ -149,6 +149,15 @@ export const IconCard = (p: P) => (
   </svg>
 );
 
+export const IconUsers = (p: P) => (
+  <svg {...base(p)}>
+    <circle cx="9" cy="8" r="3.5" />
+    <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+    <path d="M16 5.2a3.5 3.5 0 0 1 0 5.6" />
+    <path d="M17.8 14.3A6.5 6.5 0 0 1 21.5 20" />
+  </svg>
+);
+
 export const IconKey = (p: P) => (
   <svg {...base(p)}>
     <circle cx="7.5" cy="15.5" r="4.5" />

@@ -1,9 +1,10 @@
 import { InviteManager } from "@/app/components/InviteManager";
 import { MembersList } from "@/app/components/MembersList";
-import { getMe } from "@/app/lib/auth";
+import { getAuthMode, getMe } from "@/app/lib/auth";
 
 export default async function TeamPage() {
   const me = await getMe();
+  const mode = getAuthMode();
   const allowed = me?.role === "OWNER" || me?.role === "ADMIN";
   const personal = me?.organization_kind === "personal";
 
@@ -27,7 +28,12 @@ export default async function TeamPage() {
       ) : (
         <>
           <MembersList />
-          {allowed ? (
+          {mode !== "local" ? (
+            // Clerk owns invitations in hosted mode — the local invite endpoints aren't mounted.
+            <div className="card p-6 text-[13px] text-fg-muted">
+              Invitations are managed in your identity provider.
+            </div>
+          ) : allowed ? (
             <InviteManager />
           ) : (
             <div className="card p-6 text-[13px] text-fg-muted">

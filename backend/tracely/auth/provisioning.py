@@ -389,6 +389,12 @@ async def create_workspace(
     session.add(key)
     await seed_recommended_evaluators(session, project.id)
     await session.commit()
+    # Fill it with the demo dataset so it opens on a working product rather than empty pages.
+    # Detached and best-effort — after the commit, so a seeding hiccup can't undo the workspace.
+    if settings.seed_new_workspaces:
+        from tracely.services import demo_seed  # lazy: keeps subprocess/pathing out of import time
+
+        demo_seed.launch(key.key)
     return project, key
 
 

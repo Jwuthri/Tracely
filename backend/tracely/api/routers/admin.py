@@ -7,21 +7,16 @@ Pure HTTP shaping — ClickHouse deletes live in `infrastructure.clickhouse.dele
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from tracely.api.auth import get_project_id
-from tracely.config import settings
 from tracely.infrastructure.clickhouse import deletes
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.llm import provider
+from tracely.services import demo_seed
 
 router = APIRouter(prefix="/api")
 
@@ -61,12 +56,10 @@ async def wipe_project_data(body: WipeBody, project_id: str = Depends(get_projec
 async def seed_project_demo(project_id: str = Depends(get_project_id)) -> dict:
     """Populate this workspace with the demo dataset — traces, clusters, cases, gates, scenarios.
 
-    A dev convenience so an empty install (or one you just wiped) has something to look at without
-    dropping to a terminal. Queued, not inline: the seeder drives the product through its own HTTP
-    API and takes minutes. Idempotent, so a double-click just costs time.
+    Available in every environment, prod included: it's how a workspace stops being a set of empty
+    pages. Queued, not inline — the seeder drives the product through its own HTTP API and takes
+    minutes. Idempotent, so a double-click just costs time.
     """
-    if settings.tracely_env == "prod":
-        raise HTTPException(status_code=403, detail="seeding is disabled in prod")
 
     def key():
         with SyncSessionLocal() as s:
@@ -75,21 +68,9 @@ async def seed_project_demo(project_id: str = Depends(get_project_id)) -> dict:
     ingest_key = await run_in_threadpool(key)
     if not ingest_key:
         raise HTTPException(status_code=400, detail="this workspace has no ingest key")
-
-    script = Path(__file__).resolve().parents[4] / "scripts" / "seed_demo.py"
-    if not script.exists():  # trimmed image — seeding is a dev convenience only
+    if not demo_seed.available():  # trimmed image that ships without scripts/
         raise HTTPException(status_code=501, detail="seed_demo.py is not present in this image")
-
-    # Detached child of the API process, NOT a Celery task. The seeder pushes traces and then waits
-    # for them to be ingested, clustered and evaluated — all of which are worker jobs. Under the
-    # default `--pool=solo --concurrency=1` a seed task would hold the worker's only slot and wait
-    # on work queued behind itself, so it deadlocked and gave up after phase 2 with cases, gates
-    # and scenarios empty. Running it here leaves the worker free to do exactly that work.
-    subprocess.Popen(  # noqa: S603
-        [sys.executable, str(script)],
-        env={**os.environ, "TRACELY_API": settings.internal_api_url, "TRACELY_KEY": ingest_key},
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
-    )
+    demo_seed.launch(ingest_key)
     return {"queued": True}
 
 

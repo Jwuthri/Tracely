@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     # used to mint accounts. Hosted cloud turns it on — each signup gets its own personal
     # organization and workspace.
     allow_public_signup: bool = False
+    # Populate every new workspace with the demo dataset (traces, clusters, cases, gates) so it
+    # opens on a working product instead of empty pages. Best-effort and detached — it never
+    # blocks or fails workspace creation. Turn off for deployments that want clean workspaces.
+    seed_new_workspaces: bool = True
     # Hosted-cloud hard gate: when true, the server-wide LLM/embedding credentials
     # (OPENROUTER_API_KEY / LLM_JUDGE_API_KEY / OPENAI_API_KEY) never apply to ANY call — scoped
     # or not. Every AI feature then runs exclusively on the workspace's own OpenRouter key

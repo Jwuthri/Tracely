@@ -25,6 +25,7 @@ os.environ["INTROSPECTION_ENABLED"] = "false"
 # that want the chat path turn it on with a fake checkpointer.
 os.environ["EVAL_CHAT_ENABLED"] = "false"
 
+import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
@@ -32,6 +33,7 @@ from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from tracely.api.main import app  # noqa: E402
 from tracely.auth import passwords  # noqa: E402
+from tracely.config import settings  # noqa: E402
 from tracely.infrastructure.db import models  # noqa: E402
 from tracely.infrastructure.db.base import Base  # noqa: E402
 from tracely.infrastructure.db.session import get_session  # noqa: E402
@@ -52,6 +54,14 @@ _AUTH_TABLES = [
     # The OTLP edge's quota gate reads it whenever a billing test flips BILLING_ENABLED on.
     models.UsageCounter.__table__,
 ]
+
+
+@pytest.fixture(autouse=True)
+def _no_demo_seed_subprocesses(monkeypatch):
+    """Workspace creation spawns the demo seeder in production. Tests create workspaces
+    constantly — without this every one forks a python process against a backend that isn't
+    there."""
+    monkeypatch.setattr(settings, "seed_new_workspaces", False)
 
 
 @pytest_asyncio.fixture

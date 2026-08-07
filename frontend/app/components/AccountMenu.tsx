@@ -19,9 +19,12 @@ export function AccountMenu({ me }: { me: Me | null }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Inline naming instead of window.prompt(), which browsers refuse to render in some contexts
+  // ("prompt() is not supported") and which can't show the backend's 409 copy anyway.
+  const [creating, setCreating] = useState<{ path: string; label: string } | null>(null);
+  const [draft, setDraft] = useState("");
   const workspace = me?.project_name || "Workspace";
   const role = me?.role || (MODE === "dev" ? "dev" : "");
-  const canInvite = MODE === "local" && (me?.role === "OWNER" || me?.role === "ADMIN");
   const projects = me?.projects ?? [];
   const orgs = me?.organizations ?? [];
   const canCreate = MODE === "local" && (me?.role === "OWNER" || me?.role === "ADMIN");
@@ -59,20 +62,27 @@ export function AccountMenu({ me }: { me: Me | null }) {
     }
   }
 
-  /** POST a create action, surfacing the backend's message — the plan caps answer 409 with copy
+  function startCreating(path: string, label: string) {
+    setCreating({ path, label });
+    setDraft("");
+    setError("");
+  }
+
+  /** POST the create action, surfacing the backend's message — the plan caps answer 409 with copy
    *  that tells the user what to do about it ("upgrade", "create an organization"). */
-  async function create(path: string, promptText: string) {
-    const name = window.prompt(promptText)?.trim();
-    if (!name) return;
+  async function submitCreate() {
+    const name = draft.trim();
+    if (!name || !creating) return;
     setBusy(true);
     setError("");
     try {
-      const r = await fetch(path, {
+      const r = await fetch(creating.path, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name }),
       });
       if (r.ok) {
+        setCreating(null);
         setOpen(false);
         router.refresh();
       } else {
@@ -152,23 +162,59 @@ export function AccountMenu({ me }: { me: Me | null }) {
                     </div>
                   ),
               )}
-              {canCreate && (
-                <button
-                  onClick={() => create("/api/auth/projects", "New workspace name")}
-                  disabled={busy}
-                  className="block w-full px-3 py-1.5 text-left text-[12.5px] text-signal transition-colors hover:bg-signal/10 disabled:opacity-50"
-                >
-                  + New workspace
-                </button>
-              )}
-              {MODE === "local" && !!me?.user_id && me.can_create_organization && (
-                <button
-                  onClick={() => create("/api/auth/organizations", "New organization name")}
-                  disabled={busy}
-                  className="block w-full px-3 py-1.5 text-left text-[12.5px] text-signal transition-colors hover:bg-signal/10 disabled:opacity-50"
-                >
-                  + New organization
-                </button>
+              {creating ? (
+                <div className="px-3 py-2">
+                  <label className="mb-1 block font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">
+                    {creating.label}
+                  </label>
+                  <input
+                    autoFocus
+                    value={draft}
+                    disabled={busy}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") submitCreate();
+                      if (e.key === "Escape") setCreating(null);
+                    }}
+                    placeholder="Name"
+                    className="w-full rounded-md border border-line bg-ink-900 px-2 py-1.5 text-[12.5px] text-fg outline-none placeholder:text-fg-faint focus:border-signal/50 disabled:opacity-50"
+                  />
+                  <div className="mt-1.5 flex gap-2">
+                    <button
+                      onClick={submitCreate}
+                      disabled={busy || !draft.trim()}
+                      className="rounded-md bg-signal px-2.5 py-1 text-[11.5px] font-semibold text-ink transition-opacity hover:opacity-90 disabled:opacity-50"
+                    >
+                      {busy ? "…" : "Create"}
+                    </button>
+                    <button
+                      onClick={() => setCreating(null)}
+                      disabled={busy}
+                      className="rounded-md px-2 py-1 text-[11.5px] text-fg-muted transition-colors hover:text-fg"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {canCreate && (
+                    <button
+                      onClick={() => startCreating("/api/auth/projects", "New workspace")}
+                      className="block w-full px-3 py-1.5 text-left text-[12.5px] text-signal transition-colors hover:bg-signal/10"
+                    >
+                      + New workspace
+                    </button>
+                  )}
+                  {MODE === "local" && !!me?.user_id && me.can_create_organization && (
+                    <button
+                      onClick={() => startCreating("/api/auth/organizations", "New organization")}
+                      className="block w-full px-3 py-1.5 text-left text-[12.5px] text-signal transition-colors hover:bg-signal/10"
+                    >
+                      + New organization
+                    </button>
+                  )}
+                </>
               )}
               {error && (
                 <p role="alert" className="px-3 py-1.5 text-[11.5px] leading-snug text-fail">
@@ -196,26 +242,12 @@ export function AccountMenu({ me }: { me: Me | null }) {
           >
             Settings · LLM key
           </a>
-          <a
-            href="/settings/billing"
-            className="block px-3 py-2 text-[12.5px] text-fg-muted transition-colors hover:bg-white/[0.04] hover:text-fg"
-          >
-            Usage &amp; billing
-          </a>
           {MODE === "local" && me?.user_id && (
             <a
               href="/settings/account"
               className="block px-3 py-2 text-[12.5px] text-fg-muted transition-colors hover:bg-white/[0.04] hover:text-fg"
             >
               Change password
-            </a>
-          )}
-          {canInvite && (
-            <a
-              href="/settings/team"
-              className="block px-3 py-2 text-[12.5px] text-fg-muted transition-colors hover:bg-white/[0.04] hover:text-fg"
-            >
-              Invite teammates
             </a>
           )}
           {MODE === "local" && (
