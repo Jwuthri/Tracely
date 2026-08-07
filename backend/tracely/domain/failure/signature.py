@@ -8,8 +8,8 @@ trace so the cluster appears immediately.
 
 Exact hashing alone splits LLM-judge prose into one cluster per trace ("the response is not
 helpful" vs "the answer is not a helpful reply"). So the key is only the FIRST lookup: the
-clusterer falls back to a token-overlap match against existing clusters with the same failed
-evaluators (`tokens` / `similarity` below).
+clusterer falls back to a token-overlap match (`matches` below). Near-identical text always
+merges — the failed-evaluator set only separates clusters whose text is genuinely different.
 """
 
 from __future__ import annotations
@@ -23,6 +23,13 @@ _MASK_PATTERNS = [
     (re.compile(r"\b\d+(\.\d+)?\b"), "<n>"),  # numbers
     (re.compile(r"'[^']*'|\"[^\"]*\""), "<*>"),  # quoted strings
 ]
+_WS = re.compile(r"\s+")
+
+# Above this text similarity, two failures are the same issue no matter which evaluators
+# tripped — a pydantic error captured by the outcome check on one trace and by a judge on the
+# next must not become two clusters. Below it, a disjoint failed-evaluator set keeps genuinely
+# different failure modes apart even when their wording overlaps.
+_TEXT_MATCH_OVERRIDE = 0.9
 
 # Dropped before comparing two failure texts: grammar glue plus the words every judge comment
 # repeats ("the agent response ..."). Negations are deliberately KEPT — "helpful" and "not
@@ -49,11 +56,12 @@ _TAXONOMY = {
 
 
 def mask(text: str) -> str:
-    """Strip volatile bits so failures with the same shape but different ids/values collapse."""
+    """Strip volatile bits so failures with the same shape but different ids/values collapse.
+    Whitespace is collapsed too — a traceback rendered with `\\n` vs spaces is the same failure."""
     out = text
     for pat, repl in _MASK_PATTERNS:
         out = pat.sub(repl, out)
-    return out.strip()
+    return _WS.sub(" ", out).strip()
 
 
 def tokens(text: str) -> frozenset[str]:
@@ -70,8 +78,14 @@ def similarity(a: frozenset[str], b: frozenset[str]) -> float:
 
 
 def eval_part(signature: str) -> str:
-    """The failed-evaluator half of a signature string — the hard gate for merging."""
+    """The failed-evaluator half of a signature string — the merge gate for dissimilar text."""
     return signature.split(" ## ", 1)[0]
+
+
+def eval_names(signature: str) -> frozenset[str]:
+    """The failed-evaluator names of a signature, as a set. Empty for signatures that carry no
+    evaluator half (the synthesized ones on embedding clusters)."""
+    return frozenset(n for n in eval_part(signature).split(" || ") if n)
 
 
 def text_part(signature: str) -> str:
@@ -94,14 +108,21 @@ class FailureSignature:
     taxonomy: str
 
     def matches(self, other_signature: str, threshold: float) -> bool:
-        """True if an existing cluster's signature describes the same failure: identical failed
-        evaluators AND enough shared content words."""
-        if eval_part(self.signature) != eval_part(other_signature):
+        """True if an existing cluster's signature describes the same failure.
+
+        Near-identical failure text (>= _TEXT_MATCH_OVERRIDE) is the same issue regardless of
+        which evaluators tripped — the evaluator set flaps (advisory judges, sampling, per-mode
+        eval passes) while the underlying error text does not, and gating on set equality is
+        exactly what duplicated clusters in production. Below the override, disjoint evaluator
+        sets keep different failure modes apart; overlapping (or absent) sets fall through to
+        the ordinary similarity threshold."""
+        sim = similarity(tokens(text_part(self.signature)), tokens(text_part(other_signature)))
+        if sim >= _TEXT_MATCH_OVERRIDE:
+            return True
+        mine, theirs = eval_names(self.signature), eval_names(other_signature)
+        if mine and theirs and mine.isdisjoint(theirs):
             return False
-        return (
-            similarity(tokens(text_part(self.signature)), tokens(text_part(other_signature)))
-            >= threshold
-        )
+        return sim >= threshold
 
     @classmethod
     def compute(cls, eval_failures, spans: list[dict]) -> "FailureSignature":

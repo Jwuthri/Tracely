@@ -2,13 +2,15 @@
 
 Exact signature hashing alone gives one cluster per failing trace — every LLM judge comment is
 worded differently. `StructuralClusteringService` falls back to a token-overlap match; these
-tests pin that it merges reworded versions of the same failure and still keeps different
-failure modes (and different evaluators) apart. In-memory SQLite, no infra.
+tests pin that it merges reworded versions of the same failure (even when the failed-evaluator
+set flaps between traces) and still keeps genuinely different failure modes apart. In-memory
+SQLite, no infra.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -76,11 +78,102 @@ def test_different_failure_modes_stay_apart(session):
     assert _counts(session) == [1, 1]
 
 
-def test_different_evaluators_never_merge(session):
-    """Same words, different failed evaluator -> different issue. The hard gate."""
-    _cluster(session, "t1", "the call timed out", name="tracely.run.quality")
-    _cluster(session, "t2", "the call timed out", name="tracely.run.latency_ms")
+def test_different_evaluators_different_text_stay_apart(session):
+    """Disjoint failed evaluators AND genuinely different text -> different issue."""
+    _cluster(session, "t1", "the reply was rude and dismissive", name="tracely.run.quality")
+    _cluster(session, "t2", "latency exceeded the configured budget", name="tracely.run.latency_ms")
     assert _counts(session) == [1, 1]
+
+
+def test_same_error_text_merges_across_disjoint_evaluators(session):
+    """Identical failure text is one issue no matter which evaluator caught it."""
+    spans = [{"level": "ERROR", "status_message": "boom: connection reset by peer"}]
+    a = StructuralClusteringService(session).cluster_failure(
+        PROJECT, AGENT, "t1", [Ev("tracely.run.outcome", "")], spans
+    )
+    b = StructuralClusteringService(session).cluster_failure(
+        PROJECT, AGENT, "t2", [Ev("tracely.tool.success", "")], spans
+    )
+    assert a == b
+    assert _counts(session) == [2]
+
+
+def test_flapping_advisory_judge_does_not_split_the_cluster(session):
+    """The production dupe: the same masked pydantic error, once with only the outcome check
+    failing and once with an advisory judge failing alongside — one issue, not two."""
+    err = (
+        "1 validation error for FindNearbyStoresToolArgs\nmax_results\n"
+        "  Input should be less than or equal to 20 [type=less_than_equal, input_value=50]"
+    )
+    spans = [{"level": "ERROR", "status_message": err}]
+    a = StructuralClusteringService(session).cluster_failure(
+        PROJECT, AGENT, "t1", [Ev("tracely.run.outcome", "")], spans
+    )
+    b = StructuralClusteringService(session).cluster_failure(
+        PROJECT,
+        AGENT,
+        "t2",
+        [
+            Ev("tracely.run.outcome", ""),
+            Ev("tracely.run.quality", "the response never answered the question"),
+        ],
+        spans,
+    )
+    assert a == b
+    assert _counts(session) == [2]
+
+
+def test_whitespace_variants_share_one_key():
+    """A traceback rendered with newlines vs spaces must hash to the same cluster_key."""
+    a = FailureSignature.compute(
+        [Ev("tracely.run.outcome", "validation error for X\n  max_results\n Input should be less")], []
+    )
+    b = FailureSignature.compute(
+        [Ev("tracely.run.outcome", "validation error for X max_results Input should be less")], []
+    )
+    assert a.key == b.key
+
+
+def test_create_race_joins_the_winning_row(session, monkeypatch):
+    """Two workers, same brand-new signature: the loser's insert folds into the winner."""
+    winner = _cluster(session, "t-other", "upstream returned http 502")
+    svc = StructuralClusteringService(session)
+    real_find = svc._find_existing
+    misses = iter([True])  # first lookup misses, as if the winner committed just after it
+    monkeypatch.setattr(
+        svc, "_find_existing", lambda *a: None if next(misses, False) else real_find(*a)
+    )
+    monkeypatch.setattr(svc, "_find_similar", lambda *a: None)
+    got = svc.cluster_failure(
+        PROJECT, AGENT, "t-me", [Ev("tracely.run.quality", "upstream returned http 502")], []
+    )
+    assert got == winner
+    assert _counts(session) == [2]
+
+
+def test_structural_failure_joins_analyzed_issue(session):
+    """After Analyze, embedding clusters carry a synthesized text-only signature; a fresh
+    structural failure with the same wording folds in instead of opening a duplicate."""
+    now = datetime.now(timezone.utc)
+    session.add(
+        FailureCluster(
+            id="emb1",
+            project_id=PROJECT,
+            agent_id=AGENT,
+            cluster_key="deadbeef00000000",
+            label="Weather tool never called",
+            taxonomy="execution: error",
+            signature=" ## the weather tool was never called for the forecast question",
+            method="embedding",
+            count=3,
+            status="OPEN",
+            first_seen_at=now,
+            last_seen_at=now,
+        )
+    )
+    session.commit()
+    got = _cluster(session, "t9", "the agent never called the weather tool for the forecast question")
+    assert got == "emb1"
 
 
 def test_ignored_cluster_is_not_resurrected(session):

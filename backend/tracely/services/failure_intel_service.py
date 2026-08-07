@@ -22,6 +22,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from tracely.domain.failure.clustering import ClusterEngine
+from tracely.domain.failure.signature import text_part
 from tracely.domain.failure.text import embedding_text, summarize_failure
 from tracely.domain.traces.spans import root_span
 from tracely.infrastructure.clickhouse.trace_reader import TraceReader
@@ -249,6 +250,10 @@ class FailureIntelService:
         )
         # (id, status, candidate_case_id, first_seen_at, {trace_ids}) — only carried-over fields
         old_state: list[tuple[str, str, str | None, datetime | None, set[str]]] = []
+        # Masked failure text of each old cluster, so the replacement issues keep a joinable
+        # signature. With `signature=""` a new structural failure could never fuzzy-match an
+        # embedding cluster and every failure after an Analyze re-opened a duplicate row.
+        old_texts: dict[str, str] = {ec.id: text_part(ec.signature or "") for ec in existing}
         for ec in existing:
             mtids = set(
                 session.execute(
@@ -302,6 +307,10 @@ class FailureIntelService:
             status = match[1] if match else "OPEN"
             case_id = match[2] if match else None
             seen = match[3] if (match and match[3]) else now
+            # No evaluator half (" ## " prefix): a synthesized signature gates on text alone.
+            merged_texts = sorted(
+                {t for cid, _st, _c, _f, tids in old_state if tids & member_tids and (t := old_texts.get(cid))}
+            )
             cl = FailureCluster(
                 id=str(uuid.uuid4()),
                 project_id=project_id,
@@ -309,7 +318,7 @@ class FailureIntelService:
                 cluster_key=hashlib.sha256(g.title.encode()).hexdigest()[:16],
                 label=g.title,
                 taxonomy=first.taxonomy,
-                signature="",
+                signature=(" ## " + " || ".join(merged_texts))[:2000] if merged_texts else "",
                 description=g.description,
                 proposed_fix=first.proposed_fix,
                 severity=first.severity,

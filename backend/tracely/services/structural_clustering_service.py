@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import desc, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from tracely.config import settings
@@ -49,7 +50,18 @@ class StructuralClusteringService:
             project_id, agent_id, sig
         )
         if cl is None:
-            cl = self._create(project_id, agent_id, sig, now)
+            try:
+                cl = self._create(project_id, agent_id, sig, now)
+                self._record_member(cl, trace_id, now)
+                self.session.commit()
+                return cl.id
+            except IntegrityError:
+                # Two workers raced on the same brand-new signature; the other insert won the
+                # (project, agent, cluster_key) unique constraint. Join its row instead.
+                self.session.rollback()
+                cl = self._find_existing(project_id, agent_id, sig.key)
+                if cl is None:
+                    raise
 
         self._record_member(cl, trace_id, now)
         self.session.commit()
