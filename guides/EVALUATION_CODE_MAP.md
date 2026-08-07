@@ -106,7 +106,7 @@ The single place every evaluator actually runs. In order:
 
 1. `_topo_sort(specs)` (line 121) — orders by `config.depends_on`; a cycle logs
    `eval_dependency_cycle` and falls back to creation order.
-2. `provider.use_project_key(project_id)` — per-workspace OpenRouter key for every LLM call inside.
+2. `provider.use_project_key(project_id)` — the workspace's OWN OpenRouter key for every LLM call inside; no key configured = no LLM (server keys never apply inside a project scope).
 3. `introspection.record(EVAL, ...)` — records the whole dispatch as a Tracely-internal trace
    (`stable=True` ⇒ re-runs replace, not stack).
 4. Per spec: `_inject_dependencies` (line 148) → `registry.dispatch(...)` → collect results into

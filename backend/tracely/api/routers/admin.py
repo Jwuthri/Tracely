@@ -118,9 +118,10 @@ async def get_llm_key(project_id: str = Depends(get_project_id)) -> OpenRouterKe
 async def set_llm_key(
     body: OpenRouterKeyIn, project_id: str = Depends(get_project_id)
 ) -> OpenRouterKeyOut:
-    """Set this workspace's own OpenRouter key — every LLM eval call for this project (judge,
-    failure intelligence, meta-analysis, rolling summary) then bills to it instead of the
-    server-wide key. The key itself is never returned again; only whether one is configured."""
+    """Set this workspace's own OpenRouter key. It is REQUIRED for every LLM-backed feature
+    (judge evaluators, clustering/failure intelligence, meta-analysis, rolling summary, scenario
+    gates) — without one those degrade to no-op. The key itself is never returned again; only
+    whether one is configured."""
     key = body.api_key.strip()
     if not key:
         raise HTTPException(status_code=400, detail="api_key is required")
@@ -141,7 +142,7 @@ async def set_llm_key(
 
 @router.delete("/project/llm-key", response_model=OpenRouterKeyOut)
 async def clear_llm_key(project_id: str = Depends(get_project_id)) -> OpenRouterKeyOut:
-    """Clear the workspace key — LLM eval calls fall back to the server-wide key."""
+    """Clear the workspace key — every LLM-backed feature stops running for this project."""
 
     def work() -> bool:
         with SyncSessionLocal() as s:

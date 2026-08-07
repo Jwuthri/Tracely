@@ -68,7 +68,8 @@ async def rebuild(project_id: str = Depends(get_project_id)) -> dict:
     if not ready:
         raise HTTPException(
             status_code=400,
-            detail="Set OPENROUTER_API_KEY (embeddings + agent analysis) to enable cluster rebuild",
+            detail="Failure clustering needs this workspace's OpenRouter key (embeddings + agent "
+            "analysis). Add one in Settings -> OpenRouter key.",
         )
     rebuild_clusters_task.delay(project_id)
     return {"status": "started"}

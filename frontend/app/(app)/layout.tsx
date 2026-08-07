@@ -1,4 +1,5 @@
 import { CommandPalette } from "@/app/components/CommandPalette";
+import { MissingLlmKeyBanner } from "@/app/components/MissingLlmKeyBanner";
 import { Sidebar } from "@/app/components/Sidebar";
 import { Topbar } from "@/app/components/Topbar";
 import { getMe, requireSession } from "@/app/lib/auth";
@@ -13,6 +14,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Sidebar me={me} />
       <div className="bg-grid relative flex min-h-screen flex-1 flex-col">
         <Topbar />
+        <MissingLlmKeyBanner />
         <main className="mx-auto w-full max-w-[1240px] flex-1 px-8 py-8">{children}</main>
       </div>
       <CommandPalette />

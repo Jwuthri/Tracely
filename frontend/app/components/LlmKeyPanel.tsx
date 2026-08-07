@@ -69,10 +69,16 @@ export function LlmKeyPanel() {
       <div className="hairline px-4 py-3 text-[13px] font-semibold text-fg">OpenRouter key</div>
       <div className="space-y-4 p-5">
         <p className="text-[13.5px] leading-relaxed text-fg-muted">
-          Set this workspace's own OpenRouter key and every LLM eval call — the judge, failure
-          intelligence, meta-analysis, rolling summary — bills to it instead of the shared key.
-          Leave it unset to keep using the server's own key.
+          Required. Every LLM-backed feature — judge evaluators, clustering and failure
+          intelligence, meta-analysis, rolling summary, scenario gates — runs on this workspace's
+          own OpenRouter key and bills to your account. Without one, those features stay off.
         </p>
+
+        {status === "unset" && (
+          <p className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-[13px] text-warn">
+            No key configured — LLM evaluations and clustering will not run.
+          </p>
+        )}
 
         {status === "loading" && <p className="text-[13px] text-fg-faint">Loading…</p>}
 

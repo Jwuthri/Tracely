@@ -1,10 +1,10 @@
 """A workspace's own OpenRouter key: encrypted at rest, Redis-cached, scoped via
 `provider.use_project_key`.
 
-`effective_openrouter_key()` must prefer the project's key inside the context, fall back to the
-server-wide key outside it (or when the project has none / the lookup fails), and never leak a
-key past the `with` block — the whole point of a workspace being able to bill its own eval spend
-instead of ours.
+Inside the context `effective_openrouter_key()` returns the project's OWN key and nothing else —
+a workspace with none (or a failed lookup) gets `""`, never the server-wide key, so no customer's
+eval spend can land on our account. Outside the context the server key still applies, and a key
+must never leak past the `with` block.
 
 The Redis seam is always pinned explicitly (never left to whatever is running on localhost), so
 these tests neither depend on Redis being up nor pollute each other through a live cache.
@@ -84,8 +84,8 @@ def test_decrypt_degrades_to_none_on_bad_token(monkeypatch):
 
 
 def test_rotated_encryption_key_degrades_instead_of_crashing(monkeypatch):
-    """Re-keying the server must not take evaluation down: an undecryptable stored token falls
-    back to the server-wide key rather than raising through the eval pipeline."""
+    """Re-keying the server must not take evaluation down: an undecryptable stored token reads as
+    'no key configured' rather than raising through the eval pipeline."""
     monkeypatch.setattr(settings, "secrets_encryption_key", "y" * 40)
     token = provider.encrypt_project_key("project-key")
     monkeypatch.setattr(settings, "secrets_encryption_key", "z" * 40)  # rotated
@@ -95,7 +95,7 @@ def test_rotated_encryption_key_degrades_instead_of_crashing(monkeypatch):
         lambda s, pid: types.SimpleNamespace(openrouter_api_key_encrypted=token),
     )
     with provider.use_project_key("proj-1"):
-        assert provider.effective_openrouter_key() == "server-key"
+        assert provider.effective_openrouter_key() == ""
 
 
 # ── contextvar scoping ────────────────────────────────────────────────────────
@@ -136,19 +136,22 @@ def test_nested_scopes_restore_the_outer_key(monkeypatch):
     assert provider.effective_openrouter_key() == "server-key"
 
 
-def test_use_project_key_falls_back_when_project_has_none(monkeypatch):
+def test_project_without_a_key_gets_no_key_at_all(monkeypatch):
+    """No fallback to the server-wide key: a workspace that hasn't configured one simply has no
+    LLM, so nothing bills to us."""
     monkeypatch.setattr(settings, "openrouter_api_key", "server-key")
     monkeypatch.setattr(
         repo_module, "project_get",
         lambda s, pid: types.SimpleNamespace(openrouter_api_key_encrypted=None),
     )
     with provider.use_project_key("proj-1"):
-        assert provider.effective_openrouter_key() == "server-key"
+        assert provider.effective_openrouter_key() == ""
+        assert provider.llm_enabled() is False
+    assert provider.effective_openrouter_key() == "server-key"
 
 
-def test_use_project_key_degrades_on_lookup_failure(monkeypatch):
-    """A DB hiccup (or no Postgres reachable at all) must never block evaluation — it just means
-    this call falls back to the server-wide key, same as a project with none configured."""
+def test_use_project_key_fails_closed_on_lookup_failure(monkeypatch):
+    """A DB hiccup must not silently spend the server key — it reads as 'no key configured'."""
     monkeypatch.setattr(settings, "openrouter_api_key", "server-key")
 
     def boom(s, project_id):
@@ -156,7 +159,22 @@ def test_use_project_key_degrades_on_lookup_failure(monkeypatch):
 
     monkeypatch.setattr(repo_module, "project_get", boom)
     with provider.use_project_key("proj-1"):
-        assert provider.effective_openrouter_key() == "server-key"
+        assert provider.effective_openrouter_key() == ""
+
+
+def test_legacy_judge_key_does_not_leak_into_a_project(monkeypatch):
+    """The legacy direct-OpenAI credential is a server credential too — same rule."""
+    monkeypatch.setattr(settings, "openrouter_api_key", "")
+    monkeypatch.setattr(settings, "llm_judge_api_key", "legacy-server-key")
+    monkeypatch.setattr(
+        repo_module, "project_get",
+        lambda s, pid: types.SimpleNamespace(openrouter_api_key_encrypted=None),
+    )
+    assert provider.llm_enabled() is True  # unscoped: server credential still applies
+    with provider.use_project_key("proj-1"):
+        assert provider.llm_enabled() is False
+        with pytest.raises(RuntimeError, match="no OpenRouter API key"):
+            provider.get_chat_model()
 
 
 # ── Redis cache ───────────────────────────────────────────────────────────────

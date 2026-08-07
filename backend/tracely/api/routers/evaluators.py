@@ -285,8 +285,8 @@ async def generate_evaluator(
     if not enabled:
         raise HTTPException(
             status_code=503,
-            detail="AI generation needs the judge LLM configured (set OPENROUTER_API_KEY, or a "
-            "workspace one in Settings).",
+            detail="AI generation needs this workspace's OpenRouter key. Add one in "
+            "Settings -> OpenRouter key.",
         )
     try:
         return await run_in_threadpool(generate_evaluator_config, body.description, project_id)

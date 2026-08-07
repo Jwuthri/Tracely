@@ -193,9 +193,14 @@ def _decrypt_project_key(token: str) -> str | None:
 
 
 def effective_openrouter_key() -> str:
-    """The OpenRouter key in effect right now: the current project's own key when
-    `use_project_key()` is active and one is configured, else the server-wide key."""
-    return _project_key_ctx.get() or settings.openrouter_api_key
+    """The OpenRouter key in effect right now.
+
+    Inside `use_project_key()` that is the project's OWN key and nothing else: a workspace with
+    no key configured gets `""`, never the server-wide key. Customers pay for their own eval
+    spend. Outside any project scope (CLI scripts, health checks) the server key still applies.
+    """
+    scoped = _project_key_ctx.get()
+    return settings.openrouter_api_key if scoped is None else scoped
 
 
 def _redis():
@@ -250,25 +255,37 @@ def use_project_key(project_id: str) -> Iterator[None]:
     """Scope every provider.py call inside the block to `project_id`'s own OpenRouter key when
     one is configured — server-wide key otherwise. Wrap any project-scoped entry point that ends
     up calling get_chat_model/run_structured_agent/run_text_agent/list_models/llm_enabled (the
-    judge, failure intelligence, meta-analysis, rolling summary, evaluator generation)."""
+    judge, failure intelligence, meta-analysis, rolling summary, evaluator generation).
+
+    No key configured (or a failed lookup) means NO LLM for that work — it degrades exactly like
+    an unconfigured deployment (`llm_enabled()` false) rather than silently spending our credit.
+    """
     key: str | None = None
     try:
         encrypted = _encrypted_key_for(project_id)
         if encrypted:
             key = _decrypt_project_key(encrypted)
-    except Exception as exc:  # a lookup hiccup must fall back to the server key, never block
+    except Exception as exc:  # fail closed: a lookup hiccup must not spend the server key
         log.warning("project_key_lookup_failed", project_id=project_id, error=str(exc))
 
-    token = _project_key_ctx.set(key)
+    token = _project_key_ctx.set(key or "")  # "" = scoped, no key (distinct from None = unscoped)
     try:
         yield
     finally:
         _project_key_ctx.reset(token)
 
 
+def project_scoped() -> bool:
+    """True inside `use_project_key()` — i.e. server-wide credentials do not apply here."""
+    return _project_key_ctx.get() is not None
+
+
 def llm_enabled() -> bool:
-    """Whether any judge/agent LLM credential is configured."""
-    return bool(effective_openrouter_key() or settings.llm_judge_api_key)
+    """Whether an LLM credential applies to the work being done right now — the project's own
+    OpenRouter key inside `use_project_key()`, the server-wide keys outside it."""
+    if project_scoped():
+        return bool(effective_openrouter_key())
+    return bool(settings.openrouter_api_key or settings.llm_judge_api_key)
 
 
 def _normalize_model(model: str) -> str:
@@ -398,6 +415,11 @@ def get_chat_model(model: str | None = None, temperature: float = 0.0):
 
     name = (model or settings.llm_judge_model).strip()
     key = effective_openrouter_key()
+    if not key and project_scoped():
+        raise RuntimeError(
+            "This workspace has no OpenRouter API key. Add one in Settings -> OpenRouter key to "
+            "run LLM evaluations, clustering and scenario gates."
+        )
     if key:
         return ChatOpenAI(
             model=_normalize_model(name),

@@ -58,19 +58,21 @@ S3_BUCKET=tracely-events
 S3_ACCESS_KEY_ID=...
 S3_SECRET_ACCESS_KEY=...
 
-# LLM (judge, failure-intel agents, rolling summary, meta-analysis)
-OPENROUTER_API_KEY=...               # the fallback key, used by workspaces that set none of their own
+# LLM (judge, failure-intel agents, rolling summary, meta-analysis).
+# NOT used for customer workspaces — every project runs on its OWN OpenRouter key (Settings ->
+# OpenRouter key) and a project without one simply gets no LLM features. These server-wide keys
+# only apply outside a project scope (CLI scripts, local single-tenant use).
+OPENROUTER_API_KEY=...
 OPENAI_API_KEY=...                   # embeddings only
 
-# Encrypts a workspace's OWN OpenRouter key at rest (Settings -> LLM key), so a customer's eval
-# spend bills to their account instead of yours. `openssl rand -hex 32` (>=32 chars).
+# REQUIRED in any multi-tenant deployment: encrypts each workspace's own OpenRouter key at rest
+# (Settings -> OpenRouter key). `openssl rand -hex 32` (>=32 chars).
 # Set the SAME value on the backend AND the worker: the API encrypts, the worker (which runs the
-# on-ingest judge) decrypts. A mismatch means every stored key silently fails to decrypt and
-# every project falls back to OPENROUTER_API_KEY — i.e. you quietly pay for their evals.
-# Leaving it unset is safe: the feature refuses to store a key (HTTP 500 with a clear message)
-# rather than persisting anything in plaintext; everything else keeps working on the server key.
-# Rotating it orphans already-stored workspace keys — they degrade to the server key and each
-# workspace must re-enter theirs.
+# on-ingest judge) decrypts. A mismatch means every stored key silently fails to decrypt, and
+# since there is no fallback to OPENROUTER_API_KEY, every project's evals stop running.
+# Unset, the feature refuses to store a key (HTTP 500 with a clear message) rather than
+# persisting plaintext — which also means no workspace can enable LLM evaluation.
+# Rotating it orphans already-stored workspace keys — each workspace must re-enter theirs.
 SECRETS_ENCRYPTION_KEY=...
 
 # Hosted frontend origin (CORS allow-list — wildcard localhost is OFF in prod)

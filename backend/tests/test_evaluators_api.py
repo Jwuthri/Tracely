@@ -52,6 +52,16 @@ def _bearer(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _workspace_key(monkeypatch, key: str = "test-key") -> None:
+    """Give the request's project its own OpenRouter key. Server-wide keys don't apply inside a
+    project scope any more (customers pay their own eval spend), so LLM-backed endpoints need
+    this rather than `settings.openrouter_api_key`."""
+    from tracely.infrastructure.llm import provider
+
+    monkeypatch.setattr(provider, "_encrypted_key_for", lambda pid: "enc")
+    monkeypatch.setattr(provider, "_decrypt_project_key", lambda tok: key)
+
+
 async def _owner_token(client) -> str:
     r = await client.post(
         "/auth/register", json={"email": "owner@x.test", "password": "hunter2-pw"}
@@ -188,10 +198,9 @@ async def test_evaluators_are_project_scoped(client, sync_db, make_workspace):
 
 
 async def test_models_endpoint_static_fallback(client, sync_db, monkeypatch):
-    from tracely.config import settings
     from tracely.infrastructure.llm import provider
 
-    monkeypatch.setattr(settings, "openrouter_api_key", "test-key")
+    _workspace_key(monkeypatch)
     monkeypatch.setattr(provider, "_openrouter_model_names", lambda: {})
     tok = await _owner_token(client)
     r = await client.get("/api/evaluators/models", headers=_bearer(tok))
@@ -229,11 +238,10 @@ async def test_models_endpoint_filters_to_available(client, sync_db, monkeypatch
 
 
 async def test_generate_json_draft_builds_schema(client, sync_db, monkeypatch):
-    from tracely.config import settings
     from tracely.domain.evaluation.generation import GeneratedEvaluatorDraft, GeneratedSchemaField
     from tracely.infrastructure.llm import provider
 
-    monkeypatch.setattr(settings, "openrouter_api_key", "test-key")
+    _workspace_key(monkeypatch)
     monkeypatch.setattr(
         provider, "run_structured_agent",
         lambda prompt, *, response_format, system_prompt=None, model=None, temperature=0.0:
@@ -276,11 +284,10 @@ async def test_generate_without_llm_key_is_503(client, sync_db, monkeypatch):
 
 
 async def test_generate_returns_normalized_draft(client, sync_db, monkeypatch):
-    from tracely.config import settings
     from tracely.domain.evaluation.generation import GeneratedEvaluatorDraft
     from tracely.infrastructure.llm import provider
 
-    monkeypatch.setattr(settings, "openrouter_api_key", "test-key")
+    _workspace_key(monkeypatch)
     monkeypatch.setattr(
         provider,
         "run_structured_agent",

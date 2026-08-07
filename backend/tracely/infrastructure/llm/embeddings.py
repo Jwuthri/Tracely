@@ -11,8 +11,11 @@ from tracely.infrastructure.llm import provider
 
 
 def embeddings_enabled() -> bool:
-    """Whether any embedding credential is configured (either key works)."""
-    return bool(provider.effective_openrouter_key() or settings.openai_api_key)
+    """Whether an embedding credential applies right now. Inside `provider.use_project_key()`
+    only the workspace's own OpenRouter key counts — no fallback to the server's keys."""
+    if provider.project_scoped():
+        return bool(provider.effective_openrouter_key())
+    return bool(settings.openrouter_api_key or settings.openai_api_key)
 
 
 class Embedder:
@@ -43,7 +46,9 @@ class Embedder:
         key = self._api_key_arg or provider.effective_openrouter_key()
         if key:
             return (name if "/" in name else f"openai/{name}"), key, settings.openrouter_base_url
-        return name.removeprefix("openai/"), (self._api_key_arg or settings.openai_api_key), None
+        if provider.project_scoped():  # workspace key or nothing — never the server's OpenAI key
+            return name, None, None
+        return name.removeprefix("openai/"), settings.openai_api_key, None
 
     @property
     def model(self) -> str:

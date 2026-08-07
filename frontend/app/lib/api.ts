@@ -466,3 +466,17 @@ export async function getSharedSession(token: string): Promise<SharedSession | n
   if (!res.ok) throw new ApiError(res.status, "/api/share");
   return res.json() as Promise<SharedSession>;
 }
+
+/** Whether this workspace has its own OpenRouter key. Every LLM-backed feature (judge
+ *  evaluators, clustering, meta-analysis, rolling summary, scenario gates) runs on it — there is
+ *  no server-wide fallback — so the shell shows a banner when it's missing. Never throws: a key
+ *  lookup failing must not take the whole app down, and "assume configured" is the quiet option. */
+export async function getLlmKeyConfigured(): Promise<boolean> {
+  try {
+    const res = await apiGet("/api/project/llm-key");
+    if (!res.ok) return true;
+    return Boolean(((await res.json()) as { configured?: boolean })?.configured);
+  } catch {
+    return true;
+  }
+}
