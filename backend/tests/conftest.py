@@ -47,6 +47,8 @@ _AUTH_TABLES = [
     models.Invitation.__table__,
     models.PasswordReset.__table__,
     models.Evaluator.__table__,
+    # The OTLP edge's quota gate reads it whenever a billing test flips BILLING_ENABLED on.
+    models.UsageCounter.__table__,
 ]
 
 

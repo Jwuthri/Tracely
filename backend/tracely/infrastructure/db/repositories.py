@@ -37,6 +37,7 @@ from tracely.infrastructure.db.models import (
     RollingSummary,
     Scenario,
     ScoreAnnotation,
+    UsageCounter,
 )
 
 # ── projects (workspaces) ─────────────────────────────────────────────────────
@@ -44,6 +45,48 @@ from tracely.infrastructure.db.models import (
 
 def project_get(s: Session, project_id: str) -> Project | None:
     return s.get(Project, project_id)
+
+
+def project_by_stripe_customer(s: Session, customer_id: str) -> Project | None:
+    """The workspace a Stripe customer id belongs to — the webhook's primary lookup."""
+    if not customer_id:
+        return None
+    return s.execute(
+        select(Project).where(Project.stripe_customer_id == customer_id)
+    ).scalar_one_or_none()
+
+
+# ── usage counters (hosted-cloud trace quota; see services/quota_service.py) ──
+
+
+def usage_increment(s: Session, project_id: str, period: str, n: int) -> None:
+    """Add `n` newly-seen traces to this project's month. UPDATE-then-INSERT (with the savepoint
+    IntegrityError fallback) instead of dialect `ON CONFLICT`, so the SQLite test harness runs
+    the same code Postgres does. Caller commits."""
+    if n <= 0:
+        return
+    updated = s.execute(
+        update(UsageCounter)
+        .where(UsageCounter.project_id == project_id, UsageCounter.period == period)
+        .values(traces=UsageCounter.traces + n)
+    ).rowcount
+    if updated:
+        return
+    try:
+        with s.begin_nested():
+            s.add(UsageCounter(project_id=project_id, period=period, traces=n))
+    except IntegrityError:
+        # Two workers raced on the month's first row — the loser folds into the winner's.
+        s.execute(
+            update(UsageCounter)
+            .where(UsageCounter.project_id == project_id, UsageCounter.period == period)
+            .values(traces=UsageCounter.traces + n)
+        )
+
+
+def usage_traces(s: Session, project_id: str, period: str) -> int:
+    row = s.get(UsageCounter, (project_id, period))
+    return int(row.traces) if row else 0
 
 
 def project_ingest_key(s: Session, project_id: str) -> str | None:
@@ -1033,6 +1076,9 @@ def project_data_delete(s: Session, project_id: str) -> dict[str, int]:
     Kept: the project, ingest keys, users/memberships, evaluators and monitors. Those are your
     setup, not your data — wiping them would mean reconfiguring the workspace to use it again.
     Evaluators/monitors target agents by slug (no FK), so they survive an agent wipe intact.
+
+    ALSO kept, deliberately and forever: `usage_counters`. It looks trace-derived, but it is the
+    billing record — wiping it here would make Data → wipe a self-serve monthly quota reset.
 
     Returns per-table row counts. Caller is responsible for the ClickHouse half
     (`infrastructure.clickhouse.deletes.delete_project_events`).

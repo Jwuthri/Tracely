@@ -141,6 +141,14 @@ export const IconDatabase = (p: P) => (
   </svg>
 );
 
+export const IconCard = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="2.5" y="5" width="19" height="14" rx="2.5" />
+    <path d="M2.5 10h19" />
+    <path d="M6.5 14.5h4" />
+  </svg>
+);
+
 export const IconKey = (p: P) => (
   <svg {...base(p)}>
     <circle cx="7.5" cy="15.5" r="4.5" />

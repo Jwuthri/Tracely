@@ -12,9 +12,12 @@ from tracely.infrastructure.llm import provider
 
 def embeddings_enabled() -> bool:
     """Whether an embedding credential applies right now. Inside `provider.use_project_key()`
-    only the workspace's own OpenRouter key counts — no fallback to the server's keys."""
+    only the workspace's own OpenRouter key counts — no fallback to the server's keys. Under
+    `REQUIRE_PROJECT_LLM_KEY` (hosted infra) the server keys never count, scoped or not."""
     if provider.project_scoped():
         return bool(provider.effective_openrouter_key())
+    if settings.require_project_llm_key:
+        return False
     return bool(settings.openrouter_api_key or settings.openai_api_key)
 
 
@@ -46,7 +49,9 @@ class Embedder:
         key = self._api_key_arg or provider.effective_openrouter_key()
         if key:
             return (name if "/" in name else f"openai/{name}"), key, settings.openrouter_base_url
-        if provider.project_scoped():  # workspace key or nothing — never the server's OpenAI key
+        if provider.project_scoped() or settings.require_project_llm_key:
+            # Workspace key or nothing — never the server's OpenAI key. The hard-gate flag
+            # extends that to unscoped calls too (a path that forgot `use_project_key()`).
             return name, None, None
         return name.removeprefix("openai/"), settings.openai_api_key, None
 

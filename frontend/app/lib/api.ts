@@ -508,3 +508,26 @@ export async function getLlmKeyConfigured(): Promise<boolean> {
     return true;
   }
 }
+
+/** Hosted-cloud billing snapshot. `trace_limit: null` = uncapped (unlimited plan, or the
+ *  limits don't apply). `billing_enabled: false` = self-hosted — the billing page shows its
+ *  "no limits" state and the quota banner never renders. */
+export type BillingUsage = {
+  billing_enabled: boolean;
+  plan: string;
+  period: string; // "YYYY-MM" (UTC)
+  traces_used: number;
+  trace_limit: number | null;
+};
+
+/** Never throws (same rationale as getLlmKeyConfigured): the shell's quota banner and the
+ *  billing page must degrade to silence, not take the app down. Null = unknown. */
+export async function getBillingUsage(): Promise<BillingUsage | null> {
+  try {
+    const res = await apiGet("/api/billing/usage");
+    if (!res.ok) return null;
+    return (await res.json()) as BillingUsage;
+  } catch {
+    return null;
+  }
+}

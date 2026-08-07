@@ -252,3 +252,44 @@ def test_cache_never_holds_plaintext(monkeypatch):
     cached = b"".join(fake.store.values())
     assert b"sk-or-super-secret" not in cached
     assert cached == encrypted.encode()
+
+
+# ── the hosted hard gate (REQUIRE_PROJECT_LLM_KEY) ────────────────────────────
+# On hosted infra every AI feature must run on the workspace's own key. The flag makes the
+# server-wide credentials count for nothing ANYWHERE — so a future code path that forgets
+# `use_project_key()` fails closed (no LLM) instead of silently billing the operator.
+
+
+def test_hard_gate_disables_unscoped_server_credentials(monkeypatch):
+    monkeypatch.setattr(settings, "require_project_llm_key", True)
+    monkeypatch.setattr(settings, "openrouter_api_key", "server-key")
+    monkeypatch.setattr(settings, "llm_judge_api_key", "legacy-server-key")
+    assert provider.effective_openrouter_key() == ""
+    assert provider.llm_enabled() is False
+    with pytest.raises(RuntimeError, match="no OpenRouter API key"):
+        provider.get_chat_model()  # unscoped = a forgotten use_project_key() — never the legacy path
+
+
+def test_hard_gate_disables_unscoped_embeddings(monkeypatch):
+    from tracely.infrastructure.llm import embeddings
+
+    monkeypatch.setattr(settings, "require_project_llm_key", True)
+    monkeypatch.setattr(settings, "openrouter_api_key", "server-key")
+    monkeypatch.setattr(settings, "openai_api_key", "server-openai-key")
+    assert embeddings.embeddings_enabled() is False
+    _, key, _ = embeddings.Embedder()._resolved()
+    assert key is None
+
+
+def test_hard_gate_keeps_workspace_keys_working(monkeypatch):
+    """The gate blocks OUR credentials, never the customer's."""
+    monkeypatch.setattr(settings, "require_project_llm_key", True)
+    monkeypatch.setattr(settings, "secrets_encryption_key", "z" * 40)
+    encrypted = provider.encrypt_project_key("sk-or-customer-key")
+    monkeypatch.setattr(
+        repo_module, "project_get",
+        lambda s, pid: types.SimpleNamespace(openrouter_api_key_encrypted=encrypted),
+    )
+    with provider.use_project_key("proj-1"):
+        assert provider.effective_openrouter_key() == "sk-or-customer-key"
+        assert provider.llm_enabled() is True

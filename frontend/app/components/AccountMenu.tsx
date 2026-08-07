@@ -153,6 +153,12 @@ export function AccountMenu({ me }: { me: Me | null }) {
           >
             Settings · LLM key
           </a>
+          <a
+            href="/settings/billing"
+            className="block px-3 py-2 text-[12.5px] text-fg-muted transition-colors hover:bg-white/[0.04] hover:text-fg"
+          >
+            Usage &amp; billing
+          </a>
           {MODE === "local" && me?.user_id && (
             <a
               href="/settings/account"

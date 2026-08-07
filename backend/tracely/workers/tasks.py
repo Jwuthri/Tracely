@@ -12,6 +12,7 @@ from tracely.config import settings
 from tracely.infrastructure.db import repositories
 from tracely.infrastructure.queue import eval_debounce
 from tracely.infrastructure.queue.celery_app import celery_app
+from tracely.services import quota_service
 from tracely.services.evaluation_service import EvaluationService
 from tracely.services.failure_intel_service import FailureIntelService
 from tracely.services.ingestion_service import IngestionService
@@ -50,10 +51,18 @@ def ingest_otlp_blob(self, project_id: str, key: str, content_type: str) -> dict
             evaluate_run_task.apply_async(
                 (project_id, trace_id, gen), countdown=settings.eval_debounce_seconds
             )
-        return {"events": result.get("events", 0)}
     except Exception as exc:  # transient failures -> retry with backoff
         log.warning("ingest_failed", key=key, error=str(exc))
         raise self.retry(exc=exc)
+
+    # Hosted-cloud quota: count this batch's never-seen traces into the project's month. AFTER
+    # (and outside) the try above on purpose — `record_ingested_traces` swallows its own
+    # failures, and a counting hiccup must never trigger the task retry: the Redis seen-set
+    # would already hold these ids, so the retry would lose the count AND re-ingest the batch.
+    # This task is the only counting site, so inline emissions (scenario turns, recordings —
+    # which call `process_blob` directly) never consume quota. No-op unless BILLING_ENABLED.
+    quota_service.record_ingested_traces(project_id, result.get("trace_ids", []), internal)
+    return {"events": result.get("events", 0)}
 
 
 # The conversation debounce shares the per-trace generation counter, namespaced so a thread and a

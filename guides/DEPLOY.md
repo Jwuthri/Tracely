@@ -108,6 +108,53 @@ SENTRY_ENVIRONMENT=prod
 
 ---
 
+## 2b. Hosted-cloud billing (optional — skip entirely when self-hosting)
+
+Off by default; nothing below applies until you set `BILLING_ENABLED=true` on **both** the
+backend and the worker (the quota is *counted* in the worker and *enforced* in the API — a
+backend-only flag reads counters nobody writes, and the limit silently never fires).
+
+```dotenv
+BILLING_ENABLED=true
+REQUIRE_PROJECT_LLM_KEY=true       # server LLM keys never serve customer work — see below
+FREE_TRACE_LIMIT=20000             # per project, per UTC month
+PRO_TRACE_LIMIT=1000000
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...    # REQUIRED with the secret key — boot refuses without it
+STRIPE_PRICE_PRO=price_...         # the Pro plan's monthly price id
+```
+
+**What counts as a trace:** externally-POSTed OTLP traces, once per (project, month) however
+many batches carry their spans. Tracely's own recordings (evaluations, scenario drives) never
+count. Over the cap, `/v1/traces` answers **429 + Retry-After** until the month rolls over or
+the plan changes; enforcement is fail-open (a Redis/Postgres outage admits traces, never drops
+them). Redis sizing: one set per project-month of trace ids (≈ tens of MB per million traces) —
+it shares the Celery broker, which runs `noeviction`, so give it headroom.
+
+**Stripe setup (dashboard):** create the Pro product + monthly price → `STRIPE_PRICE_PRO`; add a
+webhook endpoint at `https://<api-domain>/api/billing/webhook` with events
+`checkout.session.completed`, `customer.subscription.updated`,
+`customer.subscription.deleted` → `STRIPE_WEBHOOK_SECRET`. The webhook is signature-verified;
+plan state only ever changes through it.
+
+**Operator workspaces:** the free cap applies to every project the moment billing is enabled —
+mark your own first:
+
+```sql
+UPDATE projects SET plan='unlimited' WHERE slug IN ('default', 'demo');
+```
+
+`unlimited` is never touched by webhooks and is only settable via SQL.
+
+**`REQUIRE_PROJECT_LLM_KEY`** is the hosted hard gate for AI features: with it on, the
+server-wide `OPENROUTER_API_KEY`/`LLM_JUDGE_API_KEY`/`OPENAI_API_KEY` apply to *nothing* —
+every judge, clustering run, meta-analysis, rolling summary and scenario gate runs exclusively
+on the workspace's own OpenRouter key (Settings → OpenRouter key), and a workspace without one
+gets structural checks only. Any future code path that forgets the per-project scoping fails
+closed instead of billing you.
+
+---
+
 ## 3. Celery worker pool
 
 Local dev uses `--pool=solo --concurrency=1` because the failure-intelligence stack

@@ -1,4 +1,4 @@
-import { getClusters, PAGE_SIZE } from "@/app/lib/api";
+import { getClusters, getLlmKeyConfigured, PAGE_SIZE } from "@/app/lib/api";
 import { Badge } from "@/app/components/ui";
 import { ClusterList } from "@/app/components/ClusterList";
 import { Pager, pageParam } from "@/app/components/Pager";
@@ -16,11 +16,10 @@ export default async function ClustersPage({
   const page = pageParam(sp.page);
   // `open` comes from the server as a project-wide count — deriving it from the page would make
   // the badge mean "open on this page".
-  const { items: clusters, total, open } = await getClusters(
-    minSize,
-    PAGE_SIZE,
-    (page - 1) * PAGE_SIZE,
-  );
+  const [{ items: clusters, total, open }, hasLlmKey] = await Promise.all([
+    getClusters(minSize, PAGE_SIZE, (page - 1) * PAGE_SIZE),
+    getLlmKeyConfigured(),
+  ]);
   const qs = (p: number) =>
     `/clusters?${new URLSearchParams({
       ...(minSize ? { min_size: String(minSize) } : {}),
@@ -53,7 +52,7 @@ export default async function ClustersPage({
             </button>
           </form>
           <Badge variant="warn">{open} open</Badge>
-          <RebuildButton />
+          <RebuildButton hasLlmKey={hasLlmKey} />
         </div>
       </header>
 

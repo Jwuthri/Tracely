@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { usePathname } from "next/navigation";
 import type { Me } from "@/app/lib/auth/types";
 import { AccountMenu } from "./AccountMenu";
-import { IconActivity, IconBolt, IconDatabase, IconGate, IconGrid, IconLayers, IconScale, IconSettings, IconShield, IconTrend } from "./icons";
+import { IconActivity, IconBolt, IconCard, IconDatabase, IconGate, IconGrid, IconLayers, IconScale, IconSettings, IconShield, IconTrend } from "./icons";
 
 const NAV = [
   {
@@ -36,6 +36,9 @@ const NAV = [
     items: [
       { href: "/settings/api-keys", label: "Settings", Icon: IconSettings },
       { href: "/settings/data", label: "Data", Icon: IconDatabase },
+      // The one place billing is reachable in clerk mode — the AccountMenu dropdown never
+      // renders there (ClerkUserButton replaces it).
+      { href: "/settings/billing", label: "Usage & billing", Icon: IconCard },
     ],
   },
 ];

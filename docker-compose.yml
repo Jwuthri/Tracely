@@ -71,6 +71,17 @@ x-app-env: &app-env
   RESEND_API_KEY: ${RESEND_API_KEY:-}
   EMAIL_FROM: "${EMAIL_FROM:-Tracely <onboarding@resend.dev>}"
   APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3001}
+  # Hosted-cloud billing — all off by default; self-hosters never need these. BILLING_ENABLED
+  # turns on the monthly trace quota (counted in the WORKER, enforced in the API — the shared
+  # anchor is what makes sure both see the flag). REQUIRE_PROJECT_LLM_KEY makes server-wide LLM
+  # keys inapplicable everywhere, so every AI feature runs only on a workspace's own key.
+  BILLING_ENABLED: ${BILLING_ENABLED:-false}
+  FREE_TRACE_LIMIT: ${FREE_TRACE_LIMIT:-20000}
+  PRO_TRACE_LIMIT: ${PRO_TRACE_LIMIT:-1000000}
+  REQUIRE_PROJECT_LLM_KEY: ${REQUIRE_PROJECT_LLM_KEY:-false}
+  STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+  STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+  STRIPE_PRICE_PRO: ${STRIPE_PRICE_PRO:-}
 
 services:
   # ── infra ────────────────────────────────────────────────────────────────

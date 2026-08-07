@@ -199,10 +199,14 @@ def effective_openrouter_key() -> str:
 
     Inside `use_project_key()` that is the project's OWN key and nothing else: a workspace with
     no key configured gets `""`, never the server-wide key. Customers pay for their own eval
-    spend. Outside any project scope (CLI scripts, health checks) the server key still applies.
+    spend. Outside any project scope (CLI scripts, health checks) the server key still applies —
+    unless `REQUIRE_PROJECT_LLM_KEY` is on (hosted infra), where server-wide credentials never
+    apply to anything: an unscoped call is then a bug that fails closed, not a bill.
     """
     scoped = _project_key_ctx.get()
-    return settings.openrouter_api_key if scoped is None else scoped
+    if scoped is None:
+        return "" if settings.require_project_llm_key else settings.openrouter_api_key
+    return scoped
 
 
 def _redis():
@@ -284,9 +288,13 @@ def project_scoped() -> bool:
 
 def llm_enabled() -> bool:
     """Whether an LLM credential applies to the work being done right now — the project's own
-    OpenRouter key inside `use_project_key()`, the server-wide keys outside it."""
+    OpenRouter key inside `use_project_key()`, the server-wide keys outside it. Under
+    `REQUIRE_PROJECT_LLM_KEY` the server-wide keys count for nothing, so unscoped work is
+    always disabled."""
     if project_scoped():
         return bool(effective_openrouter_key())
+    if settings.require_project_llm_key:
+        return False
     return bool(settings.openrouter_api_key or settings.llm_judge_api_key)
 
 
@@ -504,7 +512,10 @@ def get_chat_model(model: str | None = None, temperature: float = 0.0):
 
     name = (model or settings.llm_judge_model).strip()
     key = effective_openrouter_key()
-    if not key and project_scoped():
+    if not key and (project_scoped() or settings.require_project_llm_key):
+        # Scoped with no key = the workspace hasn't configured one. Unscoped under the hosted
+        # hard gate = a code path that forgot `use_project_key()` — either way, never fall
+        # through to the legacy server-credential endpoint below.
         raise RuntimeError(
             "This workspace has no OpenRouter API key. Add one in Settings -> OpenRouter key to "
             "run LLM evaluations, clustering and scenario gates."

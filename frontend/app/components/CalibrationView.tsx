@@ -122,7 +122,10 @@ export function CalibrationView() {
   if (!evaluators.length)
     return (
       <div className="card p-6 text-[13px] text-fg-muted">
-        No evaluator verdicts yet. Run some traces with evaluators enabled, then come back to calibrate them.
+        No evaluator verdicts yet. Run some traces with evaluators enabled, then come back to
+        calibrate them. LLM judges only run once your workspace has an OpenRouter key
+        (<a href="/settings/llm" className="text-signal hover:underline">Settings → LLM key</a>) —
+        without one, only the structural evaluators produce verdicts.
       </div>
     );
 

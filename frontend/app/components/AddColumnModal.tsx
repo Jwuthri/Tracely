@@ -256,6 +256,9 @@ export function AddColumnModal({
   const [aiOpen, setAiOpen] = useState(false);
   const [aiText, setAiText] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
+  // Whether the workspace has an OpenRouter key. The AI-generate path (and every LLM judge the
+  // modal creates) runs on it exclusively; null = probe still in flight, treat as configured.
+  const [hasLlmKey, setHasLlmKey] = useState<boolean | null>(null);
   // Library + model choices + existing evaluators (for depends_on)
   const [templates, setTemplates] = useState<EvaluatorTemplate[] | null>(null);
   const [judgeModels, setJudgeModels] = useState<JudgeModels | null>(null);
@@ -272,6 +275,10 @@ export function AddColumnModal({
     setTemplates(null);
     setAllEvaluators(null);
     void listEvaluators().then(setAllEvaluators).catch(() => setAllEvaluators([]));
+    void fetch("/api/project/llm-key", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setHasLlmKey(d ? Boolean(d.configured) : null))
+      .catch(() => setHasLlmKey(null));
     if (judgeModels === null || judgeModels.models.length === 0) {
       void listJudgeModels().then(setJudgeModels).catch(() => {});
     }
@@ -530,6 +537,16 @@ export function AddColumnModal({
                 </button>
               </div>
 
+              {aiOpen && hasLlmKey === false && (
+                <p className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-[12.5px] text-warn">
+                  AI generation (and every LLM judge) runs on your workspace&apos;s own OpenRouter
+                  key —{" "}
+                  <a href="/settings/llm" className="underline underline-offset-2">
+                    add one in Settings
+                  </a>{" "}
+                  first. Structural evaluators work without it.
+                </p>
+              )}
               {aiOpen && (
                 <div className="space-y-3 rounded-lg border border-t_think/20 bg-ink-900/60 p-4">
                   <label className="block text-[10.5px] font-medium uppercase tracking-wider text-fg-faint">Describe your metric</label>

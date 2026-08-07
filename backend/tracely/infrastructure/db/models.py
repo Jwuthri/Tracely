@@ -11,6 +11,7 @@ from datetime import datetime
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -57,11 +58,39 @@ class Project(Base):
     # This workspace's own OpenRouter key (Fernet-encrypted, see infrastructure/llm/provider.py),
     # used for every LLM eval call instead of the server-wide OPENROUTER_API_KEY. NULL = server key.
     openrouter_api_key_encrypted: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Hosted-cloud billing (migration 0021). `free | pro | unlimited` — `unlimited` is for
+    # operator workspaces (set via SQL) and is never written by webhooks. Both defaults (Python +
+    # server) so none of the Project-creation sites need to name the column.
+    plan: Mapped[str] = mapped_column(String(16), default="free", server_default="free")
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    subscription_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     ingest_keys: Mapped[list["IngestKey"]] = relationship(back_populates="project")
     agents: Mapped[list["Agent"]] = relationship(back_populates="project")
     memberships: Mapped[list["Membership"]] = relationship(back_populates="project")
+
+
+class UsageCounter(Base):
+    """One row per (project, UTC calendar month): how many externally-ingested traces landed.
+
+    Written by the worker's counting hook (`services/quota_service.py`), read by the OTLP edge
+    gate and the billing usage endpoint. Deliberately NOT part of the project data wipe — the
+    wipe clears trace-derived product data, and clearing this would make it a self-serve monthly
+    quota reset.
+    """
+
+    __tablename__ = "usage_counters"
+
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    period: Mapped[str] = mapped_column(String(7), primary_key=True)  # "YYYY-MM", UTC
+    traces: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class IngestKey(Base):

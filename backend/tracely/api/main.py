@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from tracely.api.routers import (
     admin,
     analytics,
+    billing,
     cases,
     calibration,
     clusters,
@@ -154,6 +155,9 @@ app.include_router(calibration.router)
 app.include_router(monitors.router)
 app.include_router(share.router)
 app.include_router(admin.router)
+# Always mounted, even for self-hosters: /api/billing/usage answers `billing_enabled: false`
+# rather than 404ing the frontend's unconditional probe; the Stripe endpoints gate themselves.
+app.include_router(billing.router)
 
 # Auth: /auth/me + /auth/logout always; mode-specific endpoints gated by AUTH_MODE.
 app.include_router(auth_router.common_router)

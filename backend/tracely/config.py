@@ -68,6 +68,29 @@ class Settings(BaseSettings):
     # (`Project.openrouter_api_key_encrypted`). Only needed once a workspace sets its own key —
     # blank deployments (server-wide key only) are unaffected.
     secrets_encryption_key: str = ""
+    # Hosted-cloud hard gate: when true, the server-wide LLM/embedding credentials
+    # (OPENROUTER_API_KEY / LLM_JUDGE_API_KEY / OPENAI_API_KEY) never apply to ANY call — scoped
+    # or not. Every AI feature then runs exclusively on the workspace's own OpenRouter key
+    # (Settings → OpenRouter key), and a future code path that forgets `use_project_key()` fails
+    # closed (no LLM) instead of silently billing the operator. Self-host default: off, so a
+    # single-tenant deployment keeps using its server-wide keys exactly as before.
+    require_project_llm_key: bool = False
+
+    # ── hosted-cloud billing (all off by default — self-hosters are unaffected) ──
+    # Master switch: monthly trace quota enforcement + the Stripe endpoints + the billing UI.
+    billing_enabled: bool = False
+    # Monthly ingested-trace caps per plan. Counted per project, per UTC calendar month, over
+    # externally-POSTed OTLP traces only (Tracely's own recordings and emulated scenario turns
+    # never count). `unlimited` plan = no cap.
+    free_trace_limit: int = 20_000
+    pro_trace_limit: int = 1_000_000
+    # Stripe (subscription billing). Secret key + the Pro plan's monthly price id, plus the
+    # webhook signing secret — required whenever the secret key is set, because an unverified
+    # webhook endpoint would let anyone flip a workspace's plan with a curl.
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_pro: str = ""
+
     # Cap on OUTPUT tokens per judge/agent call. A judge emits a small structured verdict, so the
     # providers' 64k default is pure waste — and worse, OpenRouter reserves credit for the full
     # max_tokens UP FRONT, so an uncapped request fails with "requires more credits, you requested
@@ -237,6 +260,11 @@ class Settings(BaseSettings):
             raise ValueError(
                 "TRACELY_ENV=prod requires AUTH_MODE=local or clerk (dev mode has no human auth)"
             )
+        # A Stripe key without the webhook signing secret means the /api/billing/webhook endpoint
+        # cannot verify senders — anyone could POST a forged `checkout.session.completed` and
+        # upgrade themselves. Refuse to boot rather than run open.
+        if self.stripe_secret_key and not self.stripe_webhook_secret:
+            raise ValueError("STRIPE_SECRET_KEY is set but STRIPE_WEBHOOK_SECRET is empty")
         return self
 
     @property

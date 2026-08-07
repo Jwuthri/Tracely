@@ -198,6 +198,9 @@ async def test_wipe_clears_derived_data_but_keeps_config(client, sync_db, no_cli
                     human_verdict="PASS",
                 ),
                 models.Monitor(id=str(uuid4()), project_id=project_id, name="fail rate"),
+                # Looks trace-derived, must survive the wipe: it is the BILLING record, and
+                # wiping it would make Data → wipe a self-serve monthly quota reset.
+                models.UsageCounter(project_id=project_id, period="2026-08", traces=12345),
             ]
         )
         s.commit()
@@ -236,6 +239,8 @@ async def test_wipe_clears_derived_data_but_keeps_config(client, sync_db, no_cli
         assert len(list(s.execute(select(models.Monitor)).scalars())) == 1
         assert len(list(s.execute(select(models.IngestKey)).scalars())) > 0
         assert s.get(models.Project, project_id) is not None
+        # …and so does the billing record: a wipe is not a quota reset
+        assert s.get(models.UsageCounter, (project_id, "2026-08")).traces == 12345
 
 
 async def test_wipe_is_project_scoped_and_idempotent(client, sync_db, no_clickhouse):

@@ -5194,6 +5194,19 @@ wheels = [
 ]
 
 [[package]]
+name = "stripe"
+version = "15.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b0/e5/2dcf53bed6061f615d5cd03a89a311c2ca969a5b1e415d6fcfa2965ec0b6/stripe-15.4.0.tar.gz", hash = "sha256:f94c2780a7728c5fb49789e0fbb18e984267f93fa724e8400b31aebf36d01b1e", size = 1538270, upload-time = "2026-07-29T23:36:21.722Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/00/e1/3047b4e244cc78bb598b0d5fcab6632b8bf8a4d526f2e840c4f4de02c989/stripe-15.4.0-py3-none-any.whl", hash = "sha256:cb1b23253473c17fa8e8d9bd3b5e66bc1454089f904843ca92ac785d5bf0d4d9", size = 2197834, upload-time = "2026-07-29T23:36:19.802Z" },
+]
+
+[[package]]
 name = "structlog"
 version = "25.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5536,6 +5549,7 @@ dependencies = [
     { name = "pyjwt", extra = ["crypto"] },
     { name = "scikit-learn" },
     { name = "sqlalchemy" },
+    { name = "stripe" },
     { name = "structlog" },
     { name = "umap-learn" },
     { name = "uvicorn", extra = ["standard"] },
@@ -5568,6 +5582,7 @@ requires-dist = [
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.8" },
     { name = "scikit-learn", specifier = ">=1.4" },
     { name = "sqlalchemy", specifier = ">=2.0.30" },
+    { name = "stripe", specifier = ">=11" },
     { name = "structlog", specifier = ">=24.1" },
     { name = "umap-learn", specifier = ">=0.5.5" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
