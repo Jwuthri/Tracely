@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Mount-time effects fetch evaluator defs/costs + navigation — stub so the table renders offline.
 // `push` is hoisted so a test can assert the row-click navigation did (or didn't) fire.
@@ -164,6 +164,50 @@ describe("TraceTable State Δ columns", () => {
     render(<TraceTable conversations={[conv({ turnsData: [turnWith([plain])] })]} />);
     expect(await screen.findByText("Conversation")).toBeInTheDocument();
     expect(screen.queryByText("State Δ")).not.toBeInTheDocument();
+  });
+});
+
+// ── step-type filter ─────────────────────────────────────────────────────────
+// The Types menu writes `hiddenTypes` into the shared prefs key. It used to be a no-op on the
+// conversation Evals page: every span of a Tracely recording carries `tracely.internal.kind`, and
+// those spans were exempt — so the same menu filtered the Timeline tab and did nothing to the
+// Table tab, on the one page where every row is a recording.
+
+function evalStep(over: Partial<SpanOut> = {}): SpanOut {
+  return {
+    ...stateSpan({ metadata: { "tracely.internal.kind": "eval" } }),
+    span_id: "ev-1", step_name: "judge-group", type: "CHAIN",
+    ...over,
+  };
+}
+
+describe("TraceTable step-type filter", () => {
+  const setHiddenTypes = (types: string[]) =>
+    localStorage.setItem("tracely.traceTable.prefs", JSON.stringify({ hiddenTypes: types }));
+
+  afterEach(() => localStorage.clear());
+
+  it("hides a recording's steps too — the filter is not a no-op on the evals page", async () => {
+    setHiddenTypes(["CHAIN"]);
+    const spans = [
+      evalStep(),
+      evalStep({ span_id: "ev-2", step_name: "judge-call", type: "GENERATION" }),
+    ];
+    render(<TraceTable conversations={[conv({ turnsData: [turnWith(spans)] })]} />);
+
+    expect(await screen.findByText("judge-call")).toBeInTheDocument();   // GENERATION kept
+    expect(screen.queryByText("judge-group")).not.toBeInTheDocument();   // CHAIN filtered out
+  });
+
+  it("says so rather than rendering a blank turn when every type is hidden", async () => {
+    setHiddenTypes(["CHAIN"]);
+    render(<TraceTable conversations={[conv({ turnsData: [turnWith([evalStep()])] })]} />);
+    expect(await screen.findByText(/All step types hidden/i)).toBeInTheDocument();
+  });
+
+  it("shows every step when nothing is hidden", async () => {
+    render(<TraceTable conversations={[conv({ turnsData: [turnWith([evalStep()])] })]} />);
+    expect(await screen.findByText("judge-group")).toBeInTheDocument();
   });
 });
 

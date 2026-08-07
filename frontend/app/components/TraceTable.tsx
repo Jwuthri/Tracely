@@ -1163,12 +1163,12 @@ function DataRow({
 // memo: a turn's step rows depend only on (turn, spans, cols, hiddenTypes) — all referentially stable
 // across unrelated parent re-renders (busy/prefs/another thread expanding), so they skip re-rendering.
 const SpanRows = memo(function SpanRows({ turn, spans, cols, hiddenTypes }: { turn: FullTurn; spans: SpanOut[]; cols: Col[]; hiddenTypes: Set<string> }) {
-  // The type filter exists to hide the CHAIN noise some frameworks emit around real work. Every
-  // span of a Tracely recording IS a CHAIN, so that preference — set once, on a trace, months ago —
-  // silently blanked the whole evals view. Recording rows opt out of it.
-  const visible = sortSpans(spans).filter(
-    (s) => s.metadata?.["tracely.internal.kind"] || !hiddenTypes.has(normalizeType(s.type)),
-  );
+  // Applies to every step, recordings included. Tracely's own eval/sim spans used to opt out —
+  // which made the Types filter a no-op on the conversation Evals page while the Timeline tab
+  // (Waterfall) filtered them normally, so the same menu did different things in the two tabs.
+  // The opt-out was there because a stale "hide CHAIN" pref blanked the view with no explanation;
+  // the count badge on the Types button plus its Reset say so now, and the empty row below names it.
+  const visible = sortSpans(spans).filter((s) => !hiddenTypes.has(normalizeType(s.type)));
   if (visible.length === 0) {
     return <EmptyTr cols={cols} text={spans.length ? "All step types hidden." : "No steps."} />;
   }
