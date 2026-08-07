@@ -296,7 +296,7 @@ Signature touches: **`[ID]` copy chips** (long ids never shown raw), the **⌘K 
 
 ## ⚠️ Honest limitations
 
-- 🔌 **Replay bridge covers tools, not yet the auto-instrumented LLM call.** `@observe(as_type="tool")`-decorated tools are now **transparently hermetic**: under `with tracely.fixtures(bundle):` the decorator serves the recorded output (or raises `ToolError`) instead of running — no `call_tool` rewrite. So an agent that decorates its tools (e.g. via `observed_tools()`) replays its tool side deterministically. **Still open:** the LLM call in a pure `instrument="auto"` agent is monkeypatch-*observed*, not intercepted, so it hits the real model in replay — use `call_llm` or the `wrap_openai`/`wrap_anthropic` drop-in for a fully-hermetic LLM side.
+- 🔌 **Replay bridge: tools AND the two big providers' LLM calls are hermetic; other providers fall back to live.** `@observe(as_type="tool")`-decorated tools are **transparently hermetic**: under `with tracely.fixtures(bundle):` the decorator serves the recorded output (or raises `ToolError`) instead of running — no `call_tool` rewrite. On the LLM side, `fixtures()` class-patches **OpenAI `chat.completions`** and **Anthropic `messages`**, so `instrument="auto"` and drop-in (`wrap_openai`/`wrap_anthropic`) agents are served recorded completions and never hit the network. Gemini/Mistral/Bedrock direct calls aren't patched yet — use `call_llm` there for hermetic replay.
 - ⏱️ **Latency/cost ≈ 0 in hermetic replay** — the soft delta gates are most meaningful for live cases / instrumented token usage; in pure replay the comparison is informational.
 - 📊 **Version attribution scaffolding is unsurfaced** — `agent_versions` is content-hashed and `EvaluationCase.agent_version_first_failed` is set at promote, but no UI shows "v12 introduced this regression". Cheap follow-up, real moat.
 - 🛟 **Backups need an operator action** — Postgres + ClickHouse snapshots are a one-click toggle in your provider's UI (see [`DEPLOY.md`](DEPLOY.md)); nothing in Tracely takes them for you.
@@ -308,7 +308,7 @@ Signature touches: **`[ID]` copy chips** (long ids never shown raw), the **⌘K 
 The strategic plan ("honest gate, visible moat, trustworthy evals") shipped — gate honesty + judge-in-gate + calibration are live. The remaining moves:
 
 **Near-term**
-1. **Finish the replay bridge on the LLM side** — the tool side is done (`@observe(as_type="tool")` now consults `tracely.fixtures()` transparently). Next: make the `wrap_openai`/`wrap_anthropic` drop-in clients serve recorded completions in replay, so a drop-in agent is fully hermetic end-to-end.
+1. **Extend the replay bridge to the remaining providers** — OpenAI + Anthropic (auto-instrument *and* drop-in) already serve recorded completions in replay; add Gemini/Mistral/Bedrock patching so every drop-in agent is hermetic end-to-end.
 2. **Surface agent-version attribution** — the scaffolding exists; show "v12 (prompt edit, git a1b2c3) introduced cluster #4" on case + cluster pages.
 3. **SDK auth-aware ingest in prod** — first-party Clerk org → ingest key bootstrap so SaaS users don't have to provision keys by hand.
 
@@ -382,9 +382,9 @@ Tracely/
 │   └── log_config.py                   # structlog: JSON in prod, console in dev
 ├── migrations/versions/                # Alembic — 0001 baseline … 0013 score_annotations
 ├── workers/tracely_workers/            # thin Celery runtime (entrypoint only)
-├── sdk/tracely_sdk/                    # OpenTelemetry SDK + `tracely` CLI (`gate` / `replay`)
-│   ├── __init__.py                     #   init/agent/observe/trace/call_tool/call_llm/fixtures/Conversation
-│   └── examples/                       #   16 examples: auto_*/dropin_* per provider, multi-turn + 2 agents
+├── sdk/tracely_sdk/                    # OpenTelemetry SDK + `tracely` CLI (`simulate` / `gate` / `replay`)
+│   ├── __init__.py                     #   init/agent/observe/trace/call_tool/call_llm/fixtures
+│   └── examples/                       #   25 examples: auto_*/dropin_* per provider + harness + agent SDK
 ├── frontend/app/                       # Next.js 15 / React 19 — server components, no UI libs
 │   ├── (app)/                          #   authed dashboard shell (Sidebar + error.tsx + loading.tsx)
 │   │   ├── traces · clusters · cases · gates · trends · calibration · settings · sessions

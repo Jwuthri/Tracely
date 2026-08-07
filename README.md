@@ -138,10 +138,16 @@ make demo          # populate the WHOLE product: traces + clusters + cases + gat
 make test          # backend unit tests (no infra, ~6s)
 ```
 
-### Deploy
+### Deploy your own (Railway, ~15 minutes)
 
-A pre-defined Railway deployment for the whole stack lives in
-[`deploy/railway/`](deploy/railway/README.md) — see [DEPLOY.md](DEPLOY.md) for the runbook.
+Don't want to run servers by hand? The whole stack — API, worker, UI, Postgres, ClickHouse, Redis,
+MinIO — deploys to [Railway](https://railway.com) from the checked-in configs: four one-click
+database templates plus three services pointed at this repo, each with a config-as-code file that
+carries its Dockerfile, start command, health check and migrations. The step-by-step walkthrough is
+[`deploy/railway/README.md`](deploy/railway/README.md) (copy-paste env included:
+[`.env.railway.example`](deploy/railway/.env.railway.example)); the production-hardening runbook
+(auth guards, backups, worker pool, post-deploy checks) is
+[`guides/DEPLOY.md`](guides/DEPLOY.md).
 
 ---
 
@@ -162,7 +168,7 @@ tracely.init(
     api_key="tracely_dev_key",          # an ingest key
     service_name="support-agent",
     env="prod",                         # prod | staging | ci | dev — the gating axis
-    instrument="auto",                  # activate every importable provider instrumentor
+    instrument="auto",                  # auto-detect openai / anthropic / google / mistral / langchain
 )
 
 with tracely.trace(agent="support-agent", conversation="conv-1", user="u_42"):
@@ -181,6 +187,32 @@ Any OTLP/HTTP exporter works too — point it at `POST {endpoint}/v1/traces` wit
 plus first-class hints: `tracely.agent.id` (auto-registered), `tracely.agent.version`,
 `tracely.conversation.id` / `turn.*` / `step.*`, `tracely.observation.type`, and `tracely.env`
 (`prod|staging|ci|dev` — the gating axis).
+
+### Declare your agents and record your state
+
+Two optional lines make a conversation self-describing. **The agent catalog** tells Tracely which
+agents, tools, prompts and models the conversation *has* (not just which ones fired) — it fills the
+**Conversation Agents** panel and is readable from judge prompts as `@LIST_AGENT`. **State deltas**
+record what each step wrote to your shared state, folded into the **Conversation State** drawer and
+the per-message **State Δ** column:
+
+```python
+AGENTS = [{
+    "name": "support",
+    "description": "front-line agent; routes billing questions",
+    "system_prompt": "You are the support agent for Acme…",   # free-form keys kept verbatim
+    "model": "gpt-5.2",
+    "tools": {"lookup_order": {"name": "lookup_order", "description": "order by id",
+                               "parameters": {"type": "object", "properties": {"order_id": {"type": "string"}}}}},
+}]
+
+with tracely.trace(agent="support", conversation="conv-1", agents=AGENTS):
+    ...
+    tracely.set_state({"cart": cart, "last_action": "add_to_cart"})   # inside any span/@observe
+```
+
+LangGraph users get state for free (node outputs are captured as deltas automatically), and
+non-Python services can push the catalog with `POST /api/sessions/{conversation_id}/config`.
 
 Full instrumentation guide → **[doc.tracely-studio.xyz](https://doc.tracely-studio.xyz)** · [`sdk/README.md`](sdk/README.md)
 

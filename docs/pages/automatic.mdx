@@ -18,10 +18,10 @@ Each extra pulls the matching auto-instrumentor:
 | Group | Extras |
 |---|---|
 | Providers | `openai` · `anthropic` · `google` · `mistral` · `bedrock` · `groq` |
-| Harnesses | `langchain` (covers LangGraph) · `llama-index` · `crewai` · `litellm` |
-| Agent SDKs | `openai-agents` · `google-adk` · `claude-agent-sdk` · `openrouter` |
+| Harnesses | `langchain` (covers LangGraph) · `llama-index` · `crewai` · `litellm` · `openrouter` (installs `langchain-openrouter`, traced via the `langchain` instrumentor) |
+| Agent SDKs | `openai-agents` · `google-adk` · `claude-agent-sdk` |
 | Drop-ins (no instrumentor) | `xai` · `openrouter-openai` · `google-genai` · `mistral-sdk` |
-| Everything | `all` — every provider, harness, and agent SDK above |
+| Everything | `all` — every instrumentor extra above (the four drop-in extras and `openllmetry` stay separate installs) |
 
 Tracely adopts the OpenTelemetry ecosystem rather than reinventing it: the extras install
 [OpenInference](https://github.com/Arize-ai/openinference) (Arize) packages by default;
@@ -43,13 +43,16 @@ tracely.init(
     api_key="tracely_dev_key",          # an ingest key
     service_name="weather-agent",
     env="prod",                         # prod | staging | ci | dev — the gating axis
-    instrument="auto",                  # activate every importable provider instrumentor
+    instrument="auto",                  # auto-detect openai / anthropic / google / mistral / langchain
 )
 ```
 
-`instrument` accepts `"auto"` (detect installed SDKs), an explicit list like `["openai",
-"anthropic"]`, or `False` (export only — use the manual API). `init()` is idempotent and safe to
-call once at startup.
+`instrument` accepts `"auto"` (probe for the five SDKs whose presence implies intent — **openai,
+anthropic, google, mistral, langchain** — and activate their instrumentors), an explicit list like
+`["openai", "langchain"]` or a single string, or `False` (export only — use the manual API).
+Everything else — `crewai`, `llama-index`, `litellm`, `bedrock`, `groq`, and the agent SDKs — is
+deliberately opt-in via the list: a router or boto3 being importable doesn't mean you want it
+traced. `init()` is idempotent and safe to call once at startup.
 
 ### Call your provider normally — no span code
 
@@ -118,8 +121,8 @@ with tracely.trace(agent="weather-agent", conversation="conv-1"):
 This yields a 4-span tree — `weather-agent` (AGENT) → `decide` (GENERATION) · `get_weather` (TOOL) ·
 `answer` (GENERATION) — all carrying the `agent`/`conversation` from the enclosing `trace()`.
 
-`as_type` ∈ `span` · `generation` · `agent` · `tool` · `chain` · `retriever` · `embedding` ·
-`guardrail` · … (`capture_input` / `capture_output` default `True`). See
+`as_type` ∈ `span` · `generation` · `agent` · `tool` · `chain` · `retriever` · `thinking` ·
+`embedding` · `guardrail` · … (`capture_input` / `capture_output` default `True`). See
 [`sdk/examples/auto_agent.py`](https://github.com/Jwuthri/Tracely/blob/master/sdk/examples/auto_agent.py).
 
 ## The layers compose
@@ -254,10 +257,14 @@ tracely.init(instrument=["litellm"])     # wires litellm.callbacks = ["otel"]
 
 ## Other harnesses — CrewAI & LlamaIndex
 
-Both have OpenInference instrumentors that `"auto"` picks up once installed:
+Both have OpenInference instrumentors. They are **not** part of `"auto"` — name them explicitly:
 
 ```bash
 pip install "tracely-ai[crewai]"        # or [llama-index]
+```
+
+```python
+tracely.init(instrument=["crewai"])     # or ["llama-index"]
 ```
 
 CrewAI crews trace as AGENT + TOOL spans per crew member; LlamaIndex query engines trace their

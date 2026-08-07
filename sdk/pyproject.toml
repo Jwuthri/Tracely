@@ -21,8 +21,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Jwuthri/Tracely"
-Documentation = "https://github.com/Jwuthri/Tracely/blob/master/sdk/README.md"
+Homepage = "https://tracely-studio.xyz"
+Documentation = "https://doc.tracely-studio.xyz"
 Source = "https://github.com/Jwuthri/Tracely"
 Issues = "https://github.com/Jwuthri/Tracely/issues"
 

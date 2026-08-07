@@ -100,6 +100,48 @@ Arbitrary tags on any span (`tracely.metadata.<key>`), surfaced in the span pane
 tracely.set_metadata(span, tenant="acme", prompt_version="v3", feature_flag="rag_v2")
 ```
 
+## The agent catalog — `trace(agents=…)` / `set_agents(...)`
+
+Tracing shows which agents *fired*; the catalog declares which agents (and tools, prompts, models)
+*exist*. It fills the **Conversation Agents** panel with your real setup and is readable from
+evaluator prompts as `@LIST_AGENT`:
+
+```python
+AGENTS = [
+    {
+        "name": "support",
+        "description": "front-line agent; routes billing questions",
+        "system_prompt": "You are the support agent for Acme…",   # free-form keys kept verbatim
+        "model": "gpt-5.2",
+        "tools": {
+            "lookup_order": {"name": "lookup_order", "description": "order by id",
+                             "parameters": {"type": "object", "properties": {"order_id": {"type": "string"}}}},
+        },
+    },
+]
+
+with tracely.trace(agent="support", conversation="conv-1", agents=AGENTS):
+    ...
+```
+
+Full shape, the HTTP alternative for non-Python services, and how the observed fallback works:
+[`set_agents` in the API reference](/api-reference#set_agentsspan-agents--the-agent-catalog).
+
+## Shared state — `set_state(...)`
+
+Record the state channels a step **wrote** (a LangGraph-style delta, a scratchpad update); the UI
+folds them into the **Conversation State** drawer and the per-message **State Δ** column:
+
+```python
+@tracely.observe(as_type="tool")
+def add_to_cart(item: str):
+    cart.append(item)
+    tracely.set_state({"cart": cart, "last_action": "add_to_cart"})
+```
+
+LangGraph needs no code — node outputs are captured as state deltas automatically. Details:
+[`set_state` in the API reference](/api-reference#set_statedelta-spannone--max_bytes4096--shared-state).
+
 ## Multimodal input
 
 Build content blocks — text + image + file — in one user message:

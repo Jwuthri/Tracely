@@ -114,5 +114,10 @@ endpoints. `mode: gate` switches it to grading CI traces you already emitted, an
 ## Configuration
 
 Flags or environment: `TRACELY_API`, `TRACELY_KEY`, `TRACELY_AGENT` (comma-separated for
-`simulate`), `TRACELY_GATE_ENV`, `TRACELY_WEB_URL`, `GITHUB_TOKEN`. `--dry-run` prints the GitHub
-calls instead of sending them; `--no-github` never touches GitHub even inside Actions.
+`simulate`; `--all` overrides it), `TRACELY_GATE_ENV`, `TRACELY_WEB_URL`, `GITHUB_TOKEN`. Outside
+GitHub Actions the git ref falls back to `GIT_REF`. `--dry-run` prints the GitHub calls instead of
+sending them; `--no-github` never touches GitHub even inside Actions.
+
+A `replay --cmd "…"` subprocess inherits `TRACELY_INPUT` (the case's recorded input) plus
+`TRACELY_API`, `TRACELY_KEY` and `TRACELY_ENV` — so the command can emit its trace without
+hardcoding the endpoint or key.

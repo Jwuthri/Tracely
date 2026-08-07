@@ -22,7 +22,7 @@ call initializes with defaults.
 | `api_key` | An ingest key, sent as `Authorization: Bearer …`. |
 | `service_name` | `service.name` on the OTel resource. |
 | `env` | `prod \| staging \| ci \| dev`, stamped on every span — the gating axis. |
-| `instrument` | `"auto"` (every importable provider instrumentor) · a list like `["openai", "langchain"]` · `False` (export only). |
+| `instrument` | `"auto"` (probe for **openai / anthropic / google / mistral / langchain** and activate what's installed) · a list like `["openai", "langchain"]` (honored as-is — how you opt into `crewai`, `llama-index`, `litellm`, `bedrock`, `groq` and the agent SDKs) · `False` (export only). |
 | `redact` | Scrub payloads before they leave the process — see below. |
 | `tracer_provider` | Attach to a provider the host app already owns instead of building one. |
 | `export_scopes` | Instrumentation-scope prefixes to export, e.g. `("my_app.agents",)`. |
@@ -59,7 +59,7 @@ tracely.init(
 
 ## Automatic instrumentation
 
-### `trace(agent=None, *, conversation=None, turn=None, turn_id=None, user=None, trace_name=None, env=None, agents=None, **metadata)`
+### `trace(agent=None, *, conversation=None, turn=None, turn_id=None, user=None, trace_name=None, env=None, agents=None, traceparent=None, **metadata)`
 
 A run context — a context manager **or** (sync/async) decorator. Sets `tracely.*` run hints once; a
 span processor stamps them onto **every** span started inside (auto-instrumentor spans included), so
@@ -70,12 +70,18 @@ the run's identity flows down with no per-span code. Sets context only (opens no
 `turn()` span helper — lands on **every** span of the turn, which is what the `turn_id` column groups
 on. `agents` declares the conversation's agent catalog (see `set_agents` below).
 
+`traceparent` continues a W3C trace context from an incoming request (the `traceparent` header):
+your spans join the caller's trace instead of starting a new one. This is how a served agent nests
+its internal spans under the turn span Tracely sends when [scenarios](/scenarios) drive it —
+`tracely.trace(traceparent=request.headers.get("traceparent"))` is the whole integration. Malformed
+values are logged and ignored, never raised.
+
 ### `observe(fn=None, *, name=None, as_type="span", capture_input=True, capture_output=True)`
 
 Decorator (`@observe` or `@observe(...)`) that turns any sync/async function into a span:
 args → `tracely.input`, return → `tracely.output`, latency, and exceptions → `level=ERROR`, captured
 automatically and auto-nested via OTel context. `as_type` (`span | generation | agent | tool | chain
-| retriever | embedding | guardrail | …`) → `tracely.observation.type`.
+| retriever | thinking | embedding | guardrail | …`) → `tracely.observation.type`.
 
 ### `run_in_thread(fn, *args, **kwargs)` → `Thread`
 
@@ -174,6 +180,7 @@ A turn marker (`tracely.turn.id`/`.index`) and a generic step (`tracely.step.nam
 | `set_usage(span, *, input_tokens=None, output_tokens=None, thinking_tokens=None, cached_tokens=None, cache_write_tokens=None)` | `gen_ai.usage.*` — `input_tokens` / `output_tokens` / `reasoning_tokens`, plus prompt-cache reads and writes. |
 | `set_metadata(span, **kv)` | `tracely.metadata.<key>` — arbitrary tags (scalars kept; others JSON-encoded). |
 | `set_agents(span, agents)` | `tracely.agents` — the conversation's agent catalog (below). |
+| `set_state(delta, span=None, *, max_bytes=4096)` | `tracely.state.<channel>` — the state channels this step wrote (below). |
 | `error(span, message="")` | Marks the span `StatusCode.ERROR` → `level=ERROR`. The failure signal. |
 | `flush()` | Force-flush the OTLP exporter — call before the process exits. |
 
@@ -182,10 +189,23 @@ A turn marker (`tracely.turn.id`/`.index`) and a generic step (`tracely.step.nam
 Declare which agents and tools *exist* in this conversation, not just which ones fired. It powers the
 Conversation Agents panel and is addressable from evaluator prompts as `@LIST_AGENT`.
 
+`name`, `description` and `tools` are interpreted; **every other key rides along verbatim** and
+renders as an expandable row in the panel — `system_prompt`, `model`, `guardrails`, `config`,
+whatever describes your setup. Declaring is the only way Tracely can know things tracing can't see
+(a guardrail that never fired, the prompt of an agent that wasn't invoked this turn).
+
 ```python
 agents = [
-    {"name": "billing", "description": "refunds and charges",
-     "tools": {"get_charges": {"name": "get_charges", "description": "…", "parameters": {…}}}},
+    {
+        "name": "billing",
+        "description": "refunds and charges",
+        "system_prompt": "You are the billing specialist…",   # free-form — kept verbatim
+        "model": "gpt-5.2",
+        "tools": {
+            "get_charges": {"name": "get_charges", "description": "list charges",
+                            "parameters": {"type": "object", "properties": {"user_id": {"type": "string"}}}},
+        },
+    },
 ]
 
 with tracely.trace(agent="router", conversation="c1", agents=agents):   # flows onto every span
@@ -193,7 +213,41 @@ with tracely.trace(agent="router", conversation="c1", agents=agents):   # flows 
 ```
 
 Prefer the `trace(agents=…)` form, which stamps it across the run. `set_agents(span, …)` is for
-pinning the catalog to one specific span (usually the root).
+pinning the catalog to one specific span (usually the root). `tools` may also be a plain list of
+`{name, description, parameters}` objects.
+
+Not on Python, or want to declare without touching instrumentation? The same catalog can be pushed
+per conversation over HTTP:
+
+```bash
+curl -X POST "$TRACELY_API/api/sessions/<conversation-id>/config" \
+  -H "Authorization: Bearer $TRACELY_KEY" -H "content-type: application/json" \
+  -d '{"agents": [{"name": "billing", "description": "refunds and charges"}]}'
+```
+
+Without any declaration the panel still works — Tracely derives an **observed** view from the spans
+themselves (which agents ran, which tools executed, the system prompt found in the messages). A
+declared catalog wins outright when present.
+
+### `set_state(delta, span=None, *, max_bytes=4096)` — shared state
+
+Record the state channels a step **wrote** — a LangGraph-style state delta, a scratchpad update, a
+memory write. Each key becomes its own `tracely.state.<channel>` attribute on the current span (or
+`span` if given); values are JSON-encoded and truncated at `max_bytes` per channel. The UI folds the
+deltas in span order into the **Conversation State** panel and the per-message **State Δ** column.
+
+```python
+@tracely.observe(as_type="tool")
+def add_to_cart(item: str):
+    cart.append(item)
+    tracely.set_state({"cart": cart, "last_action": "add_to_cart"})   # what this step changed
+```
+
+Record the **delta**, never a full snapshot — Tracely tracks add/update/unchanged per channel by
+comparing consecutive writes. **LangGraph needs no code at all:** a node's return value *is* its
+channel update, and ingest marks those spans (`tracely.state_source=output`) so the UI reads them as
+deltas automatically. `set_state` outside any recording span warns and drops (call it inside an
+`@observe`d function or an open span helper).
 
 ## Hermetic replay
 
@@ -206,10 +260,20 @@ agent=None)`, `with fixtures(bundle): …`, `fixture(kind, name)`, and the `Tool
 Beyond standard `gen_ai.*` / OpenInference attributes, these `tracely.*` hints become **indexed
 columns** on the span row:
 
-`tracely.agent.id` · `.version` · `.role` · `tracely.user.id` · `tracely.trace.name` ·
-`tracely.conversation.id` · `tracely.turn.id` / `.index` · `tracely.step.id` / `.name` ·
-`tracely.observation.type` · `tracely.tool_calls` · `tracely.handoff.caller_agent_id` /
-`.callee_agent_id` · `tracely.edge.type` · the `gen_ai.request.*` sampling params · `tracely.env`.
+`tracely.agent.id` · `.version` · `.run_id` · `.role` · `tracely.user.id` · `tracely.trace.name` ·
+`tracely.conversation.id` (also read from `session.id`) · `tracely.turn.id` / `.index` ·
+`tracely.step.id` / `.name` · `tracely.observation.type` · `tracely.tool_calls` ·
+`tracely.handoff.caller_agent_id` / `.callee_agent_id` · `tracely.edge.type` · the
+`gen_ai.request.*` sampling params · `gen_ai.usage.*` token counts · `gen_ai.tool.name` /
+`gen_ai.operation.name` · `tracely.env`.
+
+Carried through as span metadata (not columns) and read by specific features:
+`tracely.agents` (the declared agent catalog — stripped into the registry at ingest) ·
+`tracely.state.<channel>` (the state panel) · `tracely.metadata.<key>` (your tags) ·
+`tracely.replay.fixture` (marks a hermetic-replay span as served-from-fixture).
+
+If you emit **raw OTLP from another language**, these are the attribute names to set — POST
+protobuf-JSON to `{endpoint}/v1/traces` with `Authorization: Bearer <ingest key>`.
 
 Agent slug + version are auto-registered into the Postgres registry on ingest. Input/output are
 stored in dedicated columns (and shown in Input/Output tabs), so they're **excluded** from the

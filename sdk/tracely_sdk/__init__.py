@@ -452,9 +452,18 @@ def _activate_one(name: str) -> bool:
             return True
         except Exception as e:  # a broken/older instrumentor shouldn't crash startup
             log.warning("tracely: failed to instrument %s via %s: %s", name, module, e)
+    if name not in _INSTRUMENTORS:
+        # An unknown target was a silent no-op — `instrument=["openrouter"]` traced nothing and
+        # never said so. (OpenRouter rides through the langchain instrumentor.)
+        log.warning(
+            "tracely: unknown instrument target %r — known targets: %s",
+            name,
+            ", ".join(sorted([*_INSTRUMENTORS, "litellm"])),
+        )
+        return False
     if _module_available(_PROVIDER_SDK.get(name, name)):  # SDK present but instrumentor missing
         log.warning(
-            'tracely: %s is installed but no instrumentor found — pip install "tracely-sdk[%s]"',
+            'tracely: %s is installed but no instrumentor found — pip install "tracely-ai[%s]"',
             name,
             name,
         )
@@ -713,7 +722,7 @@ def observe(
 ) -> Callable:
     """Wrap any sync/async function as a span (R8): args→input, return→output, latency, and
     exceptions (→ level=ERROR) captured automatically; auto-nests via OTel context — no manual
-    parent wiring. `as_type` (span | generation | agent | tool | chain | retriever | embedding |
+    parent wiring. `as_type` (span | generation | agent | tool | chain | retriever | thinking | embedding |
     guardrail | …) becomes `tracely.observation.type`. Usable as `@observe` or `@observe(...)`."""
 
     def decorate(func: Callable) -> Callable:

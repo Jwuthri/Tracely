@@ -15,7 +15,7 @@ via `example=os.path.basename(__file__)`, so each span carries `tracely.metadata
 
 ```bash
 pip install "tracely-ai[<extra>]"     # the extra named in each file's header
-export TRACELY_API=http://localhost:8000           # your Tracely API (default shown)
+export TRACELY_API=http://localhost:8000           # read by these example scripts (init() itself takes endpoint=)
 export OPENAI_API_KEY=sk-...                        # (or the provider's key)
 uv run python sdk/examples/<file>.py
 ```
@@ -55,8 +55,9 @@ uv run python sdk/examples/<file>.py
 | [`auto_llama_index.py`](auto_llama_index.py) | `["llama-index"]` | `[llama-index]` | `ReActAgent` over `FunctionTool`s |
 | [`auto_crewai.py`](auto_crewai.py) | `["crewai"]` | `[crewai]` | a `Crew` whose agent is equipped with the tools |
 
-> `instrument="auto"` activates whichever of these are importable; when a harness instrumentor (e.g.
-> LangChain) is present it owns the LLM spans and the provider instrumentors are skipped to avoid
+> Of these, `instrument="auto"` only auto-activates **langchain** — `litellm`, `llama-index` and
+> `crewai` are deliberately opt-in via the explicit list shown per file. When the LangChain
+> instrumentor is present it owns the LLM spans and the provider instrumentors are skipped to avoid
 > duplicate spans (override with an explicit list). See the docs [Automatic instrumentation](../../docs/pages/automatic.mdx) page.
 
 ## Agent frameworks — first-party SDKs (L1)

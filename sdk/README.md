@@ -38,8 +38,10 @@ with tracely.trace(agent="support-agent", conversation="conv-1", user="u_42"):
 def plan(goal): ...
 ```
 
-`instrument` is `"auto"` (every importable provider SDK), an explicit list (`["openai",
-"anthropic"]`), or `False`. The `tracely.trace()` hints flow onto **every** span inside it — including
+`instrument` is `"auto"` (probes for **openai / anthropic / google / mistral / langchain** and
+activates what's installed — everything else, e.g. `crewai`, `llama-index`, `litellm`, `bedrock`,
+is opt-in), an explicit list (`["openai", "anthropic"]`, honored as-is), or `False`. The
+`tracely.trace()` hints flow onto **every** span inside it — including
 the provider spans the instrumentor creates — via a custom `SpanProcessor`. Streaming token usage
 needs `stream_options={"include_usage": True}`.
 
@@ -114,17 +116,47 @@ tracely.flush()   # force-flush the exporter (call before the process exits)
 
 ### Annotating spans
 - `set_io(span, *, input=None, output=None)` → `tracely.input` / `tracely.output` (objects are JSON-encoded; message content is a `{role, content:[blocks]}` object or a content-block list).
-- `set_usage(span, *, input_tokens=None, output_tokens=None, thinking_tokens=None)` → `gen_ai.usage.input_tokens` / `output_tokens` / `reasoning_tokens`.
+- `set_usage(span, *, input_tokens=None, output_tokens=None, thinking_tokens=None, cached_tokens=None, cache_write_tokens=None)` → `gen_ai.usage.input_tokens` / `output_tokens` / `reasoning_tokens` / `cache_read_input_tokens` / `cache_creation_input_tokens`.
 - `set_metadata(span, **kv)` → `tracely.metadata.<key>` — arbitrary tags (e.g. prompt version, tenant), surfaced in the span's Metadata and searchable.
 - `set_state(delta, span=None, *, max_bytes=4096)` → `tracely.state.<channel>` — see [Shared state](#shared-state-langgraph-state-scratchpads-stores) below.
 - `error(span, message="")` → marks the span `StatusCode.ERROR` (→ `level=ERROR` in Tracely) — this is *the* failure-detection signal.
 - `flush()` → force-flush the OTLP exporter.
 
 ### What Tracely reads
-Standard `gen_ai.*` / OpenInference attributes, plus first-class hints that become **indexed columns** on the span row: `tracely.agent.id`/`.version`/`.role`, `tracely.user.id`, `tracely.trace.name`, `tracely.conversation.id`, `tracely.turn.id`/`.index`, `tracely.step.id`/`.name`, `tracely.observation.type`, `tracely.tool_calls`, `tracely.handoff.*` + `tracely.edge.type`, the `gen_ai.request.*` sampling params, and `tracely.env` (`prod|staging|ci|dev` — the gating axis). Agent slug + version are auto-registered into the Postgres registry on ingest.
+Standard `gen_ai.*` / OpenInference attributes, plus first-class hints that become **indexed columns** on the span row: `tracely.agent.id`/`.version`/`.run_id`/`.role`, `tracely.user.id`, `tracely.trace.name`, `tracely.conversation.id` (also read from `session.id`), `tracely.turn.id`/`.index`, `tracely.step.id`/`.name`, `tracely.observation.type`, `tracely.tool_calls`, `tracely.handoff.*` + `tracely.edge.type`, the `gen_ai.request.*` sampling params, `gen_ai.usage.*`, `gen_ai.tool.name`/`gen_ai.operation.name`, and `tracely.env` (`prod|staging|ci|dev` — the gating axis). Carried as metadata for specific features: `tracely.agents` (agent catalog), `tracely.state.<channel>` (state panel), `tracely.metadata.<key>` (tags). Agent slug + version are auto-registered into the Postgres registry on ingest.
 
 ### Declaring a conversation's agent catalog
-Pass `agents=[{name, description, tools:[...]}]` to `tracely.trace(...)` (or call `set_agents([...])`) to declare the agents/tools a conversation uses — emitted once as `tracely.agents`. The backend stores this per conversation; the UI's **Conversation Agents** panel renders it (with per-tool run counts) and the LLM judge can read it as `@LIST_AGENT`. Without it, Tracely still derives the agent view from the spans.
+
+Declare the agents and tools a conversation *has* — not just the ones that fired — and the
+**Conversation Agents** panel renders your actual setup: names, descriptions, system prompts,
+models, tool schemas, each tool annotated with how often it really executed. The LLM judge can read
+the same catalog as `@LIST_AGENT`.
+
+```python
+AGENTS = [
+    {
+        "name": "support",
+        "description": "front-line agent; routes billing questions",
+        "system_prompt": "You are the support agent for Acme…",   # free-form keys kept verbatim
+        "model": "gpt-5.2",
+        "tools": {
+            "lookup_order": {"name": "lookup_order", "description": "order by id",
+                             "parameters": {"type": "object", "properties": {"order_id": {"type": "string"}}}},
+        },
+    },
+    {"name": "billing", "description": "refunds and charges", "tools": {...}},
+]
+
+with tracely.trace(agent="support", conversation="conv-1", agents=AGENTS):   # stamped on every span
+    ...
+# or pin it to one span: tracely.set_agents(root_span, AGENTS)
+```
+
+Only `name` / `description` / `tools` are interpreted (`tools` is a dict keyed by tool name, or a
+plain list); **any other key** — `system_prompt`, `model`, `guardrails`, `config` — is stored and
+rendered verbatim. Non-Python services can push the same catalog with
+`POST /api/sessions/{conversation_id}/config` (`{"agents": [...]}`). Without a declaration, Tracely
+still derives an observed agent view from the spans; a declared catalog wins when present.
 
 ### Shared state (LangGraph `State`, scratchpads, stores)
 
@@ -181,7 +213,7 @@ tracely replay   <agent> (--entrypoint module:func | --cmd "…") [--live] [--gi
 
 Scenarios belong to an agent, so `simulate` gates one agent, a comma-separated subset, or — with `--all` — every agent that has at least one **enabled** scenario (an agent whose suite is switched off is skipped, not reported untested). Each agent gets its own gate run but they share one commit status and one PR comment, and the job fails if any agent does. `--timeout` budgets the whole command.
 
-All three **exit 0 (PASS) / 1 (FAIL) / 2 (no answer — timeout or unreachable API)** and, inside GitHub Actions (or with `--github`), post a **commit status + PR comment** with per-case results and soft warnings (latency/token deltas vs the last green gate). `--dry-run` prints the GitHub calls instead of sending; `--no-github` never touches GitHub. Config via flags or env (`TRACELY_API`, `TRACELY_KEY`, `TRACELY_AGENT`, `TRACELY_GATE_ENV`, `TRACELY_WEB_URL`, `GITHUB_TOKEN`). A reusable composite action lives at `.github/actions/tracely-gate/`.
+All three **exit 0 (PASS) / 1 (FAIL) / 2 (no answer — timeout, unreachable API, or a server-side ERROR run)** and, inside GitHub Actions (or with `--github`), post a **commit status + PR comment** with per-case results and soft warnings (latency/token deltas vs the last green gate). `--dry-run` prints the GitHub calls instead of sending; `--no-github` never touches GitHub. Config via flags or env (`TRACELY_API`, `TRACELY_KEY`, `TRACELY_AGENT`, `TRACELY_GATE_ENV`, `TRACELY_WEB_URL`, `GITHUB_TOKEN`; the git ref falls back to `GIT_REF` outside Actions). A `--cmd` subprocess inherits `TRACELY_INPUT` plus `TRACELY_API`/`TRACELY_KEY`/`TRACELY_ENV`, so it can emit traces without hardcoding the endpoint. A reusable composite action lives at `.github/actions/tracely-gate/`.
 
 ---
 

@@ -33,6 +33,19 @@ def run(user_input: str) -> str:
   gate sees the same failure condition. Faithful error-handling replay, for free.
 </Callout>
 
+## No rewrite needed: `@observe` tools and auto-instrumented LLM calls replay too
+
+The `call_tool`/`call_llm` seam is the fully-portable path, but most agents don't need a rewrite:
+
+- **Tools** — a function decorated `@tracely.observe(as_type="tool")` is transparently hermetic:
+  under fixtures it serves the recorded output (or re-raises the recorded failure as
+  `tracely.ToolError`) instead of running. Decorate your tools and the tool side replays as-is.
+- **LLM calls** — inside a `fixtures()` block Tracely class-patches **OpenAI `chat.completions`**
+  and **Anthropic `messages`**, so code that calls the SDK directly (under `instrument="auto"`, or
+  via the `wrap_openai` / `wrap_anthropic` drop-ins) is served the recorded completion —
+  reconstructed into a provider-shaped response object — and never hits the network. Other
+  providers' direct calls fall back to live in replay; use `call_llm` there.
+
 ## Activating fixtures manually
 
 `tracely replay` does this for you, but the primitive is public:

@@ -49,18 +49,19 @@ turn. If your service continues that context, **its own spans nest inside the gr
 conversation** — so the gate sees your tool calls, retrieval and sub-agents, not just the text you
 returned.
 
-Most OTel HTTP auto-instrumentation does this for free. By hand it is two lines:
+With the Tracely SDK it's one parameter — `trace()` accepts the header directly:
 
 ```python
-from opentelemetry import context as otel_context, propagate
-
-ctx = propagate.extract(dict(request.headers))
-token = otel_context.attach(ctx)
-try:
-    reply = run_my_agent(message)
-finally:
-    otel_context.detach(token)
+@app.post("/agent/chat")
+def chat(request: Request, body: ChatBody):
+    with tracely.trace(traceparent=request.headers.get("traceparent")):
+        return {"reply": run_my_agent(body.messages)}
 ```
+
+Most OTel HTTP auto-instrumentation (FastAPI/Flask/Express middleware) also does this for free.
+Hand-rolling with raw OpenTelemetry (`propagate.extract` + `context.attach`) works too, but the
+`traceparent=` form is the two lines minus the boilerplate — and it logs malformed headers instead
+of raising.
 
 <Callout type="warning">
   Without this, Tracely can still grade what your agent *said*, but it is blind to what your agent
