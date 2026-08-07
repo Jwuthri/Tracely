@@ -504,3 +504,25 @@ def test_a_bad_turn_index_does_not_take_the_batch_down():
     one span with a junk index used to cost every other span in the request."""
     e = _event({"gen_ai.operation.name": "chat", "tracely.turn.index": "not-a-number"})
     assert e["turn_index"] == 0
+
+
+def test_model_falls_back_to_the_invocation_parameters_blob():
+    """Found by scanning real ingested data: the OpenInference OpenAI instrumentor emits some
+    spans with NO `llm.model_name`, carrying the model only inside `llm.invocation_parameters`.
+    An empty model_id costs the Model column and every cost figure keyed off it."""
+    e = _event({
+        "openinference.span.kind": "LLM",
+        "llm.provider": "openai",
+        "llm.invocation_parameters": '{"model": "gpt-4o-mini"}',
+    })
+    assert e["type"] == "GENERATION"
+    assert e["model_id"] == "gpt-4o-mini"
+
+
+def test_an_explicit_model_still_wins_over_the_blob():
+    e = _event({
+        "openinference.span.kind": "LLM",
+        "llm.model_name": "gpt-4o",
+        "llm.invocation_parameters": '{"model": "gpt-4o-mini"}',
+    })
+    assert e["model_id"] == "gpt-4o"

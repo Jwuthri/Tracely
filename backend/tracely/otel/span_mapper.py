@@ -21,7 +21,12 @@ from tracely.otel.messages import _as_obj, _normalize_parsed
 from tracely.otel.span_events import events_io, exception_text
 from tracely.otel.tool_enrichment import _tool_call_names
 from tracely.otel.types import EMBEDDING, GENERATION, TOOL, map_observation_type
-from tracely.otel.usage import _completion_start, _model_parameters, _usage
+from tracely.otel.usage import (
+    _completion_start,
+    _invocation_model,
+    _model_parameters,
+    _usage,
+)
 
 
 def _int_or(value: Any, default: int) -> int:
@@ -174,7 +179,11 @@ def _map_span(
                     "ai.model.id",  # Vercel AI SDK
                     "embedding.model_name",  # OpenInference EMBEDDING spans
                     "tracely.model",
-                ]) or ""
+                ])
+                # Last resort: OpenInference sometimes carries the model ONLY inside its
+                # invocation-parameters blob.
+                or _invocation_model(a)
+                or ""
             )
             if otype in (GENERATION, EMBEDDING)
             else ""

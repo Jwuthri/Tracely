@@ -72,6 +72,21 @@ def _usage(attrs: dict[str, Any]) -> dict[str, int]:
     return out
 
 
+def _invocation_model(attrs: dict[str, Any]) -> str:
+    """The model out of OpenInference's `llm.invocation_parameters` blob.
+
+    Some instrumentor code paths (the OpenAI one, on a plain `ChatCompletion`) emit no
+    `llm.model_name` at all and put the model only in here — leaving `model_id` empty, which
+    costs the Model column and every cost calculation that keys off it.
+    """
+    inv = _as_obj(attrs.get("llm.invocation_parameters"))
+    if isinstance(inv, dict):
+        model = inv.get("model")
+        if isinstance(model, str) and model.strip():
+            return model.strip()
+    return ""
+
+
 def _model_parameters(attrs: dict[str, Any]) -> str:
     """Sampling params as JSON. Merges OTel `gen_ai.request.*` with OpenInference's single-blob
     `llm.invocation_parameters` (JSON); scalar values only, to avoid dumping nested messages."""
