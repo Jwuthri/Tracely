@@ -293,10 +293,14 @@ async def upsert_clerk_principal(
             name=(f"Org {org_id}" if org_id else email),
             source="clerk",
             external_id=external_project,
-            # first account to touch the org (its creator, in practice) anchors the free pool
-            billing_owner_id=user.id,
         ),
     )
+    # The free-quota pool anchors to the org's admin (its creator, in Clerk), never to an
+    # invited MEMBER who merely opened Tracely first — otherwise ordering accidents couple an
+    # invitee's personal quota to someone else's org. Until an admin touches, NULL = the
+    # per-workspace fallback.
+    if project.billing_owner_id is None and role in ("OWNER", "ADMIN"):
+        project.billing_owner_id = user.id
     await _ensure_ingest_key(session, project.id)
     if project_created:
         await seed_recommended_evaluators(session, project.id)

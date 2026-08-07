@@ -83,6 +83,31 @@ async def test_clerk_personal_account_is_owner(session, clerk_mode):
     priv, _ = clerk_mode
     p = await resolve_principal(token=_token(priv, sub="solo"), x_project=None, session=session)
     assert p.role == "OWNER"  # no org → personal workspace owned by the user
+    proj = await session.get(models.Project, p.project_id)
+    assert proj.billing_owner_id == p.user_id  # personal workspace anchors the user's free pool
+
+
+async def test_clerk_billing_owner_anchors_to_admin_not_first_toucher(session, clerk_mode):
+    """An invited MEMBER opening Tracely before the org admin must NOT become the org's quota
+    anchor — that would couple their personal free pool to someone else's org by ordering
+    accident. The pool stays unanchored (per-workspace fallback) until an admin touches."""
+    priv, _ = clerk_mode
+    member = _token(priv, sub="user_member", org_id="org_9", org_role="org:member")
+    admin = _token(priv, sub="user_admin", org_id="org_9", org_role="org:admin")
+
+    p_member = await resolve_principal(token=member, x_project=None, session=session)
+    proj = await session.get(models.Project, p_member.project_id)
+    assert proj.billing_owner_id is None  # member touch anchors nothing
+
+    p_admin = await resolve_principal(token=admin, x_project=None, session=session)
+    assert p_admin.project_id == p_member.project_id
+    await session.refresh(proj)
+    assert proj.billing_owner_id == p_admin.user_id  # first ADMIN anchors…
+
+    other_admin = _token(priv, sub="user_admin2", org_id="org_9", org_role="org:admin")
+    await resolve_principal(token=other_admin, x_project=None, session=session)
+    await session.refresh(proj)
+    assert proj.billing_owner_id == p_admin.user_id  # …and later admins never re-anchor
 
 
 async def test_clerk_alg_confusion_rejected(session, clerk_mode):
