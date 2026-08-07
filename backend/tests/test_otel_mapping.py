@@ -75,8 +75,14 @@ def test_to_rows_shape() -> None:
 # ── PRD 12: ingest real instrumentor output (R5/R15/§8) ─────────────────────
 
 
-def _event(attrs: dict, *, status_code: int = 0, name: str = "span") -> dict:
-    """Build one span from a flat {key: value} attr dict and return its mapped event."""
+def _event(
+    attrs: dict, *, status_code: int = 0, name: str = "span", events: list | None = None
+) -> dict:
+    """Build one span from a flat {key: value} attr dict and return its mapped event.
+
+    `events` is a list of `(event_name, {attr: value})` — span events, which carry both recorded
+    exceptions and the OTel GenAI *event* message convention.
+    """
     span = Span(
         name=name,
         trace_id=b"\x01" * 16,
@@ -85,6 +91,11 @@ def _event(attrs: dict, *, status_code: int = 0, name: str = "span") -> dict:
         end_time_unix_nano=2_000,
     )
     span.attributes.extend([_kv(k, v) for k, v in attrs.items()])
+    for ev_name, ev_attrs in events or []:
+        ev = span.events.add()
+        ev.name = ev_name
+        ev.time_unix_nano = 1_500
+        ev.attributes.extend([_kv(k, v) for k, v in ev_attrs.items()])
     if status_code:
         span.status.code = status_code
     ss = ScopeSpans(scope=InstrumentationScope(name="instr"), spans=[span])
@@ -327,3 +338,169 @@ def test_a_recording_is_never_attributed_to_the_fallback_agent():
 
     assert events[0]["agent_slug"] == ""          # the recording stays agent-less
     assert events[1]["agent_slug"] != ""          # a real agent-less trace still gets the default
+
+
+# ── framework coverage: the conventions that were silently dropped ───────────
+# Each of these was verified end-to-end against a running stack by ingesting the payload the
+# framework actually emits and reading the trace back. They are the difference between "the
+# span arrived" and "the span is legible".
+
+
+def test_a_recorded_exception_is_a_failure_even_without_an_error_status():
+    """`level=ERROR` is the ONLY failure signal Tracely has — clustering, failure detection and
+    the gate all key off it. Instrumentors routinely call `record_exception()` without also
+    setting the span status, which used to render a thrown run as a clean green trace."""
+    e = _event(
+        {"gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "charge_card"},
+        events=[("exception", {
+            "exception.type": "TimeoutError",
+            "exception.message": "upstream did not respond in 30s",
+        })],
+    )
+    assert e["level"] == "ERROR"
+    assert e["status_message"] == "TimeoutError: upstream did not respond in 30s"
+
+
+def test_the_semconv_error_type_attribute_is_a_failure():
+    e = _event({"gen_ai.operation.name": "chat", "error.type": "RateLimitError"})
+    assert (e["level"], e["status_message"]) == ("ERROR", "RateLimitError")
+
+
+def test_an_explicit_ok_status_beats_a_handled_exception():
+    """A framework that caught the exception and marked the span OK said so deliberately —
+    flagging it would turn every retry-then-succeed into a failure."""
+    e = _event(
+        {"gen_ai.operation.name": "chat"},
+        status_code=1,
+        events=[("exception", {"exception.type": "ValueError", "exception.message": "retried"})],
+    )
+    assert e["level"] == "DEFAULT"
+
+
+def test_genai_event_convention_messages_are_read():
+    """`opentelemetry-instrumentation-openai-v2` — which the Tracely SDK itself activates as a
+    fallback — puts prompts and completions in span EVENTS, not attributes. Those spans used to
+    arrive with a model and a token count but no conversation at all."""
+    e = _event(
+        {"gen_ai.operation.name": "chat", "gen_ai.request.model": "gpt-4o"},
+        events=[
+            ("gen_ai.user.message", {"content": "what is 2+2?"}),
+            ("gen_ai.choice", {"message": json.dumps({"role": "assistant", "content": "4"})}),
+        ],
+    )
+    assert json.loads(e["input"])[0] == {"role": "user", "content": "what is 2+2?"}
+    assert json.loads(e["output"])[0]["content"] == "4"
+
+
+def test_attributes_win_over_events():
+    """Events only fill what the attributes left empty — never overwrite a real payload."""
+    e = _event(
+        {"gen_ai.operation.name": "chat", "input.value": "from attributes"},
+        events=[("gen_ai.user.message", {"content": "from events"})],
+    )
+    assert e["input"] == "from attributes"
+
+
+def test_vercel_ai_sdk_generation_maps():
+    """The dominant TS/JS agent stack names the operation rather than the type and emits no
+    gen_ai/OpenInference kind, so every span of a Next.js agent landed as an untyped SPAN."""
+    e = _event({
+        "ai.operationId": "ai.generateText",
+        "ai.model.id": "gpt-4o",
+        "ai.prompt": json.dumps({"prompt": "Summarize this ticket"}),
+        "ai.response.text": "The customer wants a refund.",
+        "ai.usage.promptTokens": 210,
+        "ai.usage.completionTokens": 30,
+    }, name="ai.generateText")
+    assert e["type"] == "GENERATION"
+    assert e["model_id"] == "gpt-4o"
+    assert e["usage_details"] == {"input": 210, "output": 30}
+    assert "Summarize this ticket" in (e["input"] or "")
+    assert e["output"] == "The customer wants a refund."
+
+
+def test_vercel_ai_sdk_tool_call_maps():
+    e = _event({
+        "ai.operationId": "ai.toolCall",
+        "ai.toolCall.name": "lookup_ticket",
+        "ai.toolCall.args": '{"id":"T-1"}',
+        "ai.toolCall.result": '{"status":"open"}',
+    }, name="ai.toolCall")
+    assert e["type"] == "TOOL"
+    assert e["name"] == "lookup_ticket"          # the tool, not the framework's span name
+    assert json.loads(e["input"]) == {"id": "T-1"}
+    assert json.loads(e["output"]) == {"status": "open"}
+
+
+def test_vercel_v5_token_key_names():
+    e = _event({
+        "ai.operationId": "ai.generateText", "ai.model.id": "gpt-4o",
+        "ai.usage.inputTokens": 11, "ai.usage.outputTokens": 22,
+    })
+    assert e["usage_details"] == {"input": 11, "output": 22}
+
+
+def test_litellm_usage_survives_python_literals_in_the_repr():
+    """LiteLLM's usage repr routinely carries `None`/`True`. The old quote-swap + json.loads
+    raised on those and dropped every token count for the span."""
+    e = _event({
+        "llm.openai.model": "gpt-4o-mini",
+        "llm.openai.usage": (
+            "{'prompt_tokens': 120, 'completion_tokens': 18, 'total_tokens': 138, "
+            "'completion_tokens_details': None, 'cached': False}"
+        ),
+    })
+    assert e["usage_details"] == {"input": 120, "output": 18}
+
+
+def test_gen_ai_agent_name_identifies_the_agent():
+    """Multi-agent harnesses that speak native semconv (OpenAI Agents, ADK, CrewAI, Pydantic AI)
+    name their agents here. Without it every one of their spans collapsed into `default` — the
+    dimension the product groups, gates and clusters on."""
+    e = _event({"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "billing-specialist"})
+    assert e["type"] == "AGENT"
+    assert e["agent_slug"] == "billing-specialist"
+
+
+def test_gen_ai_conversation_id_threads_a_run():
+    e = _event({"gen_ai.operation.name": "chat", "gen_ai.conversation.id": "conv-9"})
+    assert e["conversation_id"] == "conv-9"
+
+
+def test_langgraph_thread_id_threads_a_run():
+    """LangGraph's thread id rides in the same `metadata` blob the step columns come from."""
+    e = _event({
+        "openinference.span.kind": "CHAIN",
+        "metadata": json.dumps({"langgraph_node": "planner", "thread_id": "lg-1"}),
+    })
+    assert e["conversation_id"] == "lg-1"
+    assert e["step_name"] == "planner"
+
+
+def test_tracely_conversation_id_still_wins():
+    e = _event({
+        "tracely.conversation.id": "explicit",
+        "gen_ai.conversation.id": "semconv",
+        "metadata": json.dumps({"thread_id": "lg"}),
+    })
+    assert e["conversation_id"] == "explicit"
+
+
+def test_traceloop_decorator_spans_get_a_type_and_io():
+    """OpenLLMetry's @workflow/@task/@agent/@tool spans carry their payload under
+    `traceloop.entity.*` — they used to arrive typeless and empty."""
+    e = _event({
+        "traceloop.span.kind": "tool",
+        "traceloop.entity.input": '{"city":"SF"}',
+        "traceloop.entity.output": '{"tempF":64}',
+    })
+    assert e["type"] == "TOOL"
+    assert json.loads(e["input"]) == {"city": "SF"}
+    assert json.loads(e["output"]) == {"tempF": 64}
+
+
+def test_a_bad_turn_index_does_not_take_the_batch_down():
+    """The mapper runs inside the ingest task, which retries then drops the WHOLE payload — so
+    one span with a junk index used to cost every other span in the request."""
+    e = _event({"gen_ai.operation.name": "chat", "tracely.turn.index": "not-a-number"})
+    assert e["turn_index"] == 0

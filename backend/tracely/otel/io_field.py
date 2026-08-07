@@ -29,11 +29,22 @@ _IO_KEYS = frozenset({
     "input.value",
     "gen_ai.prompt",
     "input",
+    # OpenLLMetry decorators (`@workflow`/`@task`/`@agent`/`@tool`) put their payload here.
+    "traceloop.entity.input",
+    # Vercel AI SDK
+    "ai.prompt",
+    "ai.prompt.messages",
+    "ai.toolCall.args",
     "tracely.output",
     "langfuse.observation.output",
     "output.value",
     "gen_ai.completion",
     "output",
+    "traceloop.entity.output",
+    "ai.response.text",
+    "ai.response.object",
+    "ai.response.toolCalls",
+    "ai.toolCall.result",
 })
 
 # Prefixes/keys of flattened-or-structured message attributes — excluded from the lossless
@@ -114,8 +125,17 @@ def _io_field(attrs: dict[str, Any], direction: str) -> str | None:
                 if msgs:
                     return _to_str(_normalize_parsed(msgs))
     fallback = {
-        "input": ["input.value", "gen_ai.prompt", "input"],
-        "output": ["output.value", "gen_ai.completion", "output"],
+        # `ai.prompt.messages` before `ai.prompt`: the former is the resolved message array, the
+        # latter the raw call argument. `ai.toolCall.*` last — only tool spans carry them.
+        "input": [
+            "input.value", "gen_ai.prompt", "traceloop.entity.input",
+            "ai.prompt.messages", "ai.prompt", "ai.toolCall.args", "input",
+        ],
+        "output": [
+            "output.value", "gen_ai.completion", "traceloop.entity.output",
+            "ai.response.text", "ai.response.object", "ai.response.toolCalls",
+            "ai.toolCall.result", "output",
+        ],
     }[direction]
     raw = _first(attrs, fallback)
     if raw is None:

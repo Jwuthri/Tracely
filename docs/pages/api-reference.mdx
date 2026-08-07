@@ -273,7 +273,16 @@ Carried through as span metadata (not columns) and read by specific features:
 `tracely.replay.fixture` (marks a hermetic-replay span as served-from-fixture).
 
 If you emit **raw OTLP from another language**, these are the attribute names to set — POST
-protobuf-JSON to `{endpoint}/v1/traces` with `Authorization: Bearer <ingest key>`.
+protobuf-JSON to `{endpoint}/v1/traces` with `Authorization: Bearer <ingest key>`. (In OTLP/JSON,
+`traceId`/`spanId` are **base64**, per protobuf's canonical JSON mapping — hex ids decode to
+garbage without erroring. Any real OTel exporter handles this for you.)
+
+Beyond `tracely.*`, these third-party conventions are read natively, so most tracers need no
+Tracely-specific attributes at all: **OpenInference** (`openinference.span.kind`, `llm.*`), **OTel
+GenAI semconv** (`gen_ai.*`, including the span-event message form), **OpenLLMetry/Traceloop**
+(`gen_ai.prompt.<i>.*`, `traceloop.span.kind`, `traceloop.entity.*`), **Vercel AI SDK** (`ai.*`),
+and **LiteLLM** (`llm.openai.*`). Failure is read from an ERROR span status, a recorded
+`exception` event, or `error.type`.
 
 Agent slug + version are auto-registered into the Postgres registry on ingest. Input/output are
 stored in dedicated columns (and shown in Input/Output tabs), so they're **excluded** from the

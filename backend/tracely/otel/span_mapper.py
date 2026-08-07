@@ -16,10 +16,47 @@ from tracely.otel.io_field import (
     _is_msg_attr,
     _is_strippable_usage_for_non_llm,
 )
-from tracely.otel.messages import _as_obj
+from tracely.otel.attributes import _to_str as _stringify
+from tracely.otel.messages import _as_obj, _normalize_parsed
+from tracely.otel.span_events import events_io, exception_text
 from tracely.otel.tool_enrichment import _tool_call_names
 from tracely.otel.types import EMBEDDING, GENERATION, TOOL, map_observation_type
 from tracely.otel.usage import _completion_start, _model_parameters, _usage
+
+
+def _int_or(value: Any, default: int) -> int:
+    """A bad `turn.index` must not take the batch down with it: the mapper runs inside the ingest
+    task, which retries six times and then drops the WHOLE OTLP payload — so one span with a
+    non-numeric index used to cost every other span in the request."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _level_and_message(span: Any, a: dict[str, Any]) -> tuple[str, str]:
+    """A span's failure state. `level = 'ERROR'` is the ONLY failure signal Tracely has — every
+    detected failure, cluster and gate verdict keys off it — so it reads three sources, not one:
+
+    1. an explicit ERROR status,
+    2. a recorded `exception` event (what `record_exception()` writes; plenty of instrumentors
+       record one without also setting the status, which used to render as a green trace),
+    3. the semconv `error.type` attribute.
+
+    An explicit OK status wins over 2 and 3: a framework that caught and handled the exception
+    said so deliberately, and second-guessing it would flag every retry-then-succeed as a failure.
+    """
+    if span.status.code == 2:  # ERROR
+        return "ERROR", (span.status.message or exception_text(span) or "")
+    if span.status.code == 1:  # explicitly OK — handled
+        return "DEFAULT", ""
+    exc = exception_text(span)
+    if exc:
+        return "ERROR", exc
+    err_type = _first(a, ["error.type"])
+    if err_type:
+        return "ERROR", str(err_type)
+    return "DEFAULT", ""
 
 
 def _map_span(
@@ -35,11 +72,7 @@ def _map_span(
     span_id = span.span_id.hex()
     parent_span_id = span.parent_span_id.hex() if span.parent_span_id else ""
 
-    level = "DEFAULT"
-    status_message = ""
-    if span.status.code == 2:  # ERROR
-        level = "ERROR"
-        status_message = span.status.message or ""
+    level, status_message = _level_and_message(span, a)
 
     otype = map_observation_type(a)
     agent_run_id = str(_first(a, ["tracely.agent.run_id", "tracely.run.id"]) or trace_id)
@@ -47,6 +80,15 @@ def _map_span(
     # node name + step number to first-class step columns (R11; §13 LangGraph shape).
     lc_meta = _as_obj(a.get("metadata")) if "metadata" in a else None
     lc_meta = lc_meta if isinstance(lc_meta, dict) else {}
+
+    # Attributes first; GenAI *events* only fill what they left empty (see otel/span_events.py).
+    span_input, span_output = _io_field(a, "input"), _io_field(a, "output")
+    if span_input is None or span_output is None:
+        ev_in, ev_out = events_io(span)
+        if span_input is None and ev_in:
+            span_input = _stringify(_normalize_parsed(ev_in))
+        if span_output is None and ev_out:
+            span_output = _stringify(_normalize_parsed(ev_out))
 
     return {
         "project_id": project_id,
@@ -60,7 +102,7 @@ def _map_span(
         # span name (LlamaIndex uses `FunctionTool.acall`, etc.) — so the UI shows the tool
         # name and the tool_consistency eval can match "requested" against "executed".
         "name": (
-            str(_first(a, ["tool.name", "gen_ai.tool.name"]) or span.name or "")
+            str(_first(a, ["tool.name", "gen_ai.tool.name", "ai.toolCall.name"]) or span.name or "")
             if otype == TOOL
             else (span.name or "")
         ),
@@ -79,14 +121,29 @@ def _map_span(
         "session_id": str(
             _first(a, ["session.id", "tracely.session.id", "langfuse.session.id"]) or ""
         ),
-        "agent_slug": str(_first(a, ["tracely.agent.id", "langfuse.agent.id"]) or ""),
+        # `gen_ai.agent.*` is how every multi-agent harness that speaks native semconv (OpenAI
+        # Agents, ADK, CrewAI, Pydantic AI, Semantic Kernel) names its agents. Without it their
+        # spans all collapsed into the single fallback `default` agent, which is precisely the
+        # dimension the product groups, gates and clusters on.
+        "agent_slug": str(
+            _first(a, [
+                "tracely.agent.id", "langfuse.agent.id", "gen_ai.agent.name", "gen_ai.agent.id",
+            ]) or ""
+        ),
         "agent_version_ref": str(
             _first(a, ["tracely.agent.version", "tracely.agent.version_id"]) or ""
         ),
         "agent_run_id": agent_run_id,
-        "conversation_id": str(_first(a, ["tracely.conversation.id", "session.id"]) or ""),
+        # `gen_ai.conversation.id` is the semconv key; LangGraph's `thread_id` rides in the same
+        # `metadata` blob the step columns come from. Both are how a run becomes a *conversation*
+        # rather than an orphan trace, which is the unit the whole product reads.
+        "conversation_id": str(
+            _first(a, ["tracely.conversation.id", "gen_ai.conversation.id", "session.id"])
+            or lc_meta.get("thread_id")
+            or ""
+        ),
         "turn_id": str(_first(a, ["tracely.turn.id"]) or ""),
-        "turn_index": int(_first(a, ["tracely.turn.index"]) or 0),
+        "turn_index": _int_or(_first(a, ["tracely.turn.index"]), 0),
         "step_id": str(
             _first(a, ["tracely.step.id", "langgraph_step"]) or lc_meta.get("langgraph_step") or ""
         ),
@@ -114,6 +171,8 @@ def _map_span(
                     "gen_ai.request.model",
                     "llm.model_name",
                     "llm.openai.model",
+                    "ai.model.id",  # Vercel AI SDK
+                    "embedding.model_name",  # OpenInference EMBEDDING spans
                     "tracely.model",
                 ]) or ""
             )
@@ -123,8 +182,8 @@ def _map_span(
         "model_parameters": _model_parameters(a),
         "usage_details": _usage(a),
         "tool_call_names": _tool_call_names(a, otype),
-        "input": _io_field(a, "input"),
-        "output": _io_field(a, "output"),
+        "input": span_input,
+        "output": span_output,
         "metadata": {
             **{
                 k: _to_str(v) or ""

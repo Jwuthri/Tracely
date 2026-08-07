@@ -74,12 +74,34 @@ def map_observation_type(attrs: dict[str, Any]) -> str:
             "RETRIEVER": RETRIEVER,
             "EMBEDDING": EMBEDDING,
             "GUARDRAIL": GUARDRAIL,
+            "EVALUATOR": "EVALUATOR",
         }
         if str(oi).upper() in m:  # known kind; unknown kinds intentionally fall through (R15)
             return m[str(oi).upper()]
 
-    if _first(attrs, ["gen_ai.tool.name", "tool.name"]):
+    # Vercel AI SDK (`experimental_telemetry`) — the dominant TS/JS agent stack. It names the
+    # *operation* rather than the type, and emits no gen_ai/OpenInference kind at all, so without
+    # this every span of a Next.js agent lands as an untyped SPAN.
+    vercel = str(_first(attrs, ["ai.operationId", "operation.name"]) or "")
+    if vercel.startswith("ai."):
+        if vercel.startswith("ai.toolCall"):
+            return TOOL
+        if vercel.startswith("ai.embed"):
+            return EMBEDDING
+        return GENERATION
+
+    # OpenLLMetry decorator spans (`@workflow` / `@task` / `@agent` / `@tool`).
+    tl = str(attrs.get("traceloop.span.kind") or "").lower()
+    if tl:
+        m2 = {"workflow": CHAIN, "task": CHAIN, "agent": AGENT, "tool": TOOL}
+        if tl in m2:
+            return m2[tl]
+
+    if _first(attrs, ["gen_ai.tool.name", "tool.name", "ai.toolCall.name"]):
         return TOOL
-    if _first(attrs, ["gen_ai.request.model", "gen_ai.response.model", "llm.model_name", "llm.openai.model"]):
+    if _first(attrs, [
+        "gen_ai.request.model", "gen_ai.response.model", "llm.model_name", "llm.openai.model",
+        "ai.model.id",
+    ]):
         return GENERATION
     return SPAN

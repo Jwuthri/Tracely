@@ -271,6 +271,44 @@ CrewAI crews trace as AGENT + TOOL spans per crew member; LlamaIndex query engin
 retrieval and synthesis steps. The same de-dup rule as LangChain applies — if the harness owns the
 LLM call, don't also enable the provider instrumentor.
 
+## Anything else — TypeScript, Go, and frameworks with no Tracely extra
+
+The SDK is the ergonomic path, not the only one. **Tracely reads the conventions, not the
+libraries** — so any tracer that already speaks one of them lands as a first-class trace with no
+Tracely code at all. Point its OTLP exporter at `{endpoint}/v1/traces` with
+`Authorization: Bearer <ingest-key>` and you're done.
+
+| What you emit | Recognised as |
+|---|---|
+| **OpenInference** (`openinference.span.kind`, `llm.*`) | span type, model, tokens, messages, tool calls |
+| **OTel GenAI semconv** (`gen_ai.*`) — attributes *or* the event form (`gen_ai.user.message`, `gen_ai.choice`) | span type, model, tokens, messages, agent name, conversation id |
+| **OpenLLMetry / Traceloop** — flattened `gen_ai.prompt.<i>.*` and `@workflow`/`@task`/`@agent`/`@tool` decorators (`traceloop.*`) | span type, model, tokens, messages |
+| **Vercel AI SDK** `experimental_telemetry` (`ai.*`) | generations, tool calls with args + results, model, tokens |
+| **LiteLLM** callback blobs (`llm.openai.*`) | model, tokens, messages |
+
+That table is what makes the **TypeScript** story work today: turn on the Vercel AI SDK's
+`experimental_telemetry`, export OTLP to Tracely, and `ai.generateText` / `ai.toolCall` spans
+render as generations and tool calls — same conversation view, same evaluators, same gate.
+
+```ts
+const result = await generateText({
+  model: openai("gpt-4o"),
+  prompt: "Summarize this ticket",
+  experimental_telemetry: { isEnabled: true },
+});
+```
+
+Two attributes are worth adding by hand whichever stack you're on, because they are what turns a
+pile of spans into a *conversation*: `tracely.conversation.id` (or the semconv
+`gen_ai.conversation.id`) to thread turns together, and `tracely.agent.id` (or `gen_ai.agent.name`)
+to name the agent the gate and the failure clusters group by. Everything else is inferred.
+
+Failures need no special handling: an ERROR span status, a recorded `exception` event, or an
+`error.type` attribute all mark the span failed — which is the signal detection, clustering and
+the CI gate key off.
+
+The full attribute list is in the [API reference](/api-reference#what-tracely-reads).
+
 ## Redacting sensitive data
 
 For regulated data this is the adoption gate, so it's built in. Redaction happens **at export** —

@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any
 
 from tracely.otel.attributes import _first, _ns_to_dt
-from tracely.otel.messages import _as_obj
+from tracely.otel.messages import _as_obj, _parse_litellm_attr
 from tracely.otel.types import EMBEDDING, GENERATION
 
 
@@ -32,23 +32,28 @@ def _usage(attrs: dict[str, Any]) -> dict[str, int]:
     # into the attrs map first so the lookups below pick them up like a normal flat key/value.
     raw_usage = attrs.get("llm.openai.usage")
     if raw_usage and isinstance(raw_usage, str):
-        try:
-            parsed_usage = json.loads(raw_usage.replace("'", '"'))
-            if isinstance(parsed_usage, dict):
-                attrs = {**attrs, **{f"llm.openai.usage.{k}": v for k, v in parsed_usage.items()}}
-        except (ValueError, json.JSONDecodeError):
-            pass
+        # `_parse_litellm_attr`, not a quote-swap + json.loads: the repr routinely contains
+        # Python literals (`'completion_tokens_details': None`) that are not valid JSON, and the
+        # naive parse raised on them — silently dropping every token count for the span.
+        parsed_usage = _parse_litellm_attr(raw_usage)
+        if isinstance(parsed_usage, dict):
+            attrs = {**attrs, **{f"llm.openai.usage.{k}": v for k, v in parsed_usage.items()}}
     inp = _first(attrs, [
         "gen_ai.usage.input_tokens",
         "gen_ai.usage.prompt_tokens",
         "llm.token_count.prompt",
         "llm.openai.usage.prompt_tokens",
+        # Vercel AI SDK (v4 `promptTokens` / v5 `inputTokens`)
+        "ai.usage.promptTokens",
+        "ai.usage.inputTokens",
     ])
     outp = _first(attrs, [
         "gen_ai.usage.output_tokens",
         "gen_ai.usage.completion_tokens",
         "llm.token_count.completion",
         "llm.openai.usage.completion_tokens",
+        "ai.usage.completionTokens",
+        "ai.usage.outputTokens",
     ])
     total = _first(attrs, [
         "gen_ai.usage.total_tokens", "llm.token_count.total", "llm.openai.usage.total_tokens",
