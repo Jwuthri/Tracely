@@ -84,10 +84,9 @@ x-app-env: &app-env
   PRO_WORKSPACE_LIMIT: ${PRO_WORKSPACE_LIMIT:-10}
   FREE_SEAT_LIMIT: ${FREE_SEAT_LIMIT:-3}
   PRO_SEAT_LIMIT: ${PRO_SEAT_LIMIT:-10}
-  # How many company orgs one user may own — each org is its own quota pool, so uncapped org
-  # creation would be uncapped free quota.
-  FREE_ORG_LIMIT: ${FREE_ORG_LIMIT:-1}
-  PRO_ORG_LIMIT: ${PRO_ORG_LIMIT:-3}
+  # How many company orgs one user may belong to. One: an org is a quota pool, and a bigger
+  # account means a bigger org (more workspaces/seats), never a second one.
+  MAX_ORGANIZATIONS_PER_USER: ${MAX_ORGANIZATIONS_PER_USER:-1}
   # Multi-tenant signup: off means the first registrant claims the deployment and everyone else
   # arrives by invite (the safe self-host default).
   ALLOW_PUBLIC_SIGNUP: ${ALLOW_PUBLIC_SIGNUP:-false}

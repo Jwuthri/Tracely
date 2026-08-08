@@ -170,20 +170,24 @@ async def test_orgs_are_capped_or_the_whole_tier_is_theatre(client, hosted):
     assert me["can_create_organization"] is False
 
 
-async def test_owning_a_paid_org_lifts_the_org_cap(client, hosted, session, monkeypatch):
-    monkeypatch.setattr(settings, "pro_org_limit", 3)
+async def test_no_plan_buys_a_second_organization(client, hosted, session):
+    """The plan belongs to the org and buys workspaces, seats and quota INSIDE it. Paying — even
+    `unlimited` — must never turn into a second account."""
     await _signup(client, "founder@x.test")
     token = await _signup(client, "solo@x.test")
     first = await client.post(
         "/auth/organizations", json={"name": "One"}, headers=_bearer(token)
     )
-    org = await session.get(models.Organization, first.json()["id"])
-    org.plan = "pro"
-    await session.commit()
-
-    assert (
-        await client.post("/auth/organizations", json={"name": "Two"}, headers=_bearer(token))
-    ).status_code == 200
+    for plan in ("pro", "unlimited"):
+        org = await session.get(models.Organization, first.json()["id"])
+        org.plan = plan
+        await session.commit()
+        r = await client.post(
+            "/auth/organizations", json={"name": "Two"}, headers=_bearer(token)
+        )
+        assert r.status_code == 409, f"{plan} bought a second org"
+        me = (await client.get("/auth/me", headers=_bearer(token))).json()
+        assert me["can_create_organization"] is False
 
 
 async def test_self_hosted_org_creation_is_uncapped(client, monkeypatch):

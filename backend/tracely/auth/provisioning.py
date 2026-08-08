@@ -29,7 +29,6 @@ from tracely.config import settings
 from tracely.domain.billing import (
     KIND_COMPANY,
     KIND_PERSONAL,
-    PLAN_FREE,
     seat_limit_for,
     workspace_limit_for,
 )
@@ -201,36 +200,19 @@ async def can_create_organization(session: AsyncSession, user_id: str | None) ->
         return False
     if not settings.billing_enabled:
         return True
-    return await company_orgs_joined(session, user_id) < await _org_limit(session, user_id)
-
-
-async def _org_limit(session: AsyncSession, user_id: str) -> int:
-    """OWNING something paid lifts the cap — deliberately ownership here, not membership: a
-    customer who pays gets a self-serve path to a second org, while their teammates stay at one
-    apiece."""
-    paid = (
-        await session.execute(
-            select(func.count())
-            .select_from(OrgMembership)
-            .join(Organization, Organization.id == OrgMembership.organization_id)
-            .where(
-                OrgMembership.user_id == user_id,
-                OrgMembership.role == "OWNER",
-                Organization.plan != PLAN_FREE,
-            )
-        )
-    ).scalar_one()
-    return settings.pro_org_limit if paid else settings.free_org_limit
+    # No plan lifts this. The plan belongs to the ORG and buys workspaces, seats and quota
+    # inside it — a bigger account is a bigger org, never a second one.
+    return (
+        await company_orgs_joined(session, user_id) < settings.max_organizations_per_user
+    )
 
 
 async def assert_can_create_organization(session: AsyncSession, user_id: str) -> None:
     if not await can_create_organization(session, user_id):
-        joined = await company_orgs_joined(session, user_id)
-        limit = await _org_limit(session, user_id)
         raise AuthError(
             409,
-            f"you already belong to {joined} organization(s) and this plan allows {limit} — "
-            "leave one, or upgrade an organization you own",
+            "you already belong to an organization — add workspaces to it instead of creating "
+            "another",
         )
 
 
