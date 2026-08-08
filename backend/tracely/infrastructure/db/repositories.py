@@ -36,6 +36,7 @@ from tracely.infrastructure.db.models import (
     MetaAnalysis,
     Monitor,
     Organization,
+    OrgMembership,
     Project,
     RollingSummary,
     Scenario,
@@ -107,7 +108,38 @@ def project_siblings(s: Session, project_id: str) -> list[str]:
     )
 
 
-def project_delete(s: Session, project_id: str, *, usage_heir_id: str) -> dict[str, int]:
+def organization_projects(s: Session, organization_id: str) -> list[str]:
+    return list(
+        s.execute(
+            select(Project.id)
+            .where(Project.organization_id == organization_id)
+            .order_by(Project.created_at, Project.id)
+        ).scalars()
+    )
+
+
+def organization_delete(s: Session, organization_id: str) -> dict[str, int]:
+    """Delete the organization row itself. Its workspaces must already be gone — the caller
+    deletes each one through `project_delete` so ClickHouse events and S3 blobs go with it, which
+    a database cascade could never do."""
+    counts: dict[str, int] = {}
+    for key, stmt in (
+        ("organization_memberships",
+         delete(OrgMembership).where(OrgMembership.organization_id == organization_id)),
+        ("invitations",
+         delete(Invitation).where(Invitation.organization_id == organization_id)),
+        ("organizations", delete(Organization).where(Organization.id == organization_id)),
+    ):
+        n = int(s.execute(stmt).rowcount or 0)
+        if n:
+            counts[key] = n
+    s.commit()
+    return counts
+
+
+def project_delete(
+    s: Session, project_id: str, *, usage_heir_id: str | None
+) -> dict[str, int]:
     """Delete a workspace outright: its trace-derived data, its configuration, and the row itself.
 
     `project_data_delete` handles everything derived; this adds what that deliberately keeps —
@@ -117,14 +149,16 @@ def project_delete(s: Session, project_id: str, *, usage_heir_id: str) -> dict[s
     `usage_heir_id` is a surviving workspace in the same org that INHERITS this one's
     `usage_counters`. Without that, deleting a workspace would zero its share of the org's
     monthly quota, making "create workspace → burn quota → delete it" an unlimited free tier.
-    The caller guarantees an heir exists by refusing to delete an org's last workspace.
+    The caller guarantees an heir exists by refusing to delete an org's last workspace. `None` is
+    only for deleting the whole organization, where there is nothing left to charge.
     """
     counts = project_data_delete(s, project_id)  # commits its own half
 
-    for row in s.execute(
-        select(UsageCounter).where(UsageCounter.project_id == project_id)
-    ).scalars():
-        usage_increment(s, usage_heir_id, row.period, int(row.traces))
+    if usage_heir_id:
+        for row in s.execute(
+            select(UsageCounter).where(UsageCounter.project_id == project_id)
+        ).scalars():
+            usage_increment(s, usage_heir_id, row.period, int(row.traces))
 
     def wipe(key: str, stmt) -> None:
         n = int(s.execute(stmt).rowcount or 0)

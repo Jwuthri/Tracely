@@ -73,6 +73,13 @@ class CreateOrgIn(BaseModel):
     name: str = Field(min_length=1, max_length=256)
 
 
+class ConfirmIn(BaseModel):
+    """Destructive actions confirm with the exact name of what's being destroyed, never a fixed
+    word — muscle memory shouldn't be able to delete an organization."""
+
+    confirm: str = ""
+
+
 class MemberSummary(BaseModel):
     user_id: str
     email: str

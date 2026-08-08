@@ -1,3 +1,4 @@
+import { DeleteOrganizationPanel } from "@/app/components/DeleteOrganizationPanel";
 import { InviteManager } from "@/app/components/InviteManager";
 import { MembersList } from "@/app/components/MembersList";
 import { getAuthMode, getMe } from "@/app/lib/auth";
@@ -40,6 +41,10 @@ export default async function TeamPage() {
               Only owners and admins can invite teammates.
             </div>
           )}
+          <DeleteOrganizationPanel
+            name={me?.organization_name ?? "this organization"}
+            canDelete={me?.role === "OWNER"}
+          />
         </>
       )}
     </div>

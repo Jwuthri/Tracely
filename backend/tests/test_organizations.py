@@ -14,9 +14,33 @@ the free plan becomes unbounded:
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from tracely.config import settings
 from tracely.infrastructure.db import models
+from tracely.infrastructure.db.base import Base
+
+
+@pytest.fixture
+def sync_db():
+    """In-memory sync SQLite for the repository half of deletion."""
+    eng = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(
+        eng,
+        tables=[
+            models.Organization.__table__,
+            models.OrgMembership.__table__,
+            models.Invitation.__table__,
+            models.Project.__table__,
+            models.User.__table__,
+        ],
+    )
+    yield sessionmaker(eng)
+    eng.dispose()
 
 
 def _bearer(token: str) -> dict:
@@ -304,6 +328,108 @@ async def test_inviting_an_existing_member_is_refused(client, hosted):
         "/auth/invitations", json={"email": "teammate@x.test"}, headers=_bearer(token)
     )
     assert r.status_code == 409
+
+
+# ── deleting an organization ──────────────────────────────────────────────────
+
+
+def test_organization_delete_clears_members_and_invites(sync_db):
+    """The registry half, where it actually runs (the endpoint does its destructive work through
+    the sync session, so this is tested directly rather than over HTTP)."""
+    from tracely.infrastructure.db import repositories
+
+    with sync_db() as s:
+        s.add(models.Organization(id="o1", name="Acme", slug="acme", kind="company"))
+        s.add(models.OrgMembership(id="m1", organization_id="o1", user_id="u1", role="OWNER"))
+        s.add(models.OrgMembership(id="m2", organization_id="o1", user_id="u2", role="MEMBER"))
+        s.add(models.OrgMembership(id="m3", organization_id="o2", user_id="u1", role="OWNER"))
+        s.commit()
+
+        counts = repositories.organization_delete(s, "o1")
+        assert counts["organization_memberships"] == 2
+        assert counts["organizations"] == 1
+        assert s.get(models.Organization, "o1") is None
+        assert s.get(models.OrgMembership, "m3") is not None  # another org is untouched
+
+
+async def test_owner_can_delete_their_organization(client, hosted):
+    """The HTTP contract: the guards pass and the caller is handed somewhere to land."""
+    await _signup(client, "founder@x.test")
+    token = await _signup(client, "solo@x.test")
+    created = await client.post(
+        "/auth/organizations", json={"name": "Acme"}, headers=_bearer(token)
+    )
+    org_id = created.json()["id"]
+    me = (await client.get("/auth/me", headers=_bearer(token))).json()
+    inside = next(p["id"] for p in me["projects"] if p["organization_id"] == org_id)
+    h = {**_bearer(token), "X-Tracely-Project": inside}
+
+    r = await client.request(
+        "DELETE", "/auth/organizations", json={"confirm": "Acme"}, headers=h
+    )
+    assert r.status_code == 200, r.text
+    # A workspace outside the deleted org — the cookie is repointed at it, so the caller isn't
+    # left holding a dead id (which would 403 every request and bounce them to /login).
+    survivor = r.json()["switch_to"]
+    assert survivor and survivor != inside
+    assert survivor in {p["id"] for p in me["projects"] if p["organization_id"] != org_id}
+
+
+async def test_delete_requires_the_exact_name(client, hosted):
+    await _signup(client, "founder@x.test")
+    token = await _signup(client, "solo@x.test")
+    await client.post("/auth/organizations", json={"name": "Acme"}, headers=_bearer(token))
+    me = (await client.get("/auth/me", headers=_bearer(token))).json()
+    org = next(o for o in me["organizations"] if o["kind"] == "company")
+    inside = next(p["id"] for p in me["projects"] if p["organization_id"] == org["id"])
+    h = {**_bearer(token), "X-Tracely-Project": inside}
+
+    r = await client.request(
+        "DELETE", "/auth/organizations", json={"confirm": "DELETE"}, headers=h
+    )
+    assert r.status_code == 400  # a fixed word must not work — it's the name or nothing
+
+
+async def test_a_personal_account_cannot_be_deleted(client, hosted):
+    await _signup(client, "founder@x.test")
+    token = await _signup(client, "solo@x.test")
+    me = (await client.get("/auth/me", headers=_bearer(token))).json()
+    r = await client.request(
+        "DELETE", "/auth/organizations",
+        json={"confirm": me["organization_name"]}, headers=_bearer(token),
+    )
+    assert r.status_code == 400 and "personal" in r.json()["detail"]
+
+
+async def test_cannot_delete_your_only_organization(client, hosted):
+    """The self-host founder has one company org and no personal fallback — deleting it would
+    leave them with nothing to sign in to."""
+    token = await _signup(client, "founder@x.test")
+    me = (await client.get("/auth/me", headers=_bearer(token))).json()
+    r = await client.request(
+        "DELETE", "/auth/organizations",
+        json={"confirm": me["organization_name"]}, headers=_bearer(token),
+    )
+    assert r.status_code == 409 and "only organization" in r.json()["detail"]
+
+
+async def test_members_cannot_delete_the_organization(client, hosted):
+    owner = await _company_token(client)
+    inv = await client.post(
+        "/auth/invitations", json={"email": "teammate@x.test", "role": "ADMIN"},
+        headers=_bearer(owner),
+    )
+    joined = await client.post(
+        "/auth/invitations/accept",
+        json={"token": inv.json()["token"], "password": "member-pw-1"},
+    )
+    me = (await client.get("/auth/me", headers=_bearer(owner))).json()
+    r = await client.request(
+        "DELETE", "/auth/organizations",
+        json={"confirm": me["organization_name"]},
+        headers=_bearer(joined.json()["token"]),
+    )
+    assert r.status_code == 403  # ADMIN is not enough for this one
 
 
 async def test_a_plain_member_cannot_invite_or_add_workspaces(client, hosted):

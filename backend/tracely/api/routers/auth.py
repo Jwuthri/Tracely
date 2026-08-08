@@ -6,13 +6,16 @@
 
 from __future__ import annotations
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from tracely.api.auth import get_principal, require_role
 from tracely.api.dto.auth import (
     AcceptInviteIn,
     ChangePasswordIn,
+    ConfirmIn,
     CreateOrgIn,
     CreateProjectIn,
     ForgotPasswordIn,
@@ -33,7 +36,13 @@ from tracely.auth.principal import Principal, select_membership
 from tracely.config import settings
 from tracely.domain.billing import KIND_COMPANY
 from tracely.infrastructure import mailer
+from tracely.infrastructure.blob import s3
+from tracely.infrastructure.clickhouse import deletes
+from tracely.infrastructure.db import repositories
+from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.db.session import get_session
+
+log = structlog.get_logger()
 
 common_router = APIRouter()
 local_router = APIRouter()
@@ -151,6 +160,77 @@ async def create_organization(
     return OrgRef(
         id=org.id, name=org.name, slug=org.slug, kind=org.kind, plan=org.plan, role="OWNER"
     )
+
+
+@common_router.delete("/auth/organizations")
+async def delete_organization(
+    body: ConfirmIn,
+    principal: Principal = Depends(require_role("OWNER")),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Delete the caller's organization and everything in it — every workspace with its traces
+    and blobs, the members, the pending invites, the org itself.
+
+    Owner only, and only the org you're currently in (no id parameter, so it can't be aimed at
+    someone else's). Confirm by sending the organization's exact name.
+
+    Two refusals, both about not stranding people: a personal account is your own login and has
+    no other org to fall back to, and an org you have no alternative to would leave you with
+    nothing to sign in to. The members of a deleted org keep their accounts and their own
+    personal workspace.
+    """
+    org = await _require_org(principal, session)
+    if org.kind != KIND_COMPANY:
+        raise HTTPException(400, "a personal account can't be deleted — it is your own login")
+    if body.confirm != org.name:
+        raise HTTPException(
+            400, f"confirm must be exactly the organization name ('{org.name}')"
+        )
+    # Where the caller lands afterwards; also proves they aren't deleting their only way in.
+    survivor = next(
+        (
+            p.id
+            for (p, _role) in await queries.user_workspaces(session, principal.user_id or "")
+            if p.organization_id != org.id
+        ),
+        None,
+    )
+    if survivor is None:
+        raise HTTPException(
+            409,
+            "this is your only organization — deleting it would leave you with no workspace "
+            "to sign in to",
+        )
+
+    org_id, org_name = org.id, org.name
+
+    def work() -> dict:
+        with SyncSessionLocal() as s:
+            project_ids = repositories.organization_projects(s, org_id)
+        return {"project_ids": project_ids}
+
+    project_ids = (await run_in_threadpool(work))["project_ids"]
+    deleted: dict[str, int] = {"workspaces": len(project_ids)}
+    for pid in project_ids:
+        # ClickHouse and S3 first — a database cascade would leave both behind forever.
+        await deletes.delete_project_events(pid)
+
+        def drop(pid: str = pid) -> None:
+            with SyncSessionLocal() as s:
+                repositories.project_delete(s, pid, usage_heir_id=None)
+
+        await run_in_threadpool(drop)
+        await run_in_threadpool(s3.delete_project_blobs, pid)
+
+    def finish() -> dict:
+        with SyncSessionLocal() as s:
+            return repositories.organization_delete(s, org_id)
+
+    deleted.update(await run_in_threadpool(finish))
+    log.info(
+        "organization_deleted", organization_id=org_id, name=org_name, by=principal.user_id
+    )
+    return {"deleted": deleted, "switch_to": survivor}
 
 
 @common_router.get("/auth/members", response_model=list[MemberSummary])

@@ -84,7 +84,10 @@ async def delete_workspace(
     if not siblings:
         raise HTTPException(
             status_code=409,
-            detail="this is your organization's only workspace — create another one first",
+            detail=(
+                "this is your organization's only workspace — everyone reaches Tracely through "
+                "it. Create another workspace first, or delete the organization itself."
+            ),
         )
     if body.confirm != name:
         raise HTTPException(

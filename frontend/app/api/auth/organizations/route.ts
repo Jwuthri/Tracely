@@ -8,6 +8,22 @@ import { setActiveProject } from "@/app/lib/auth/cookie";
 // with the reason when a cap is hit; pass status + body through so the menu can show it.
 const API = process.env.TRACELY_API ?? "http://localhost:8000";
 
+/** Delete the caller's organization and every workspace in it. The backend returns a workspace
+ *  that still exists; point the active-workspace cookie at it, or the next request 403s on a
+ *  dead id and the app bounces the user to /login. */
+export async function DELETE(req: NextRequest) {
+  const body = await req.json().catch(() => ({}));
+  const r = await fetch(`${API}/auth/organizations`, {
+    method: "DELETE",
+    headers: { ...(await authHeaders()), "content-type": "application/json" },
+    body: JSON.stringify({ confirm: String(body?.confirm ?? "") }),
+    cache: "no-store",
+  });
+  const data = await r.json().catch(() => ({}));
+  if (r.ok && data?.switch_to) await setActiveProject(data.switch_to);
+  return NextResponse.json(data, { status: r.status });
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const name = String(body?.name ?? "").trim();
