@@ -89,19 +89,28 @@ def _wait_reachable(attempts: int = 60) -> bool:
     return False
 
 
+def _rows(body) -> list[dict]:
+    """The rows of a list endpoint, whether it answers a bare array or a paginated
+    `{items, total}` envelope. Iterating an envelope as a list yields its KEYS, so a plain
+    `for c in body` silently turns into strings the moment an endpoint gains pagination."""
+    if isinstance(body, dict):
+        return body.get("items") or []
+    return body or []
+
+
 def _has_traces() -> bool:
     _status, body = _req("GET", "/api/traces?limit=1")
-    return bool(body)
+    return bool(_rows(body))
 
 
 def _promoted_cases() -> int:
     _status, body = _req("GET", "/api/cases")
-    return sum(1 for c in (body or []) if c.get("status") == "PROMOTED")
+    return sum(1 for c in _rows(body) if c.get("status") == "PROMOTED")
 
 
 def _scenarios() -> list[dict]:
     _status, body = _req("GET", "/api/scenarios")
-    return body or []
+    return _rows(body)
 
 
 def _seed_scenarios() -> None:
@@ -118,7 +127,7 @@ def _seed_scenarios() -> None:
     def from_conversations(t: dict) -> bool:
         return (t.get("metadata") or {}).get("example") == "seed_conversations.py"
 
-    multi = [t for t in (threads or []) if (t.get("turns") or 0) > 1]
+    multi = [t for t in _rows(threads) if (t.get("turns") or 0) > 1]
     multi.sort(key=lambda t: (from_conversations(t), t.get("turns") or 0), reverse=True)
     if not multi:
         print(f"  {DIM}↷ no multi-turn thread to import from yet{OFF}")
@@ -167,7 +176,7 @@ def _counts() -> tuple[int, int, int]:
     _s1, traces = _req("GET", "/api/traces?limit=500")
     _s2, clusters = _req("GET", "/api/clusters")
     _s3, gates = _req("GET", "/api/gates")
-    return len(traces or []), len(clusters or []), len(gates or [])
+    return len(_rows(traces)), len(_rows(clusters)), len(_rows(gates))
 
 
 def main() -> None:
