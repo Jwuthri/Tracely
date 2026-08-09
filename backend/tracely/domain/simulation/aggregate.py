@@ -61,34 +61,43 @@ def user_text(recorded_input: str) -> str:
             found = _last_user_message(messages)
             if found:
                 return found
-        for key in ("prompt", "input", "content", "message", "text", "query", "question"):
+        # A SINGLE recorded message — `{"role": "user", "content": [{"type": "text", …}]}` — is
+        # the per-turn shape most chat SDKs log. It matched none of the branches above (`content`
+        # is a block list, not a string), so the whole envelope became the scenario turn and the
+        # replay posted JSON at the agent instead of the customer's words.
+        found = _content_text(data.get("content"))
+        if found:
+            return found
+        for key in ("prompt", "input", "message", "text", "query", "question"):
             value = data.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return text
 
 
-def _last_user_message(messages: list) -> str:
-    """The last `role: user` message's text — what the trace was actually responding to.
+def _content_text(content: object) -> str:
+    """A message's text, whether `content` is a plain string or the typed-block form
+    (`[{"type": "text", "text": …}]`). Text blocks are joined; images and files are ignored."""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = [
+            str(b.get("text") or "")
+            for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ]
+        return "\n".join(p for p in parts if p).strip()
+    return ""
 
-    Content may be a plain string or the typed-block form (`[{"type": "text", "text": …}]`), so
-    the text blocks are joined and non-text blocks (images, files) ignored.
-    """
+
+def _last_user_message(messages: list) -> str:
+    """The last `role: user` message's text — what the trace was actually responding to."""
     for m in reversed(messages):
         if not isinstance(m, dict) or m.get("role") != "user":
             continue
-        content = m.get("content")
-        if isinstance(content, str):
-            return content.strip()
-        if isinstance(content, list):
-            parts = [
-                str(b.get("text") or "")
-                for b in content
-                if isinstance(b, dict) and b.get("type") == "text"
-            ]
-            joined = "\n".join(p for p in parts if p).strip()
-            if joined:
-                return joined
+        found = _content_text(m.get("content"))
+        if found:
+            return found
     return ""
 
 

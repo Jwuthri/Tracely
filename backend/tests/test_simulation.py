@@ -460,6 +460,14 @@ def test_extra_body_is_merged_but_cannot_clobber_the_conversation(monkeypatch):
         # a chat envelope replays the LAST user turn — that's what this trace answered
         ('{"messages": [{"role":"user","content":"a"},{"role":"assistant","content":"b"},'
          '{"role":"user","content":"c"}]}', "c"),
+        # a SINGLE recorded message, the per-turn shape most chat SDKs log — with typed content
+        # blocks. This used to fall through and import the whole envelope as the scenario turn.
+        ('{"role": "user", "content": [{"type": "text", "text": "Ship it to my work address."}]}',
+         "Ship it to my work address."),
+        ('{"role": "user", "content": "plain string content"}', "plain string content"),
+        # text blocks join; images and files are dropped rather than stringified
+        ('{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "x"}},'
+         '{"type": "text", "text": "what is in this?"}]}', "what is in this?"),
     ],
 )
 def test_user_text_unwraps_recorded_envelopes(recorded, expected):
