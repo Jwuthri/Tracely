@@ -145,19 +145,7 @@ function formFromConfig(
   config: EvaluatorConfig,
   scoreName?: string,
 ): FormState {
-  // legacy category configs surface as json + enum so they're editable in the new builder
-  const outputType = config.output_type === "category" ? "json" : config.output_type;
-  const legacySchema =
-    config.output_type === "category" && (config.categories ?? []).length > 0
-      ? {
-          // legacy category → a single enum field; the user can add a score/reason if they want
-          type: "object",
-          properties: {
-            category: { type: "string", enum: config.categories },
-          },
-          required: ["category"],
-        }
-      : undefined;
+  const outputType = config.output_type;
   return {
     ...EMPTY_FORM,
     ...base,
@@ -170,7 +158,7 @@ function formFromConfig(
     // no-threshold configs stay threshold-less (informational metrics keep their no-verdict
     // semantics through install/edit round-trips) — only brand-new forms default to 0.6
     threshold: config.threshold != null ? String(config.threshold) : "",
-    outputSchema: (config.output_schema as Record<string, unknown> | undefined) ?? legacySchema,
+    outputSchema: config.output_schema as Record<string, unknown> | undefined,
     paramsJson: config.check ? JSON.stringify(config.params ?? {}, null, 2) : "",
     scoreName,
     sourceConfig: config,
@@ -187,8 +175,6 @@ function configFromForm(f: FormState, previous?: EvaluatorConfig): EvaluatorConf
   const config: EvaluatorConfig = { ...(previous ?? {}) };
   delete config.check;
   delete config.params;
-  delete config.categories; // legacy — superseded by json + enum schemas
-  delete config.fail_categories;
   config.prompt = f.prompt.trim();
   config.output_type = f.outputType;
   config.execution_mode = f.executionMode;

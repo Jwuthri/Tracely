@@ -1,0 +1,45 @@
+# Evaluations
+
+Every evaluator you add is a **column** in the trace table. A column has three choices that
+decide what the judge reads and when it runs: a **level**, an **execution mode**, and a prompt
+style (**basic** rubric or **advanced** template).
+
+## Levels
+
+| Level | One result per | The judge reads |
+|---|---|---|
+| Conversation | thread | the whole transcript, turn by turn |
+| Message | turn | that turn's user request and agent answer |
+| Step | span (tool call, generation, …) | that step's input and output |
+
+## Batch vs sequential
+
+**Batch** (default) grades every item independently — nothing carries over between items, so two
+grades of the same item are directly comparable.
+
+**Sequential** grades items in order as one running conversation with the judge: the rubric is
+the system prompt, then item → verdict → item → verdict. A step column chains the steps within a
+message; a message column chains the turns of a thread. Each item is graded knowing what came
+before it — and the previous result of the same metric is available for continuity.
+
+Sequential grading is incremental: when new turns arrive, only the new turns are graded and
+appended to the judge's conversation. Re-running a column from the UI re-grades everything from
+the start. Conversation-level columns have a single item, so the mode makes no difference there.
+
+## Advanced templates and sequential mode
+
+An advanced prompt (any prompt containing `@VARIABLES` like `@HISTORY` or `@CURRENT_STEP`)
+controls its own context: the resolved template is the whole prompt, and nothing is added around
+it.
+
+Because of that, **sequential works differently for advanced columns**: there is no running
+conversation with the judge. Chaining happens only through `@METRIC_PREVIOUS_RESULT`, which
+resolves to the previous item's result of the same metric — put it in your template where you
+want the judge to see it. If your template doesn't reference it, an advanced sequential column
+behaves exactly like batch.
+
+## Output types
+
+`score` (0–1 with a pass/fail threshold), `number`, `boolean`, `text`, or `json` — your own
+schema, built in the Add Column form. Enum fields are enforced on the model, and a numeric
+`score` field in your schema drives the pass/fail verdict via the threshold.

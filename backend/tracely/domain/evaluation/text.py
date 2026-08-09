@@ -134,24 +134,60 @@ def request_for(root: dict, spans: list[dict]) -> str:
     return content_text(root.get("input")) or last_io(spans, "input")
 
 
+def _text_only(value: Any) -> str:
+    """Readable text WITHOUT `content_text`'s raw-JSON fallback — for deciding whether a candidate
+    actually said something. An assistant message that is only a tool call
+    (`{"role":"assistant","content":"","tool_calls":[…]}`) extracts to "", so the caller can fall
+    through to the action itself instead of grading the JSON wrapper as "the answer"."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        s = value.strip()
+        if s[:1] not in ("[", "{"):
+            return value
+        try:
+            return extract_text(json.loads(s))
+        except (ValueError, TypeError):
+            return value  # unparseable → it's prose
+    return extract_text(value)
+
+
 def answer_for(root: dict, spans: list[dict], TOOL: str, GENERATION: str, CHAIN: str) -> str:
     """The agent's final answer for judge grading.
 
     Order of preference: the LAST GENERATION span → the root span's output → any non-TOOL/non-CHAIN
-    output → the fallback `last_io(spans, 'output')`.
+    output — the first one with READABLE TEXT wins; an empty or tool-call-only candidate falls
+    through instead of ending the search.
 
     The root used to come first, which put this out of step with the SQL the whole UI reads through
     (`sessions_overview` / `session_turns` both take the latest GENERATION first). Two consequences,
     both real: a trace could DISPLAY one answer and be GRADED on another, and a framework root whose
     output is a routing signal — LangGraph's `__end__` — was graded as the agent's reply. Same order
     in both places now, so what you read in the table is what the judge read.
+
+    **Not every answer is text.** Some agents end a turn by ACTING — rendering a rich card (a tool
+    that displays content), or handing the conversation to a human. Their final generation is a
+    bare tool call, which used to be graded as the raw `tool_calls` JSON — and judges read that as
+    "the agent never answered the customer" and failed turns that were answered fine. When no
+    candidate has readable text, the LAST tool span's output IS the answer, labeled so the judge
+    grades whether the action addressed the user rather than punishing the missing prose.
     """
+    candidates = [
+        next((s["output"] for s in reversed(spans)
+              if s.get("type") == GENERATION and s.get("output")), None),
+        root.get("output"),
+        next((s["output"] for s in reversed(spans)
+              if s.get("output") and s.get("type") not in (TOOL, CHAIN)), None),
+    ]
+    for value in candidates:
+        text = _text_only(value)
+        if text:
+            return text
     for s in reversed(spans):
-        if s.get("type") == GENERATION and s.get("output"):
-            return content_text(s["output"])
-    if root.get("output"):
-        return content_text(root["output"])
-    for s in reversed(spans):
-        if s.get("output") and s.get("type") not in (TOOL, CHAIN):
-            return content_text(s["output"])
+        if s.get("type") == TOOL and s.get("output"):
+            name = s.get("name") or "tool"
+            return (
+                f"[no text reply — the agent answered with the `{name}` action; "
+                f"its output below is what the user received]\n{content_text(s['output'])}"
+            )
     return last_io(spans, "output")

@@ -82,24 +82,6 @@ def test_boolean_output(monkeypatch):
     assert (r.verdict, r.data_type, r.value) == ("FAIL", "BOOLEAN", 0.0)
 
 
-def test_category_output(monkeypatch):
-    _stub_structured(monkeypatch, {"category": "complaint", "reason": "angry"})
-    config = {"output_type": "category", "categories": ["question", "complaint"]}
-    r = _judge(RUN).run(_ctx([_span()]), config)[0]
-    assert (r.data_type, r.string_value, r.verdict) == ("CATEGORICAL", "complaint", "")
-    # with fail_categories configured the verdict kicks in
-    r2 = _judge(RUN).run(_ctx([_span()]), {**config, "fail_categories": ["complaint"]})[0]
-    assert r2.verdict == "FAIL"
-
-
-def test_category_schema_rejects_unknown_label(monkeypatch):
-    """The dynamic Literal schema only admits the configured categories — a stray label is a
-    validation error, which the judge swallows as a skipped grade."""
-    _stub_structured(monkeypatch, {"category": "nonsense", "reason": ""})
-    config = {"output_type": "category", "categories": ["question", "complaint"]}
-    assert _judge(RUN).run(_ctx([_span()]), config) == []
-
-
 def test_text_output(monkeypatch):
     _stub_structured(monkeypatch, {"text": "concise summary"})
     r = _judge(RUN).run(_ctx([_span()]), {"output_type": "text"})[0]

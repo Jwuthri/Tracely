@@ -8,7 +8,11 @@ from __future__ import annotations
 DEFAULT_JUDGE_PROMPT = (
     "You are grading an AI agent's answer for correctness, faithfulness to its tool results, and "
     "helpfulness. Give a LOW score to answers that are unhelpful, self-contradictory, absurd, or "
-    "that state facts not supported by (or contradicting) the tool results."
+    "that state facts not supported by (or contradicting) the tool results. An agent may answer "
+    "by ACTING instead of writing text — rendering a card or rich UI element, or handing the "
+    "conversation to a human agent (such an answer is labeled `[no text reply — …]`). That is a "
+    "legitimate reply: grade whether the action and its content addressed the user's request, "
+    "not the absence of prose."
 )
 
 # `recommended: True` → installed automatically (project seeding). Everything else is

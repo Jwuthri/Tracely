@@ -62,6 +62,7 @@ All are **Server Components** unless noted; each lists the `lib/api.ts` calls it
 | `/traces` | `getSessions` | `TracesExplorer` (filter + search + date range) wrapping the hierarchical **TraceTable** in list mode. |
 | `/traces/[traceId]` | `getTrace` | Single trace header (spans/latency/**usage totals**, `PromoteButton` if failing) + `SingleTraceView` (Table / Timeline tabs + an Agents drawer). |
 | `/sessions/[threadId]` | `getSession` + `getTrace` per turn | A conversation, pre-expanded: builds a `ConvNode` with all turns + spans and renders **TraceTable** in detail mode. Header shows conversation usage totals. |
+| `/sessions/[threadId]/evals` | `getChainProgress` + `getSession`/`getTrace` per eval level | How Tracely graded this conversation: the sequential-chain status card (per column: turns chained, up-to-date/behind, last payload) above one tab per eval level (`eval:<thread>:step\|msg\|conv` recordings). |
 | `/clusters` | `getClusters` | Failure-cluster table + `RebuildButton` ("Analyze failures"). |
 | `/clusters/[clusterId]` | `getCluster` | Issue detail — histogram, description, proposed fix, suggested evaluator (`CodeBlock`), member traces, `ClusterActions`. |
 | `/cases` | `getCases` | Regression cases — title, status, fail→pass contract, last verdict, source trace. |

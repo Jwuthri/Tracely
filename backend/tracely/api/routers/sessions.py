@@ -259,6 +259,47 @@ class GenerateSummaryBody(BaseModel):
     force: bool = False  # rebuild from scratch (drop cached step rows)
 
 
+@router.get("/sessions/{thread_id}/chain-progress")
+async def get_chain_progress(
+    thread_id: str, project_id: str = Depends(get_project_id)
+) -> dict:
+    """Where each sequential column's durable judge conversation stands on this thread: how many
+    of the thread's turns are chained (`chained`/`turns`, `up_to_date`), the payload the next turn
+    will be seeded with, and when the chain last advanced. One entry per enabled sequential
+    message/step column (conversation-level columns have one item — the mode is inert there);
+    columns with no progress row yet report `chained: 0`.
+    """
+    turns = await async_reader.thread_turn_count(project_id, thread_id)
+
+    def load():
+        with SyncSessionLocal() as s:
+            return (
+                repo.evaluator_enabled_specs(s, project_id),
+                repo.chain_progress_load(s, project_id, thread_id),
+            )
+
+    specs, progress = await run_in_threadpool(load)
+    metrics = []
+    for spec in specs:
+        config = spec.get("config") or {}
+        if str(config.get("execution_mode") or "batch") != "sequential":
+            continue
+        if spec["level"] == "CONVERSATION":
+            continue
+        row = progress.get(spec["score_name"]) or {}
+        chained = len(row.get("turn_ids") or [])
+        metrics.append({
+            "score_name": spec["score_name"],
+            "level": spec["level"],
+            "chained": chained,
+            "turns": turns,
+            "up_to_date": turns > 0 and chained >= turns,
+            "last_payload": row.get("last_payload"),
+            "updated_at": row.get("updated_at"),
+        })
+    return {"thread_id": thread_id, "metrics": metrics}
+
+
 @router.get("/sessions/{thread_id}/rolling-summary")
 async def get_rolling_summary(
     thread_id: str, project_id: str = Depends(get_project_id)

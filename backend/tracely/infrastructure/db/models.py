@@ -475,6 +475,27 @@ class Scenario(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class EvalChainProgress(Base):
+    """How far a sequential evaluator's durable conversation has advanced through a thread.
+
+    `turn_ids` is the ordered list of traces already graded onto the column's conversation;
+    `last_payload` is the chained context the NEXT turn is seeded with (`CFG_PREVIOUS`). The
+    settled-thread pass uses this to grade only new turns; a stored prefix that stops matching
+    the thread's turn order forces a rebuild from turn 1 (see `EvaluationService.evaluate_thread`).
+    """
+
+    __tablename__ = "eval_chain_progress"
+
+    project_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    score_name: Mapped[str] = mapped_column(String(80), primary_key=True)
+    thread_id: Mapped[str] = mapped_column(String(256), primary_key=True)
+    turn_ids: Mapped[list] = mapped_column(JSON, default=list)
+    last_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Evaluator(Base):
     """A user-configured online evaluator. The runner loads the project's enabled rows and runs
     them on each trace (filtered by agent/env, sampled). The built-in checks are seeded as editable

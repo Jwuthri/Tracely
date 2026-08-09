@@ -10,8 +10,10 @@ Lifecycle (every path funnels through `EvaluationService` → `registry.dispatch
 
 1. Ingest: each trace's settle runs its BATCH trace/step columns (`evaluate_trace`).
 2. A debounced whole-thread pass runs when the thread stops growing (`evaluate_thread`):
-   CONVERSATION columns once, and SEQUENTIAL message/step columns over every turn in order —
-   sequential needs the preceding turns, so it always re-grades the thread from turn 1.
+   CONVERSATION columns once, and SEQUENTIAL message/step columns over the turns in order —
+   incrementally, grading only the turns that arrived since the last pass (persisted per-metric
+   progress in `eval_chain_progress`; a changed turn order forces a rebuild from turn 1). The
+   pass holds a per-thread Redis lock so it can't interleave with an on-demand run.
 3. On-demand runs (the UI's Play buttons → SSE) and the CI gate reuse the same two entry points.
 
 The level × mode matrix shares three primitives — an item body per level (`prompts.py`), one
@@ -20,7 +22,7 @@ chat-vs-paste continuity policy (`llm_judge._chat_id`), one grading tail (`_grad
 |              | batch (default)              | sequential                                    |
 | CONVERSATION | one grade over the thread    | identical — one item, the mode is inert       |
 | AGENT_RUN    | each message alone           | one durable conversation over the turns,      |
-|              |                              | rebuilt from turn 1 by each thread pass       |
+|              |                              | extended per pass, rebuilt on order change    |
 | SPAN/TOOL/…  | each step alone              | one durable conversation over the message's   |
 |              |                              | steps, rebuilt per pass                       |
 

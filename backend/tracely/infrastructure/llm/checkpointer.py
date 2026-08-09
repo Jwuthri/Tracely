@@ -13,12 +13,14 @@ The conversation has to survive the process, because turns are graded minutes ap
 Celery tasks. That is what a checkpointer is for: LangGraph loads the thread's messages, appends
 the new one, and persists the result — so the caller sends only the new item.
 
-A conversation is valid for exactly ONE ordered pass over its items. Every sequential pass
-re-grades from item 1 (the settled-thread task re-runs each time the thread grows; a step judge
-re-runs whenever its trace is re-evaluated), so the pass must `reset_chat` first and rebuild —
-appending to what the previous pass left would show the judge a second copy of every item, and
-grading item 1 would see the verdicts the previous pass gave items 2..N: future leakage, and a
-transcript that grows quadratically.
+A conversation only ever grows in item order, and only inside an ordered pass. A message-level
+column's conversation persists across the settled-thread passes: each pass appends just the NEW
+turns, guided by the chain-progress record (`eval_chain_progress`); when the thread's turn order
+changes under it (a late-arriving trace) or a full re-grade is forced, the pass calls
+`reset_chat` and rebuilds from turn 1 — appending out of order, or appending a second copy of
+graded items, would show the judge duplicated history and verdicts from the thread's future. A
+step-level column's conversation spans one message and is rebuilt whenever that trace is
+re-graded.
 
 Tables (`checkpoints`, `checkpoint_writes`, `checkpoint_blobs`) are LangGraph's own, created by
 `setup()` on the first call in each process. They are NOT Alembic-managed: the schema belongs to
@@ -122,9 +124,9 @@ def setup() -> None:
 
 
 def reset_chat(chat_id: str) -> None:
-    """Delete a judge conversation so the next pass rebuilds it from item 1. Best-effort: with no
-    checkpointer there is nothing to delete, and a failed delete only costs a dirtier transcript —
-    never the grades themselves."""
+    """Delete a judge conversation so the next pass rebuilds it from item 1 — the companion to
+    clearing its chain progress. Best-effort: with no checkpointer there is nothing to delete, and
+    a failed delete only costs a dirtier transcript — never the grades themselves."""
     saver = get_checkpointer()
     if saver is None:
         return

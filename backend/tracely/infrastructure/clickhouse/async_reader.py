@@ -117,6 +117,20 @@ async def thread_spans_full(project_id: str, thread_id: str) -> list[dict]:
     return [dict(zip(res.column_names, row)) for row in res.result_rows]
 
 
+async def thread_turn_count(project_id: str, thread_id: str) -> int:
+    """How many turns (traces) a conversation holds — the denominator for chain progress.
+    `_REAL` keeps Tracely's own eval/sim recordings out of the count, same as every listing."""
+    client = await get_async_client()
+    res = await client.query(
+        "SELECT count(DISTINCT trace_id) FROM events FINAL "
+        "WHERE project_id = {p:String} "
+        "AND (conversation_id = {th:String} OR trace_id = {th:String}) "
+        f"AND {_REAL}",
+        parameters={"p": project_id, "th": thread_id},
+    )
+    return int(res.result_rows[0][0]) if res.result_rows else 0
+
+
 async def trace_scores(project_id: str, trace_id: str, thread_id: str) -> list[dict]:
     """Online scores for one trace PLUS its thread's CONVERSATION-level scores (so the
     conversation metric columns render on the trace page)."""

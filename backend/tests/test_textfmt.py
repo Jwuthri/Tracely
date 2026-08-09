@@ -163,3 +163,67 @@ def test_the_root_answers_when_no_generation_did():
     root = {"type": "AGENT", "output": "handled"}
     tool = {"type": "TOOL", "output": '{"status": "ok"}'}
     assert answer_for(root, [root, tool], *_LEVELS) == "handled"
+
+
+# ── answers that are actions, not text (cards / human handoff) ────────────────
+
+
+def _toolcall_gen(**kw) -> dict:
+    """A final generation whose whole output is a tool call — no prose."""
+    out = {"role": "assistant", "content": "", "tool_calls": [
+        {"id": "c1", "function": {"name": "show_card", "arguments": "{\"sku\": 42}"}},
+    ]}
+    return {"type": "GENERATION", "output": json.dumps(out), **kw}
+
+
+def test_a_card_reply_is_graded_as_the_action_not_as_silence():
+    """An agent that answers by rendering a card ends its turn on a bare tool call. Graded as raw
+    `tool_calls` JSON (or as nothing), judges read that as "the agent never answered the customer"
+    and failed turns that were answered fine. The action's output IS the answer, labeled."""
+    spans = [
+        {"type": "AGENT", "span_id": "root", "output": ""},
+        _toolcall_gen(span_id="g1"),
+        {"type": "TOOL", "span_id": "t1", "name": "show_card",
+         "output": '{"card": {"title": "Order #42", "status": "shipped"}}'},
+    ]
+    answer = answer_for(spans[0], spans, "TOOL", "GENERATION", "CHAIN")
+    assert answer.startswith("[no text reply — the agent answered with the `show_card` action")
+    assert "Order #42" in answer
+    assert "tool_calls" not in answer  # the JSON wrapper is not the answer
+
+
+def test_a_human_handoff_reads_as_a_reply_not_an_empty_answer():
+    spans = [
+        {"type": "AGENT", "span_id": "root", "output": ""},
+        _toolcall_gen(span_id="g1"),
+        {"type": "TOOL", "span_id": "t1", "name": "escalate_to_human",
+         "output": '{"status": "queued", "eta_minutes": 3}'},
+    ]
+    answer = answer_for(spans[0], spans, "TOOL", "GENERATION", "CHAIN")
+    assert "`escalate_to_human` action" in answer
+    assert "queued" in answer
+
+
+def test_a_text_answer_still_wins_over_trailing_tool_output():
+    spans = [
+        _toolcall_gen(span_id="g1"),
+        {"type": "TOOL", "span_id": "t1", "name": "faq", "output": '{"hits": 3}'},
+        {"type": "GENERATION", "span_id": "g2",
+         "output": '{"role": "assistant", "content": "You can return it within 30 days."}'},
+    ]
+    answer = answer_for({"output": ""}, spans, "TOOL", "GENERATION", "CHAIN")
+    assert answer == "You can return it within 30 days."
+
+
+def test_an_empty_final_generation_falls_through_to_the_root_answer():
+    """Returning the first candidate's EMPTY extraction used to end the search — a tool-call-only
+    generation hid a perfectly good root output."""
+    spans = [{"type": "AGENT", "span_id": "root", "output": "All set — anything else?"},
+             _toolcall_gen(span_id="g1")]
+    assert answer_for(spans[0], spans, "TOOL", "GENERATION", "CHAIN") == "All set — anything else?"
+
+
+def test_true_silence_still_reads_as_no_answer():
+    spans = [{"type": "AGENT", "span_id": "root", "output": ""},
+             {"type": "GENERATION", "span_id": "g1", "output": ""}]
+    assert answer_for(spans[0], spans, "TOOL", "GENERATION", "CHAIN") == ""

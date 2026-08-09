@@ -3,6 +3,7 @@ export default {
   quickstart: "Quickstart",
   automatic: "Automatic instrumentation",
   concepts: "Core concepts",
+  evaluations: "Evaluations",
   instrumentation: "Custom spans (manual)",
   "api-reference": "API reference",
   scenarios: "Scenarios (multi-turn)",

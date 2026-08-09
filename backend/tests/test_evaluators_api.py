@@ -25,6 +25,7 @@ _TABLES = [
     models.OrgMembership.__table__,
     models.Invitation.__table__,
     models.Evaluator.__table__,
+    models.EvalChainProgress.__table__,
 ]
 
 
@@ -347,3 +348,51 @@ async def test_create_rejects_malformed_config_knobs(client, sync_db):
         }},
     )
     assert ok.status_code == 200
+
+
+async def test_chain_progress_reports_sequential_columns(client, sync_db, monkeypatch):
+    """One entry per enabled sequential message/step column: turns chained vs the thread's turn
+    count, the next seed payload, freshness. Batch columns don't chain, so they don't appear."""
+    from sqlalchemy import select
+
+    from tracely.infrastructure.clickhouse import async_reader
+    from tracely.infrastructure.db import repositories as repo
+    from tracely.infrastructure.db.models import Evaluator
+
+    tok = await _owner_token(client)
+
+    async def fake_count(project_id, thread_id):
+        return 3
+
+    monkeypatch.setattr(async_reader, "thread_turn_count", fake_count)
+    import tracely.api.routers.sessions as sessions_router
+
+    monkeypatch.setattr(sessions_router, "SyncSessionLocal", sync_db)
+    r = await client.post(
+        "/api/evaluators", headers=_bearer(tok),
+        json={"name": "Helpfulness", "kind": "llm_judge", "level": "AGENT_RUN",
+              "score_name": "helpfulness",
+              "config": {"execution_mode": "sequential", "threshold": 0.6}},
+    )
+    assert r.status_code == 200
+    with sync_db() as s:
+        ev = s.execute(select(Evaluator).where(Evaluator.score_name == "helpfulness")).scalar_one()
+        repo.chain_progress_set(
+            s, ev.project_id, "helpfulness", "th-1", ["t1", "t2"],
+            {"verdict": "PASS", "value": 0.9},
+        )
+
+    r = await client.get("/api/sessions/th-1/chain-progress", headers=_bearer(tok))
+    assert r.status_code == 200
+    metrics = r.json()["metrics"]
+    # the workspace bootstrap seeds batch columns; only the sequential one reports chain state
+    assert [m["score_name"] for m in metrics] == ["helpfulness"]
+    (m,) = metrics
+    assert (m["chained"], m["turns"], m["up_to_date"]) == (2, 3, False)
+    assert m["last_payload"] == {"verdict": "PASS", "value": 0.9}
+    assert isinstance(m["updated_at"], str)
+
+    # a thread with no progress rows still lists the column, at zero
+    r = await client.get("/api/sessions/th-other/chain-progress", headers=_bearer(tok))
+    (m,) = r.json()["metrics"]
+    assert (m["chained"], m["up_to_date"], m["last_payload"]) == (0, False, None)

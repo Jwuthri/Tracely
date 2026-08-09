@@ -1,4 +1,11 @@
-import { getSession, getTrace, type ConvNode, type FullTurn } from "@/app/lib/api";
+import {
+  getChainProgress,
+  getSession,
+  getTrace,
+  type ChainMetric,
+  type ConvNode,
+  type FullTurn,
+} from "@/app/lib/api";
 import { CopyId } from "@/app/components/CopyId";
 import { EvalLevelView } from "@/app/components/EvalLevelView";
 import { LEVELS, type EvalLevel } from "@/app/components/eval-levels";
@@ -17,7 +24,10 @@ export default async function ConversationEvalsPage({
   params: Promise<{ threadId: string }>;
 }) {
   const { threadId } = await params;
-  const levels = await Promise.all(LEVELS.map((level) => loadLevel(threadId, level.key)));
+  const [chain, ...levels] = await Promise.all([
+    getChainProgress(encodeURIComponent(threadId)).catch(() => ({ metrics: [] as ChainMetric[] })),
+    ...LEVELS.map((level) => loadLevel(threadId, level.key)),
+  ]);
   const found = levels.filter((l): l is NonNullable<typeof l> => l !== null);
 
   return (
@@ -39,6 +49,23 @@ export default async function ConversationEvalsPage({
         </div>
       </header>
 
+      {chain.metrics.length > 0 && (
+        <div className="card reveal p-4" style={{ animationDelay: "30ms" }}>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-fg-faint">
+            Sequential chains
+          </div>
+          <p className="mt-1 text-[12px] text-fg-muted">
+            Each sequential column grades this conversation as one running dialogue with the
+            judge — new turns are appended as they arrive.
+          </p>
+          <div className="mt-3 space-y-1.5">
+            {chain.metrics.map((m) => (
+              <ChainRow key={m.score_name} m={m} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {found.length === 0 ? (
         <div className="card p-10 text-center text-[13px] text-fg-faint">
           Nothing graded this conversation yet — run the evaluators from the conversation page.
@@ -47,6 +74,52 @@ export default async function ConversationEvalsPage({
         <div className="reveal" style={{ animationDelay: "60ms" }}>
           <EvalLevelView levels={found} />
         </div>
+      )}
+    </div>
+  );
+}
+
+/** One sequential column's chain state: how far its judge conversation is through the thread. */
+function ChainRow({ m }: { m: ChainMetric }) {
+  const level = m.level === "AGENT_RUN" ? "msg" : "step";
+  const behind = m.turns - m.chained;
+  const payload = m.last_payload ?? {};
+  const verdict = typeof payload.verdict === "string" ? payload.verdict : "";
+  const value = [payload.value, payload.score].find((v) => typeof v === "number") as
+    | number
+    | undefined;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-line bg-ink-800/40 px-3 py-2 font-mono text-[11.5px]">
+      <span className="text-fg">{m.score_name}</span>
+      <span className="rounded border border-line px-1 py-px text-[9px] uppercase tracking-wider text-fg-faint">
+        {level}
+      </span>
+      <span className="text-fg-muted">
+        {m.chained}/{m.turns} turns
+      </span>
+      {m.up_to_date ? (
+        <span className="text-ok">up to date</span>
+      ) : (
+        <span className="text-warn">
+          {m.chained === 0 ? "not started" : `${behind} behind`}
+        </span>
+      )}
+      {(verdict === "PASS" || verdict === "FAIL") && (
+        <span
+          className={
+            verdict === "PASS"
+              ? "rounded border border-ok/30 bg-ok/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-ok"
+              : "rounded border border-fail/30 bg-fail/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-fail"
+          }
+        >
+          last: {verdict}
+        </span>
+      )}
+      {typeof value === "number" && <span className="text-fg-muted">{value.toFixed(2)}</span>}
+      {m.updated_at && (
+        <span className="ml-auto text-[10.5px] text-fg-faint">
+          {m.updated_at.slice(0, 16).replace("T", " ")}
+        </span>
       )}
     </div>
   );

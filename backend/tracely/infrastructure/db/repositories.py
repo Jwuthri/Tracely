@@ -22,6 +22,7 @@ from tracely.infrastructure.db.models import (
     CaseReplay,
     ClusterMember,
     ConversationAgent,
+    EvalChainProgress,
     EvaluationCase,
     EvaluationSuite,
     EvaluationSuiteCase,
@@ -320,6 +321,61 @@ def evaluator_delete(s: Session, project_id: str, evaluator_id: str) -> bool:
     s.delete(e)
     s.commit()
     return True
+
+
+def chain_progress_load(s: Session, project_id: str, thread_id: str) -> dict[str, dict]:
+    """Every sequential metric's progress through this thread:
+    `{score_name: {turn_ids, last_payload}}` (missing metric → no progress yet)."""
+    rows = s.execute(
+        select(EvalChainProgress).where(
+            EvalChainProgress.project_id == project_id,
+            EvalChainProgress.thread_id == thread_id,
+        )
+    ).scalars()
+    return {
+        r.score_name: {
+            "turn_ids": list(r.turn_ids or []),
+            "last_payload": r.last_payload,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        }
+        for r in rows
+    }
+
+
+def chain_progress_set(
+    s: Session,
+    project_id: str,
+    score_name: str,
+    thread_id: str,
+    turn_ids: list[str],
+    last_payload: dict | None,
+) -> None:
+    """Upsert one metric's progress (called after each newly graded turn, so a crashed pass
+    resumes from the last recorded turn instead of forgetting the whole pass)."""
+    row = s.get(EvalChainProgress, (project_id, score_name, thread_id))
+    if row is None:
+        row = EvalChainProgress(
+            project_id=project_id, score_name=score_name, thread_id=thread_id
+        )
+        s.add(row)
+    row.turn_ids = list(turn_ids)
+    row.last_payload = last_payload
+    s.commit()
+
+
+def chain_progress_clear(
+    s: Session, project_id: str, thread_id: str, score_names: list[str] | None = None
+) -> None:
+    """Forget progress for a thread (all metrics, or the named ones) — the companion to
+    resetting the durable conversation: the next pass rebuilds from turn 1."""
+    stmt = delete(EvalChainProgress).where(
+        EvalChainProgress.project_id == project_id,
+        EvalChainProgress.thread_id == thread_id,
+    )
+    if score_names:
+        stmt = stmt.where(EvalChainProgress.score_name.in_(score_names))
+    s.execute(stmt)
+    s.commit()
 
 
 def _flat_config(config: dict | None) -> dict:
@@ -1242,6 +1298,8 @@ def project_data_delete(s: Session, project_id: str) -> dict[str, int]:
     )
     wipe("meta_analyses", delete(MetaAnalysis).where(MetaAnalysis.project_id == project_id))
     wipe("rolling_summaries", delete(RollingSummary).where(RollingSummary.project_id == project_id))
+    wipe("eval_chain_progress",
+         delete(EvalChainProgress).where(EvalChainProgress.project_id == project_id))
     wipe(
         "conversation_agents",
         delete(ConversationAgent).where(ConversationAgent.project_id == project_id),

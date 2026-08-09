@@ -312,3 +312,157 @@ def test_thread_pass_marks_the_chain_and_resets_its_conversations(monkeypatch):
         assert by_name["helpfulness"]["config"].get("__chain_pass__") is True
         assert by_name["tool_choice"]["config"].get("__chain_pass__") is True
         assert "__chain_pass__" not in by_name["tracely.run.outcome"]["config"]
+
+
+class _Reader:
+    def __init__(self, turn_ids):
+        self._turns = turn_ids
+
+    def thread_trace_ids(self, project_id, thread_id):
+        return list(self._turns)
+
+    def read_thread_spans(self, project_id, thread_id):
+        return []
+
+
+def _seq_spec(name="helpfulness", level="AGENT_RUN"):
+    return {
+        "id": f"ev-{name}", "kind": "llm_judge",
+        "config": {"execution_mode": "sequential"}, "score_name": name, "level": level,
+    }
+
+
+def _chain_harness(monkeypatch, progress: dict):
+    """Stub the chain-progress persistence + chat reset + lock around evaluate_thread."""
+    from tracely.infrastructure.db import repositories
+    from tracely.infrastructure.llm import checkpointer
+    from tracely.infrastructure.queue import thread_lock
+    from tracely.services import evaluation_service
+
+    calls = {"set": [], "clear": [], "reset": [], "graded": []}
+    monkeypatch.setattr(
+        repositories, "chain_progress_load", lambda s, p, t: dict(progress)
+    )
+    monkeypatch.setattr(
+        repositories, "chain_progress_set",
+        lambda s, p, name, t, turn_ids, payload: calls["set"].append((name, turn_ids, payload)),
+    )
+    monkeypatch.setattr(
+        repositories, "chain_progress_clear",
+        lambda s, p, t, names=None: calls["clear"].append(names),
+    )
+    monkeypatch.setattr(checkpointer, "reset_chat", lambda cid: calls["reset"].append(cid))
+
+    class _NullSession:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(evaluation_service, "SyncSessionLocal", _NullSession)
+
+    import contextlib
+
+    monkeypatch.setattr(
+        thread_lock, "thread_pass_lock",
+        lambda p, t: contextlib.nullcontext(calls.setdefault("locked", True)),
+    )
+
+    def fake_trace(self, project_id, trace_id, specs=None, **kw):
+        calls["graded"].append((trace_id, specs))
+        return {"scores": 1, "failures": 0}
+
+    monkeypatch.setattr(EvaluationService, "evaluate_trace", fake_trace)
+    return calls
+
+
+def test_automatic_pass_grades_only_the_new_turns(monkeypatch):
+    """The settled-thread pass is incremental: turns already on the column's conversation are
+    skipped, the new turn is graded seeded with the persisted last payload, and progress
+    advances — no reset, no re-grade of turn 1."""
+    monkeypatch.setattr(
+        EvaluationService, "load_enabled_evaluators",
+        staticmethod(lambda project_id, evaluator_ids=None: [_seq_spec()]),
+    )
+    calls = _chain_harness(monkeypatch, {
+        "helpfulness": {"turn_ids": ["t1"], "last_payload": {"verdict": "PASS", "value": 0.9}},
+    })
+    svc = EvaluationService(trace_reader=_Reader(["t1", "t2"]))
+    r = svc.evaluate_thread("p1", "th-1")
+
+    assert [tid for tid, _ in calls["graded"]] == ["t2"]  # t1 already chained
+    (_, specs), = calls["graded"]
+    (spec,) = specs
+    assert spec["config"]["__chain_pass__"] is True
+    assert spec["config"]["__previous_result__"] == {"verdict": "PASS", "value": 0.9}
+    assert calls["reset"] == [] and calls["clear"] == []
+    assert calls["set"] == [("helpfulness", ["t1", "t2"], {"verdict": "PASS", "value": 0.9})]
+    assert r["scores"] == 1
+
+
+def test_reordered_turns_force_a_rebuild_from_turn_one(monkeypatch):
+    """A stored prefix that no longer matches the thread's turn order (late-arriving trace) can't
+    be continued — the conversation resets and every turn re-grades."""
+    monkeypatch.setattr(
+        EvaluationService, "load_enabled_evaluators",
+        staticmethod(lambda project_id, evaluator_ids=None: [_seq_spec()]),
+    )
+    calls = _chain_harness(monkeypatch, {
+        "helpfulness": {"turn_ids": ["t9"], "last_payload": {"verdict": "PASS"}},
+    })
+    svc = EvaluationService(trace_reader=_Reader(["t1", "t2"]))
+    svc.evaluate_thread("p1", "th-1")
+
+    assert [tid for tid, _ in calls["graded"]] == ["t1", "t2"]
+    assert calls["reset"] == ["p1:helpfulness:th-1"]
+    assert calls["clear"] == [["helpfulness"]]
+    # the stale payload is NOT seeded into the rebuilt turn 1
+    first_spec = calls["graded"][0][1][0]
+    assert "__previous_result__" not in first_spec["config"]
+
+
+def test_lock_contention_and_redis_down_fail_open(monkeypatch):
+    """The lock is best-effort: contention past the wait, or Redis down, still runs the pass —
+    an eval that never runs is worse than a rare interleave (which progress heals next pass)."""
+    from tracely.infrastructure.queue import eval_debounce, thread_lock
+
+    class _Held:
+        def set(self, *a, **k):
+            return False  # someone else holds it
+
+        def eval(self, *a, **k):
+            raise AssertionError("must not release a lock it never acquired")
+
+    monkeypatch.setattr(eval_debounce, "_get_client", lambda: _Held())
+    monkeypatch.setattr(thread_lock, "_WAIT_SECONDS", 0)
+    with thread_lock.thread_pass_lock("p1", "th-1"):
+        pass  # reached without the lock
+
+    def boom():
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr(eval_debounce, "_get_client", boom)
+    with thread_lock.thread_pass_lock("p1", "th-1"):
+        pass
+
+
+def test_lock_acquire_and_release(monkeypatch):
+    from tracely.infrastructure.queue import eval_debounce, thread_lock
+
+    ops: list = []
+
+    class _Free:
+        def set(self, key, token, nx=None, ex=None):
+            ops.append(("set", key, token))
+            return True
+
+        def eval(self, script, n, key, token):
+            ops.append(("release", key, token))
+            return 1
+
+    monkeypatch.setattr(eval_debounce, "_get_client", lambda: _Free())
+    with thread_lock.thread_pass_lock("p1", "th-1"):
+        pass
+    assert [o[0] for o in ops] == ["set", "release"]
+    assert ops[0][1] == ops[1][1] and ops[0][2] == ops[1][2]  # same key, same token

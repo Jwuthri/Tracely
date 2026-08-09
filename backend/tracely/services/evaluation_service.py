@@ -335,12 +335,24 @@ class EvaluationService:
         on_result: OnResult | None = None,
         execution_mode: str | None = None,
     ) -> dict:
-        """Evaluate a whole conversation row: every turn with the trace/span-level evaluators,
-        then the conversation-level evaluators once across the full thread.
+        """Evaluate a whole conversation row: turns with the trace/span-level evaluators, then
+        the conversation-level evaluators once across the full thread.
 
         Metrics with `config.execution_mode == "sequential"` chain across the turns: each
         trace's run receives the previous turn's result of the SAME metric (injected as
-        `config.__previous_result__`; within a turn the judge chains its own steps)."""
+        `CFG_PREVIOUS`; within a turn the judge chains its own steps).
+
+        Sequential grading is INCREMENTAL on the automatic (ingest-debounced) pass: each metric's
+        progress through the thread is persisted (`eval_chain_progress`), so a settle only grades
+        the turns that arrived since the last pass, appending them to the column's durable
+        conversation. The stored prefix no longer matching the thread's turn order (a
+        late-arriving trace re-sorted the turns) resets the conversation and rebuilds from
+        turn 1. An explicit run (the UI's Play button, specs passed in) always rebuilds — its
+        intent is "re-grade everything now".
+
+        The whole sequential pass holds a per-thread Redis lock so the debounced task and an
+        on-demand run can't interleave one conversation; see `queue/thread_lock.py`.
+        """
         automatic = specs is None
         if specs is None:
             specs = self.load_enabled_evaluators(project_id)
@@ -353,54 +365,153 @@ class EvaluationService:
             sequential_names = {
                 s["score_name"] for s in trace_specs if _execution_mode(s) == "sequential"
             }
-            # This loop IS the ordered whole-thread pass, which is the one context where a
-            # message-level judge may extend its durable conversation (`__chain_pass__` — a lone
-            # re-grade of one turn appending mid-thread would corrupt the order). And a
-            # conversation is valid for exactly one pass: this pass re-grades every turn, so it
-            # resets each column's thread conversation first and rebuilds it from turn 1 —
-            # appending to the previous pass's transcript would show the judge a second copy of
-            # every turn, and turn 1 would see the verdicts the last pass gave turns 2..N.
             if sequential_names:
-                from tracely.infrastructure.llm.checkpointer import chat_id, reset_chat
+                from tracely.infrastructure.queue.thread_lock import thread_pass_lock
 
-                trace_specs = [
-                    {**s, "config": {**(s.get("config") or {}), CFG_CHAIN_PASS: True}}
-                    if s["score_name"] in sequential_names
-                    else s
-                    for s in trace_specs
-                ]
-                for name in sorted(
-                    s["score_name"] for s in trace_specs
-                    if s["score_name"] in sequential_names and s["level"] == RUN
-                ):
-                    reset_chat(chat_id(project_id, name, thread_id))
-            chain: dict[str, dict] = {}
-
-            def capture(score: dict) -> None:
-                if score["name"] in sequential_names:
-                    chain[score["name"]] = _chain_payload(score)
-                if on_result is not None:
-                    on_result(score)
-
-            # Fetch the thread's spans ONCE (not once per turn) when an advanced judge needs the
-            # full transcript — `evaluate_trace` reuses what we pass instead of re-reading.
-            thread_spans = (
-                self.trace_reader.read_thread_spans(project_id, thread_id)
-                if _needs_thread_context(trace_specs) else None
-            )
-            for tid in self.trace_reader.thread_trace_ids(project_id, thread_id):
-                staged = [_with_previous(s, chain) for s in trace_specs]
-                r = self.evaluate_trace(
-                    project_id, tid, specs=staged, on_result=capture, skip_conversation=True,
-                    thread_spans=thread_spans, apply_targeting=automatic,
+                with thread_pass_lock(project_id, thread_id):
+                    total, failures = self._run_turn_pass(
+                        project_id, thread_id, trace_specs, sequential_names,
+                        on_result, automatic,
+                    )
+            else:
+                total, failures = self._run_turn_pass(
+                    project_id, thread_id, trace_specs, set(), on_result, automatic
                 )
-                total += r.get("scores", 0)
-                failures += r.get("failures", 0)
         if conv_specs:
             total += self._evaluate_conversation(
                 project_id, thread_id, conv_specs, on_result, apply_targeting=automatic
             )
         return {"scores": total, "failures": failures}
+
+    def _run_turn_pass(
+        self,
+        project_id: str,
+        thread_id: str,
+        trace_specs: list[dict],
+        sequential_names: set[str],
+        on_result: OnResult | None,
+        automatic: bool,
+    ) -> tuple[int, int]:
+        """The ordered pass over a thread's turns — the one context where a message-level judge
+        may extend its durable conversation (`CFG_CHAIN_PASS`; a lone re-grade of one mid-thread
+        turn appending out of order is exactly what the marker forbids).
+
+        Each sequential metric starts at its persisted progress (incremental) or at turn 1 after
+        a reset (first run, order change, or a forced full run); batch specs run on every turn.
+        """
+        turn_ids = self.trace_reader.thread_trace_ids(project_id, thread_id)
+        if not turn_ids:
+            return 0, 0
+        starts: dict[str, int] = {}
+        chain: dict[str, dict] = {}
+        if sequential_names:
+            trace_specs = [
+                {**s, "config": {**(s.get("config") or {}), CFG_CHAIN_PASS: True}}
+                if s["score_name"] in sequential_names
+                else s
+                for s in trace_specs
+            ]
+            run_level = {
+                s["score_name"] for s in trace_specs
+                if s["score_name"] in sequential_names and s["level"] == RUN
+            }
+            starts = self._chain_starts(
+                project_id, thread_id, sequential_names, run_level, turn_ids, chain,
+                incremental=automatic,
+            )
+
+        def capture(score: dict) -> None:
+            if score["name"] in sequential_names:
+                chain[score["name"]] = _chain_payload(score)
+            if on_result is not None:
+                on_result(score)
+
+        # Fetch the thread's spans ONCE (not once per turn) when an advanced judge needs the
+        # full transcript — `evaluate_trace` reuses what we pass instead of re-reading.
+        thread_spans = (
+            self.trace_reader.read_thread_spans(project_id, thread_id)
+            if _needs_thread_context(trace_specs) else None
+        )
+        total = failures = 0
+        for i, tid in enumerate(turn_ids):
+            # A sequential metric joins at its start index; everything else runs on every turn.
+            due = [
+                s for s in trace_specs
+                if s["score_name"] not in sequential_names or starts[s["score_name"]] <= i
+            ]
+            if not due:
+                continue
+            staged = [_with_previous(s, chain) for s in due]
+            r = self.evaluate_trace(
+                project_id, tid, specs=staged, on_result=capture, skip_conversation=True,
+                thread_spans=thread_spans, apply_targeting=automatic,
+            )
+            total += r.get("scores", 0)
+            failures += r.get("failures", 0)
+            # Record progress per graded turn (not per pass) so a crashed pass resumes from the
+            # last turn it finished instead of re-appending everything to the conversation.
+            graded = [n for n in sequential_names if starts[n] <= i]
+            if graded:
+                try:
+                    with SyncSessionLocal() as sess:
+                        for name in graded:
+                            repositories.chain_progress_set(
+                                sess, project_id, name, thread_id,
+                                turn_ids[: i + 1], chain.get(name),
+                            )
+                except Exception as exc:  # progress is an optimization, never a blocker
+                    log.warning("chain_progress_write_failed", thread_id=thread_id, error=str(exc))
+        return total, failures
+
+    def _chain_starts(
+        self,
+        project_id: str,
+        thread_id: str,
+        sequential_names: set[str],
+        run_level: set[str],
+        turn_ids: list[str],
+        chain: dict[str, dict],
+        incremental: bool,
+    ) -> dict[str, int]:
+        """Where each sequential metric's pass begins, resetting whatever can't be continued.
+
+        A metric continues (start = however many turns its durable conversation already holds,
+        `chain` seeded with its last payload) iff we're on the automatic incremental path and its
+        stored turn list is a prefix of the thread's current turn order. Anything else — first
+        run, a late-arriving trace re-sorting the turns, or a forced full run — starts at 0 with
+        a fresh conversation: message-level chats reset here, step-level chats reset per trace
+        inside `_run_steps`, and the stale progress rows are cleared."""
+        progress: dict[str, dict] = {}
+        if incremental:
+            try:
+                with SyncSessionLocal() as sess:
+                    progress = repositories.chain_progress_load(sess, project_id, thread_id)
+            except Exception as exc:  # no progress ⇒ full rebuild, which is always safe
+                log.warning("chain_progress_load_failed", thread_id=thread_id, error=str(exc))
+        from tracely.infrastructure.llm.checkpointer import chat_id, reset_chat
+
+        starts: dict[str, int] = {}
+        stale: list[str] = []
+        for name in sorted(sequential_names):
+            done = (progress.get(name) or {}).get("turn_ids") or []
+            if incremental and done and done == turn_ids[: len(done)]:
+                starts[name] = len(done)
+                payload = (progress.get(name) or {}).get("last_payload")
+                if isinstance(payload, dict):
+                    chain[name] = payload
+                continue
+            starts[name] = 0
+            if done or not incremental:
+                stale.append(name)
+            if name in run_level:
+                reset_chat(chat_id(project_id, name, thread_id))
+        if stale:
+            try:
+                with SyncSessionLocal() as sess:
+                    repositories.chain_progress_clear(sess, project_id, thread_id, stale)
+            except Exception as exc:
+                log.warning("chain_progress_clear_failed", thread_id=thread_id, error=str(exc))
+        return starts
 
     def _apply_targeting(
         self, project_id: str, specs: list[dict], root: dict, trace_id: str

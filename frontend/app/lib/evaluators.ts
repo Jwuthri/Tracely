@@ -8,19 +8,17 @@ import type { EvalScore } from "./api";
 
 export type EvaluatorLevel = "CONVERSATION" | "AGENT_RUN" | "SPAN" | "TOOL" | "GENERATION" | "CHAIN";
 
-export type EvaluatorOutputType = "score" | "number" | "boolean" | "text" | "json" | "category";
+export type EvaluatorOutputType = "score" | "number" | "boolean" | "text" | "json";
 
 export type EvaluatorConfig = {
   prompt?: string;
   threshold?: number;
-  output_type?: EvaluatorOutputType; // "category" is legacy — superseded by json + enum schemas
+  output_type?: EvaluatorOutputType;
   output_schema?: Record<string, unknown>; // JSON Schema, for output_type "json"
   execution_mode?: "batch" | "sequential"; // sequential = chain items of this metric
   is_advanced?: boolean; // prompt uses @VARIABLE templates (set server-side from the prompt)
   template_variables?: string[]; // refs used, e.g. ["HISTORY", "CURRENT_STEP.tool_call"] (informational)
   depends_on?: string[]; // score_names of evaluators whose results are injected as context
-  categories?: string[]; // legacy (category output type)
-  fail_categories?: string[]; // legacy
   model?: string;
   span_types?: string[];
   check?: string; // structural evaluators

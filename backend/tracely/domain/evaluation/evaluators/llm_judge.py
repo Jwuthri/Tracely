@@ -28,7 +28,6 @@ Output types → persisted score shape:
                     numeric `score` field (if present) drives the 0..1 `value` + PASS/FAIL via
                     `threshold`; a `reason`/`reasoning`/`summary` field becomes the comment. With
                     neither, the column is informational (no value, no verdict).
-  category        → LEGACY alias (superseded by json + enum schemas); kept for old rows
 
 Execution mode (`config.execution_mode`, default "batch"):
 - batch      → every item graded independently, nothing carried between them.
@@ -36,8 +35,9 @@ Execution mode (`config.execution_mode`, default "batch"):
                prompt, then item → verdict → item → verdict (a durable LangGraph thread; see
                `infrastructure/llm/checkpointer.py`). A step judge's conversation spans the steps
                of one MESSAGE (reset and rebuilt on every pass over that trace); a message judge's
-               spans the TURNS of one thread (reset and rebuilt by each `evaluate_thread` pass —
-               a lone mid-thread re-grade never extends it). Cross-turn, a metric's previous
+               spans the TURNS of one thread, extended incrementally by the settled-thread pass
+               and rebuilt when the turn order changes or a full run is forced — a lone
+               mid-thread re-grade never extends it. Cross-turn, a metric's previous
                result is seeded into the first item (`CFG_PREVIOUS`, injected by
                the service). Without a reachable checkpointer the conversation degrades to
                pasting the run-so-far into each item's own prompt. CONVERSATION level has one
@@ -48,10 +48,10 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar
 
 import structlog
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field
 
 from tracely.domain.evaluation.evaluators.base import (
     CFG_CHAIN_PASS,
@@ -78,7 +78,7 @@ from tracely.infrastructure.llm import provider
 
 log = structlog.get_logger()
 
-OUTPUT_TYPES = ("score", "number", "boolean", "category", "text", "json")
+OUTPUT_TYPES = ("score", "number", "boolean", "text", "json")
 
 _DEFAULT_MAX_SPANS = 30  # cost guard for per-step judges
 
@@ -112,16 +112,6 @@ class TextVerdict(BaseModel):
 
     text: str = Field(description="the observation — a short, specific paragraph")
     reason: str = Field(default="", description="one sentence on why this observation matters")
-
-
-def _category_model(categories: list[str]) -> type[BaseModel]:
-    """A CategoryVerdict whose `category` field is constrained to the configured labels."""
-    cat_type: Any = Literal[tuple(categories)] if categories else str
-    return create_model(
-        "CategoryVerdict",
-        category=(cat_type, Field(description="exactly one category")),
-        reason=(str, Field(default="", description="why this category fits")),
-    )
 
 
 def _parse_json_object(text: str) -> dict:
@@ -613,8 +603,6 @@ class LLMJudgeEvaluator(Evaluator):
             return NumberVerdict
         if output_type == "boolean":
             return PassFailVerdict
-        if output_type == "category":  # legacy alias — new columns use json + enum schemas
-            return _category_model([str(c) for c in (config.get("categories") or [])])
         if output_type == "text":
             return TextVerdict
         return ScoreVerdict
@@ -633,13 +621,6 @@ class LLMJudgeEvaluator(Evaluator):
             ok = bool(verdict.passed)
             return EvalResult(
                 "", self.level, "PASS" if ok else "FAIL", value=1.0 if ok else 0.0, comment=reason,
-            )
-        if output_type == "category":
-            cat = str(verdict.category)[:120]
-            fails = {str(c) for c in (config.get("fail_categories") or [])}
-            v = "" if not fails else ("FAIL" if cat in fails else "PASS")
-            return EvalResult(
-                "", self.level, v, data_type="CATEGORICAL", string_value=cat, comment=reason,
             )
         if output_type == "text":
             return EvalResult(

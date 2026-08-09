@@ -171,6 +171,23 @@ export async function getSession(
   return getJson(`/api/sessions/${id}`);
 }
 
+// One sequential column's chain state on a thread (see /sessions/{id}/chain-progress).
+export type ChainMetric = {
+  score_name: string;
+  level: string;
+  chained: number;
+  turns: number;
+  up_to_date: boolean;
+  last_payload: Record<string, unknown> | null;
+  updated_at: string | null;
+};
+
+export async function getChainProgress(
+  id: string,
+): Promise<{ thread_id: string; metrics: ChainMetric[] }> {
+  return getJson(`/api/sessions/${id}/chain-progress`);
+}
+
 // ── Hierarchical trace table (conversation → message → step) ──────────────────
 // A turn with its spans eagerly attached (detail mode pre-seeds the whole tree).
 export type FullTurn = ThreadTurn & { spans: SpanOut[] };
