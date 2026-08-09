@@ -137,6 +137,17 @@ def _step_line(span: dict, n: int) -> str:
     )
 
 
+def _step_body(candidates: list[dict], i: int) -> str:
+    """The prompt for one step — `Step i of n` plus its I/O. Used for the item being graded and,
+    in chained mode, to re-render the earlier items for the recording."""
+    s = candidates[i]
+    return (
+        f"Step {i + 1} of {len(candidates)} — {s.get('type')} `{s.get('name') or s.get('step_id') or ''}`\n"
+        f"Step input:\n{_clip(readable_io(s.get('input')), _TRUNC_IO)}\n\n"
+        f"Step output:\n{_clip(readable_io(s.get('output')), _TRUNC_IO)}"
+    )
+
+
 def _turn_lines(spans: list[dict], stop_before: str = "") -> list[str]:
     """The thread as `Turn n — user/agent` lines, oldest first. `stop_before` cuts it at that
     trace, so a sequential message judge sees the conversation that LED to the message it grades
@@ -377,6 +388,15 @@ class LLMJudgeEvaluator(Evaluator):
             rec = introspection.active()
             if rec:
                 rec.target = f"{s.get('type')} {s.get('name') or s.get('step_id') or i + 1}"
+                # On a chat thread the earlier steps are already on the conversation, so they do
+                # not go over the wire again — but they ARE what the model is reading, and a row
+                # that shows only step N makes sequential indistinguishable from batch. Record
+                # them (display only; the wire prompt below is unchanged).
+                rec.context = (
+                    "".join(f"{_step_body(candidates, n)}\n\n[user]\n" for n in range(i))
+                    if sequential and i and chat
+                    else ""
+                )
             # Sequential means the run so far is context: the tool call is judged knowing what the
             # model was thinking when it chose it. Batch grades each step on its own — that is the
             # whole difference between the two modes.
@@ -392,12 +412,7 @@ class LLMJudgeEvaluator(Evaluator):
                 if sequential and i and not chat
                 else ""
             )
-            body = (
-                f"{trajectory}"
-                f"Step {i + 1} of {len(candidates)} — {s.get('type')} `{s.get('name') or s.get('step_id') or ''}`\n"
-                f"Step input:\n{_clip(readable_io(s.get('input')), _TRUNC_IO)}\n\n"
-                f"Step output:\n{_clip(readable_io(s.get('output')), _TRUNC_IO)}"
-            )
+            body = trajectory + _step_body(candidates, i)
             result = self._grade(
                 config, body, previous=previous,
                 deps=_deps_for_span(config, s.get("span_id", "")),

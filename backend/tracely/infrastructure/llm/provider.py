@@ -584,6 +584,9 @@ def _recorded(prompt: str, system_prompt: str | None, model: str | None) -> Iter
     start_ns = time.time_ns()
     sink: list = []
     label = model or settings.llm_judge_model
+    # Earlier turns the caller knows are already on this conversation — consumed here (they
+    # describe one call, like `target`) and shown ahead of this call's own turn.
+    prompt, rec.context = (rec.context + prompt), ""
     try:
         yield sink
     except Exception as exc:

@@ -125,6 +125,12 @@ class Recording:
     # Names the NEXT captured step — set by a step-level judge before each span it grades, so N
     # calls read as the spans they judged instead of N identical rows named after the model.
     target: str = ""
+    # The turns already on this call's conversation, consumed by the provider into the NEXT
+    # captured step's input. A chained (sequential) grade sends ONLY the new item over the wire —
+    # the checkpointer holds the earlier ones — so recording the wire prompt alone made step 3's
+    # INPUT byte-identical to a batch grade's: the trace showed the step being judged with no sight
+    # of steps 1–2, and sequential looked broken when it was working.
+    context: str = ""
 
     @property
     def label(self) -> str:

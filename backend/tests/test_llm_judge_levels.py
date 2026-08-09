@@ -509,3 +509,40 @@ def test_an_advanced_column_never_opens_a_chat_thread(monkeypatch):
         "execution_mode": "sequential",
     })
     assert seen == [None]
+
+
+def test_chained_steps_record_the_earlier_steps(monkeypatch):
+    """On a chat thread the earlier steps stay on the conversation instead of going over the wire
+    again — so they must reach the RECORDING, or step 3's trace row is a batch grade's row."""
+    from tracely.domain import introspection
+
+    def fake(prompt, *, response_format, system_prompt=None, **_):
+        with provider._recorded(prompt, system_prompt, None) as sink:  # the real recording seam
+            sink.append(("{}", {}))
+        return response_format(score=1.0, reason="ok")
+
+    monkeypatch.setattr(provider, "run_structured_agent", fake)
+    monkeypatch.setattr(
+        "tracely.domain.evaluation.evaluators.llm_judge._chat_id", lambda *a, **k: "chat-1"
+    )
+    spans = [
+        _span(span_id="root", type="AGENT"),
+        _span(span_id="tool-1", type="TOOL", name="faq", parent_span_id="root",
+              output="30 days with a receipt"),
+        _span(span_id="tool-2", type="TOOL", name="echo", parent_span_id="root"),
+    ]
+    rec = introspection.Recording(kind=introspection.EVAL, subject_id="t1", name="eval", project_id="p")
+    token = introspection._active.set(rec)
+    try:
+        _judge(SPAN).run(
+            _ctx(spans), {"execution_mode": "sequential", "span_types": ["TOOL"], "threshold": 0.6}
+        )
+    finally:
+        introspection._active.reset(token)
+
+    assert rec.context == ""  # consumed by the call it described
+    first, second = (s.input for s in rec.steps)
+    assert "Step 1 of 2" in first and "Step 2 of 2" not in first
+    # step 2's row shows the run so far, then its own turn — in the order the model read them
+    assert second.index("Step 1 of 2") < second.index("Step 2 of 2")
+    assert "30 days with a receipt" in second

@@ -514,3 +514,25 @@ def test_a_conversation_or_sequential_column_still_schedules_it(monkeypatch):
         monkeypatch, {"scores": 1, "thread_id": "th-1", "needs_thread_pass": True}
     )
     assert calls["scheduled"] == ("p1", "th-1", 7)
+
+
+def test_chained_grade_records_the_earlier_steps():
+    """Sequential sends only the new item over the wire (the checkpointer holds the rest), so
+    without this step 3's recorded INPUT is byte-identical to a batch grade's."""
+    from tracely.domain import introspection
+    from tracely.infrastructure.llm import provider
+
+    rec = _rec()
+    token = introspection._active.set(rec)
+    try:
+        rec.context = "Step 1 of 2 — TOOL `faq`\n\n[user]\n"
+        with provider._recorded("Step 2 of 2 — TOOL `echo`", "rubric", "m") as sink:
+            sink.append(("{}", {}))
+    finally:
+        introspection._active.reset(token)
+
+    assert rec.steps[0].input == (
+        "[system]\nrubric\n\n[user]\nStep 1 of 2 — TOOL `faq`\n\n[user]\nStep 2 of 2 — TOOL `echo`"
+    )
+    assert rec.context == ""  # consumed: it describes one call
+
