@@ -322,6 +322,19 @@ def evaluator_delete(s: Session, project_id: str, evaluator_id: str) -> bool:
     return True
 
 
+def _flat_config(config: dict | None) -> dict:
+    """A spec's config as ONE flat dict — the runner's contract (`base.dispatch` passes it to the
+    evaluator whole). Old rows nested structural knobs under `config.params`
+    ({"check": "latency", "params": {"budget_ms": …}}); fold that layer away here, the single
+    place specs enter the runner, so every evaluator reads one shape and the runtime-injected
+    `CFG_*` keys can never be lost to the narrowing that used to happen at dispatch."""
+    config = config or {}
+    params = config.get("params")
+    if not isinstance(params, dict):
+        return config
+    return {k: v for k, v in {**config, **params}.items() if k != "params"}
+
+
 def evaluator_enabled_specs(
     s: Session, project_id: str, evaluator_ids: list[str] | None = None
 ) -> list[dict]:
@@ -337,7 +350,7 @@ def evaluator_enabled_specs(
         {
             "id": r.id,
             "kind": r.kind,
-            "config": r.config or {},
+            "config": _flat_config(r.config),
             "score_name": r.score_name,
             "level": r.level,
             # targeting + sampling — the runner applies these on the auto (on-ingest) run

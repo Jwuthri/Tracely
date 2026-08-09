@@ -13,6 +13,13 @@ The conversation has to survive the process, because turns are graded minutes ap
 Celery tasks. That is what a checkpointer is for: LangGraph loads the thread's messages, appends
 the new one, and persists the result — so the caller sends only the new item.
 
+A conversation is valid for exactly ONE ordered pass over its items. Every sequential pass
+re-grades from item 1 (the settled-thread task re-runs each time the thread grows; a step judge
+re-runs whenever its trace is re-evaluated), so the pass must `reset_chat` first and rebuild —
+appending to what the previous pass left would show the judge a second copy of every item, and
+grading item 1 would see the verdicts the previous pass gave items 2..N: future leakage, and a
+transcript that grows quadratically.
+
 Tables (`checkpoints`, `checkpoint_writes`, `checkpoint_blobs`) are LangGraph's own, created by
 `setup()` on the first call in each process. They are NOT Alembic-managed: the schema belongs to
 the library, and pinning our migrations to its internals would break on its next release.
@@ -112,6 +119,19 @@ def setup() -> None:
     if saver is None:
         raise RuntimeError("checkpointer unavailable — cannot create checkpoint tables")
     saver.setup()
+
+
+def reset_chat(chat_id: str) -> None:
+    """Delete a judge conversation so the next pass rebuilds it from item 1. Best-effort: with no
+    checkpointer there is nothing to delete, and a failed delete only costs a dirtier transcript —
+    never the grades themselves."""
+    saver = get_checkpointer()
+    if saver is None:
+        return
+    try:
+        saver.delete_thread(chat_id)
+    except Exception as exc:
+        log.warning("chat_reset_failed", chat_id=chat_id, error=str(exc))
 
 
 def chat_id(project_id: str, score_name: str, subject: str) -> str:

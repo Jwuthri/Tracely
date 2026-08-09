@@ -27,6 +27,14 @@ CHAIN = "CHAIN"
 # Levels that address one span (the score's observation_id is the step's span_id).
 STEP_LEVELS = (SPAN, TOOL, GENERATION, CHAIN)
 
+# Reserved config keys — the runtime side-channel from `EvaluationService` to an evaluator.
+# An evaluator's `config` is otherwise exactly what the user saved (one FLAT dict; see
+# `repositories.evaluator_enabled_specs`, which folds the legacy `params` nesting away at load).
+# The service copies a spec's config and injects these per run; they are never persisted:
+CFG_PREVIOUS = "__previous_result__"  # sequential: the previous turn's result of this metric
+CFG_DEPENDENCIES = "__dependencies__"  # depends_on: {score_name: [{span_id, payload}]}
+CFG_CHAIN_PASS = "__chain_pass__"  # this run is an ordered whole-thread pass (evaluate_thread)
+
 
 class Evaluator(ABC):
     """One online check.
@@ -82,6 +90,11 @@ class EvaluatorRegistry:
     ) -> list[EvalResult]:
         """Run the matching evaluator and stamp results with the evaluator's score name/level.
 
+        `config` reaches the evaluator whole and flat — it used to be narrowed to
+        `config["params"]` when that key existed, which silently stripped the runtime-injected
+        `CFG_*` keys for any row with the legacy nesting. The nesting is now folded away at spec
+        load instead (`repositories.evaluator_enabled_specs`).
+
         Returns an empty list if no evaluator matches `kind`/`check` (an unknown evaluator
         kind on a project's row is a soft no-op — better than crashing the runner)."""
         config = config or {}
@@ -91,7 +104,7 @@ class EvaluatorRegistry:
         ev = cls()
         ev.level = level or cls.default_level
         ev.score_name = score_name
-        results = ev.run(ctx, config.get("params") or config or {})
+        results = ev.run(ctx, config)
         for r in results:
             r.name = score_name
             # Evaluators that emit the generic default get re-stamped with the configured

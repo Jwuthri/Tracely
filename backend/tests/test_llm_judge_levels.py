@@ -461,14 +461,26 @@ def test_a_sequential_column_grades_on_one_chat_thread(monkeypatch):
     ]
     ctx = RunContext("p", "t1", "run-1", [thread[1]], thread[1],
                      thread_id="c1", thread_spans=thread)
-    _judge(RUN).run(ctx, {"execution_mode": "sequential",
+    # `__chain_pass__` marks the ordered whole-thread pass (stamped by evaluate_thread) — the one
+    # context where a message-level judge may extend its durable conversation.
+    _judge(RUN).run(ctx, {"execution_mode": "sequential", "__chain_pass__": True,
                           "__previous_result__": {"verdict": "FAIL"}})
 
     chat_id, prompt = seen[0]
-    assert chat_id == "p:probe:c1" or chat_id.endswith(":c1")
+    assert chat_id.endswith(":c1")
     # the thread already holds them, so re-sending would double the tokens and break the prefix
     assert "Previous result of this metric" not in prompt
     assert "Conversation so far" not in prompt
+
+    # WITHOUT the marker (a lone re-grade of one mid-thread turn) the durable conversation must
+    # not be extended — appending that turn again, out of order, is how re-runs used to corrupt
+    # it. The judge falls back to pasting the earlier turns into its own prompt.
+    seen.clear()
+    _judge(RUN).run(ctx, {"execution_mode": "sequential",
+                          "__previous_result__": {"verdict": "FAIL"}})
+    chat_id, prompt = seen[0]
+    assert chat_id is None
+    assert "Conversation so far" in prompt and "Previous result of this metric" in prompt
 
 
 def test_an_unreachable_checkpointer_falls_back_instead_of_degrading_to_batch(monkeypatch):
@@ -546,3 +558,126 @@ def test_chained_steps_record_the_earlier_steps(monkeypatch):
     # step 2's row shows the run so far, then its own turn — in the order the model read them
     assert second.index("Step 1 of 2") < second.index("Step 2 of 2")
     assert "30 days with a receipt" in second
+
+
+def test_a_step_chat_is_per_message_and_reset_before_step_one(monkeypatch):
+    """A step judge's conversation spans the steps of ONE message — keyed by the trace, not the
+    thread (message 2's steps must not continue message 1's conversation) — and every `_run_steps`
+    call is a complete pass, so it resets the conversation first: a re-graded trace rebuilds from
+    step 1 instead of appending a second copy of every step."""
+    from tracely.infrastructure.llm import checkpointer
+
+    monkeypatch.setattr(checkpointer, "_saver", object())
+    monkeypatch.setattr(checkpointer.settings, "eval_chat_enabled", True)
+    resets: list[str] = []
+    monkeypatch.setattr(checkpointer, "reset_chat", resets.append)
+    seen: list = []
+
+    def fake(prompt, *, response_format, chat_id=None, **_):
+        seen.append((chat_id, prompt))
+        return response_format(score=1.0, reason="ok")
+
+    monkeypatch.setattr(provider, "run_structured_agent", fake)
+    spans = [
+        _span(span_id="root", type="AGENT"),
+        _span(span_id="s1", type="TOOL", name="faq", parent_span_id="root", output="found"),
+        _span(span_id="s2", type="TOOL", name="echo", parent_span_id="root"),
+    ]
+    ctx = RunContext("p", "t1", "run-1", spans, spans[0], thread_id="c1")
+    _judge(SPAN).run(ctx, {
+        "execution_mode": "sequential", "span_types": ["TOOL"],
+        "__previous_result__": {"verdict": "FAIL", "reason": "prior turn"},
+    })
+
+    assert resets == ["p:probe:t1"]  # trace-keyed, cleared once before the pass
+    assert [c for c, _ in seen] == ["p:probe:t1", "p:probe:t1"]
+    # the cross-turn seed lands on the first step only — the fresh conversation carries the rest
+    assert "Previous result of this metric" in seen[0][1]
+    assert "prior turn" in seen[0][1]
+    assert "Previous result of this metric" not in seen[1][1]
+    assert "Steps already taken" not in seen[1][1]  # the transcript, not a paste, is the context
+
+
+def test_a_conversation_level_column_never_chats(monkeypatch):
+    """The thread is one item; each settle-pass re-grades it whole. A durable conversation would
+    only show the judge stale copies of the same transcript."""
+    from tracely.infrastructure.llm import checkpointer
+
+    monkeypatch.setattr(checkpointer, "_saver", object())
+    monkeypatch.setattr(checkpointer.settings, "eval_chat_enabled", True)
+    seen: list = []
+
+    def fake(prompt, *, response_format, chat_id=None, **_):
+        seen.append(chat_id)
+        return response_format(score=1.0, reason="ok")
+
+    monkeypatch.setattr(provider, "run_structured_agent", fake)
+    thread = [
+        _span(trace_id="t0", span_id="r0", input="hi", output="hello"),
+        _span(trace_id="t1", span_id="r1", input="bye", output="later"),
+    ]
+    ctx = RunContext("p", "", "", thread, thread[0], thread_id="c1")
+    _judge(CONVERSATION).run(ctx, {"execution_mode": "sequential"})
+    assert seen == [None]
+
+
+def test_a_chain_pass_message_row_records_the_earlier_turns(monkeypatch):
+    """With the earlier turns riding on the chat thread instead of the wire, the recording must
+    re-render them or a chained message grade's INPUT reads like a batch grade's."""
+    from tracely.domain import introspection
+    from tracely.infrastructure.llm import checkpointer
+
+    monkeypatch.setattr(checkpointer, "_saver", object())
+    monkeypatch.setattr(checkpointer.settings, "eval_chat_enabled", True)
+
+    def fake(prompt, *, response_format, system_prompt=None, **_):
+        with provider._recorded(prompt, system_prompt, None) as sink:
+            sink.append(("{}", {}))
+        return response_format(score=1.0, reason="ok")
+
+    monkeypatch.setattr(provider, "run_structured_agent", fake)
+    thread = [
+        _span(trace_id="t0", span_id="r0", input="first question", output="first answer"),
+        _span(trace_id="t1", span_id="r1", input="second question", output="second answer"),
+    ]
+    ctx = RunContext("p", "t1", "run-1", [thread[1]], thread[1],
+                     thread_id="c1", thread_spans=thread)
+    rec = introspection.Recording(kind=introspection.EVAL, subject_id="t1", name="eval", project_id="p")
+    token = introspection._active.set(rec)
+    try:
+        _judge(RUN).run(ctx, {"execution_mode": "sequential", "__chain_pass__": True})
+    finally:
+        introspection._active.reset(token)
+
+    (row,) = rec.steps
+    assert "first question" in row.input and "first answer" in row.input
+    assert row.input.index("first question") < row.input.index("second question")
+
+
+def test_malformed_traces_grade_or_skip_predictably(monkeypatch):
+    """Partial/broken traces: a message with SOME content still grades (stating what's missing);
+    only a message with neither request nor answer, an empty thread, or steps without I/O are
+    skipped — silently producing nothing is reserved for 'genuinely nothing to grade'."""
+    prompts: list[str] = []
+    _stub_structured(monkeypatch, {"score": 1.0, "reason": "ok"}, prompts=prompts)
+
+    # message with no I/O at all → no result
+    silent = _span(input="", output="")
+    assert _judge(RUN).run(_ctx([silent]), {}) == []
+
+    # a request with no answer still grades, saying so
+    half = _span(input="hello?", output="")
+    assert len(_judge(RUN).run(_ctx([half]), {})) == 1
+    assert "(the agent produced no answer)" in prompts[-1]
+
+    # step level: spans with no input/output are not gradable items
+    spans = [
+        _span(span_id="root", type="AGENT"),
+        _span(span_id="empty", type="TOOL", parent_span_id="root", input="", output=""),
+        _span(span_id="real", type="TOOL", parent_span_id="root", input="q", output="a"),
+    ]
+    results = _judge(SPAN).run(_ctx(spans), {"span_types": ["TOOL"]})
+    assert [r.target_span_id for r in results] == ["real"]
+
+    # conversation level: a thread with no renderable turns → no result
+    assert _judge(CONVERSATION).run(_ctx([silent], thread_id="c1"), {}) == []

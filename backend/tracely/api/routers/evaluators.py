@@ -21,6 +21,7 @@ from tracely.api.auth import get_project_id
 from tracely.domain.evaluation.evaluators import TEMPLATES
 from tracely.domain.evaluation.evaluators.llm_judge import OUTPUT_TYPES
 from tracely.domain.evaluation.generation import generate_evaluator_config
+from tracely.domain.evaluation.output_schema import model_from_json_schema
 from tracely.domain.evaluation.template_resolver import (
     build_context,
     extract_template_variables,
@@ -81,6 +82,39 @@ def _validate_evaluator(kind: str, level: str, config: dict[str, Any]) -> None:
     execution_mode = str(config.get("execution_mode") or "batch").lower()
     if execution_mode not in {"batch", "sequential"}:
         raise HTTPException(status_code=400, detail="execution_mode must be 'batch' or 'sequential'")
+    # Knobs the runner would otherwise trip over mid-grade (a bad value there doesn't crash the
+    # pipeline — the per-evaluator catch eats it — but the column silently stops producing scores,
+    # which is the worst way to learn your threshold was the string "0.6 or so").
+    if config.get("threshold") is not None and not isinstance(config["threshold"], (int, float)):
+        raise HTTPException(status_code=400, detail="threshold must be a number")
+    if config.get("max_spans") is not None and (
+        not isinstance(config["max_spans"], int) or config["max_spans"] < 1
+    ):
+        raise HTTPException(status_code=400, detail="max_spans must be a positive integer")
+    span_types = config.get("span_types")
+    if span_types is not None:
+        allowed = {"SPAN", "TOOL", "GENERATION", "CHAIN"}
+        if not isinstance(span_types, list) or not set(map(str, span_types)) <= allowed:
+            raise HTTPException(
+                status_code=400, detail=f"span_types must be a list drawn from {sorted(allowed)}"
+            )
+    depends_on = config.get("depends_on")
+    if depends_on is not None and (
+        not isinstance(depends_on, list) or not all(isinstance(d, str) for d in depends_on)
+    ):
+        raise HTTPException(status_code=400, detail="depends_on must be a list of score names")
+    if output_type == "json" and config.get("output_schema") is not None:
+        try:
+            compiled = model_from_json_schema(config["output_schema"])
+        except Exception:
+            compiled = None
+        # None also covers a schema the compiler understands but can't build a contract from —
+        # the run path would silently fall back to free-form JSON, so reject it here instead.
+        if compiled is None:
+            raise HTTPException(
+                status_code=400,
+                detail="output_schema is not a usable JSON Schema (object with typed properties)",
+            )
 
 
 def _stamp_advanced(config: dict[str, Any]) -> dict[str, Any]:

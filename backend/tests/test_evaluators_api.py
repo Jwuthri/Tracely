@@ -314,3 +314,36 @@ async def test_generate_returns_normalized_draft(client, sync_db, monkeypatch):
     assert draft["config"]["output_type"] == "score"
     assert draft["config"]["threshold"] == 0.7
     assert draft["config"]["prompt"].startswith("Grade")
+
+
+async def test_create_rejects_malformed_config_knobs(client, sync_db):
+    """Knobs the runner would trip over mid-grade fail at save time instead — a bad value there
+    doesn't crash the pipeline, it makes the column silently stop producing scores."""
+    tok = await _owner_token(client)
+
+    async def rejected(config: dict) -> str:
+        r = await client.post(
+            "/api/evaluators", headers=_bearer(tok),
+            json={"name": "x", "kind": "llm_judge", "level": "AGENT_RUN", "config": config},
+        )
+        assert r.status_code == 400, config
+        return r.json()["detail"]
+
+    assert "threshold" in await rejected({"threshold": "0.6 or so"})
+    assert "max_spans" in await rejected({"max_spans": 0})
+    assert "span_types" in await rejected({"span_types": ["TOOL", "BANANA"]})
+    assert "depends_on" in await rejected({"depends_on": "helpfulness"})
+    # a schema the compiler can't build a contract from would silently fall back to free-form
+    assert "output_schema" in await rejected(
+        {"output_type": "json", "output_schema": {"type": "object", "properties": {}}}
+    )
+    # the same knobs well-formed are accepted
+    ok = await client.post(
+        "/api/evaluators", headers=_bearer(tok),
+        json={"name": "ok", "kind": "llm_judge", "level": "TOOL", "config": {
+            "threshold": 0.6, "max_spans": 10, "span_types": ["TOOL"],
+            "depends_on": ["helpfulness"], "output_type": "json",
+            "output_schema": {"type": "object", "properties": {"score": {"type": "number"}}},
+        }},
+    )
+    assert ok.status_code == 200

@@ -3,12 +3,18 @@
 
 The judge's rubric prompt becomes the agent's SYSTEM prompt and the graded ITEM is the user
 message — the item alone, with nothing bundled alongside it, so what the judge reads is exactly
-what the level names:
+what the level names (every string it sends is rendered in `prompts.py`, which documents the
+system-vs-user contract):
 
 - level CONVERSATION  → the whole `[user, ai, user, ai …]` transcript, once
 - level AGENT_RUN     → one `[user, ai]` pair, per message
 - level SPAN/TOOL/GENERATION → one step — every event inside the message (tool call, thinking,
                         retrieval, agent hand-off), the message root excluded
+
+This module owns everything that is NOT prompt text: the response schemas, the level dispatch,
+the sequential continuity policy (`_chat_id`), and output→`EvalResult` conversion. A failed
+grade returns None → NO score is written; the failure is logged and visible in the eval
+recording, never persisted as a fake verdict.
 
 `config.output_type` picks the structured response schema the agent must return:
 
@@ -26,10 +32,16 @@ Output types → persisted score shape:
 
 Execution mode (`config.execution_mode`, default "batch"):
 - batch      → every item graded independently, nothing carried between them.
-- sequential → items graded in order, each one seeing what came before: a step sees the steps
-               already taken in its message, a message sees the earlier turns of its
-               conversation, plus the previous result of the SAME metric
-               (`config.__previous_result__`, injected by the service).
+- sequential → items graded in order as ONE conversation with the model: the rubric is the system
+               prompt, then item → verdict → item → verdict (a durable LangGraph thread; see
+               `infrastructure/llm/checkpointer.py`). A step judge's conversation spans the steps
+               of one MESSAGE (reset and rebuilt on every pass over that trace); a message judge's
+               spans the TURNS of one thread (reset and rebuilt by each `evaluate_thread` pass —
+               a lone mid-thread re-grade never extends it). Cross-turn, a metric's previous
+               result is seeded into the first item (`CFG_PREVIOUS`, injected by
+               the service). Without a reachable checkpointer the conversation degrades to
+               pasting the run-so-far into each item's own prompt. CONVERSATION level has one
+               item, so the mode changes nothing there.
 """
 
 from __future__ import annotations
@@ -42,43 +54,33 @@ import structlog
 from pydantic import BaseModel, Field, create_model
 
 from tracely.domain.evaluation.evaluators.base import (
-    CHAIN,
+    CFG_CHAIN_PASS,
+    CFG_DEPENDENCIES,
+    CFG_PREVIOUS,
     CONVERSATION,
-    GENERATION,
     SPAN,
     STEP_LEVELS,
-    TOOL,
     Evaluator,
     default_registry,
 )
+from tracely.domain.evaluation.evaluators import prompts
+from tracely.domain.evaluation.evaluators.prompts import ADVANCED_SYSTEM
 from tracely.domain.evaluation.evaluators.catalog import DEFAULT_JUDGE_PROMPT
 from tracely.domain.evaluation.output_schema import model_from_json_schema
-from tracely.domain.evaluation.results import EvalResult, RunContext
+from tracely.domain.evaluation.results import EvalResult, RunContext, chain_payload
 from tracely.domain.evaluation.template_resolver import (
     build_context,
     extract_template_variables,
     template_resolver,
 )
 from tracely.domain import introspection
-from tracely.domain.evaluation.text import answer_for, content_text, readable_io, request_for
-from tracely.domain.traces.spans import root_span
 from tracely.infrastructure.llm import provider
 
 log = structlog.get_logger()
 
 OUTPUT_TYPES = ("score", "number", "boolean", "category", "text", "json")
 
-_TRUNC_IO = 1500  # per-step input/output excerpt
-_TRUNC_TURN = 800  # per-turn excerpt in the conversation transcript
-_TRUNC_STEP_LINE = 400  # one earlier step, in a sequential judge's trajectory
-_TRUNC_TRAJECTORY = 4000  # the whole run-so-far block (steps, or earlier turns)
 _DEFAULT_MAX_SPANS = 30  # cost guard for per-step judges
-# The system prompt for an ADVANCED grade. Deliberately says nothing about what to grade: the
-# user's resolved template is the rubric AND the context, and it arrives as the human message.
-ADVANCED_SYSTEM = (
-    "You are an evaluator. Follow the instructions in the message exactly and return the "
-    "structured verdict you are asked for — nothing else."
-)
 
 
 # ── structured response schemas (create_agent response_format) ───────────────
@@ -122,59 +124,6 @@ def _category_model(categories: list[str]) -> type[BaseModel]:
     )
 
 
-def _clip(s: str, n: int) -> str:
-    s = s or ""
-    return s if len(s) <= n else s[: n - 1] + "…"
-
-
-def _step_line(span: dict, n: int) -> str:
-    """One earlier event, as a sequential judge sees it: what kind, what it was called, what came
-    back. Output over input — the input is usually the prompt the judge already has."""
-    body = content_text(span.get("output")) or content_text(span.get("input"))
-    return (
-        f"{n}. {span.get('type')} `{span.get('name') or span.get('step_id') or ''}`: "
-        f"{_clip(body, _TRUNC_STEP_LINE)}"
-    )
-
-
-def _step_body(candidates: list[dict], i: int) -> str:
-    """The prompt for one step — `Step i of n` plus its I/O. Used for the item being graded and,
-    in chained mode, to re-render the earlier items for the recording."""
-    s = candidates[i]
-    return (
-        f"Step {i + 1} of {len(candidates)} — {s.get('type')} `{s.get('name') or s.get('step_id') or ''}`\n"
-        f"Step input:\n{_clip(readable_io(s.get('input')), _TRUNC_IO)}\n\n"
-        f"Step output:\n{_clip(readable_io(s.get('output')), _TRUNC_IO)}"
-    )
-
-
-def _turn_lines(spans: list[dict], stop_before: str = "") -> list[str]:
-    """The thread as `Turn n — user/agent` lines, oldest first. `stop_before` cuts it at that
-    trace, so a sequential message judge sees the conversation that LED to the message it grades
-    and not the message itself."""
-    by_trace: dict[str, list[dict]] = {}
-    order: list[str] = []
-    for s in spans:
-        tid = s.get("trace_id") or ""
-        if tid not in by_trace:
-            by_trace[tid] = []
-            order.append(tid)
-        by_trace[tid].append(s)
-    lines: list[str] = []
-    for n, tid in enumerate(order, start=1):
-        if stop_before and tid == stop_before:
-            break
-        trace_spans = by_trace[tid]
-        root = root_span(trace_spans)
-        user_in = request_for(root, trace_spans)
-        answer = answer_for(root, trace_spans, TOOL, GENERATION, CHAIN)
-        if user_in:
-            lines.append(f"Turn {n} — user: {_clip(user_in, _TRUNC_TURN)}")
-        if answer:
-            lines.append(f"Turn {n} — agent: {_clip(answer, _TRUNC_TURN)}")
-    return lines
-
-
 def _parse_json_object(text: str) -> dict:
     """Best-effort strict-JSON parse of a model reply (tolerates ```json fences)."""
     t = re.sub(r"^```(?:json)?\s*|\s*```$", "", (text or "").strip())
@@ -184,54 +133,24 @@ def _parse_json_object(text: str) -> dict:
     return parsed
 
 
-def _result_payload(r: EvalResult) -> dict:
-    """The chained-context view of a result (sequential mode): the schema-shaped object for
-    json outputs (with the score/verdict/reason envelope re-attached), else a compact
-    {value, verdict, reason}."""
-    if r.string_value:
-        try:
-            parsed = json.loads(r.string_value)
-            if isinstance(parsed, dict):
-                out = dict(parsed)
-                if r.value is not None:
-                    out.setdefault("score", r.value)
-                if r.verdict:
-                    out.setdefault("verdict", r.verdict)
-                if r.comment:
-                    out.setdefault("reason", r.comment)
-                return out
-        except ValueError:
-            pass
-    payload = {"value": r.value, "verdict": r.verdict or None, "reason": r.comment or None}
-    return {k: v for k, v in payload.items() if v is not None}
+def _deps(config: dict, span_id: str | None = None) -> dict:
+    """Dependency results (`CFG_DEPENDENCIES`) flattened to `{score_name: payload | [payloads]}`.
 
-
-def _deps_all(config: dict) -> dict:
-    """All dependency results, flattened to `{score_name: payload | [payloads]}` — for
-    trace/conversation grades (one item, so every dependency result applies)."""
-    raw = config.get("__dependencies__") or {}
+    `span_id=None` — a trace/conversation grade: one item, so every result of each dependency
+    applies. With a `span_id` — one step: each dependency's result for this exact span, falling
+    back to its trace/conversation-level result (recorded under span_id ""), so a step-level
+    composite lines up step N's prerequisite verdicts while a dependency on a per-turn metric is
+    shared across the run's steps."""
+    raw = config.get(CFG_DEPENDENCIES) or {}
     out: dict = {}
     for name, records in raw.items():
         if not isinstance(records, list) or not records:
             continue
-        payloads = [rec.get("payload") for rec in records]
-        out[name] = payloads[0] if len(payloads) == 1 else payloads
-    return out
-
-
-def _deps_for_span(config: dict, span_id: str) -> dict:
-    """The dependency results that apply to ONE step: each dependency's result for this exact
-    `span_id`, falling back to a trace/conversation-level result (recorded under span_id "")
-    that applies to every step. So a step-level composite lines up step N's prerequisite
-    verdicts, while a dependency on a per-turn metric is shared across the run's steps."""
-    raw = config.get("__dependencies__") or {}
-    out: dict = {}
-    for name, records in raw.items():
-        if not isinstance(records, list):
-            continue
-        match = [rec for rec in records if rec.get("span_id") == span_id]
-        if not match:  # trace/conversation-level dependency → applies to every step
-            match = [rec for rec in records if not rec.get("span_id")]
+        match = records
+        if span_id is not None:
+            match = [rec for rec in records if rec.get("span_id") == span_id]
+            if not match:  # trace/conversation-level dependency → applies to every step
+                match = [rec for rec in records if not rec.get("span_id")]
         if match:
             out[name] = match[0].get("payload") if len(match) == 1 else [m.get("payload") for m in match]
     return out
@@ -241,25 +160,40 @@ def _is_sequential(config: dict) -> bool:
     return str(config.get("execution_mode") or "batch") == "sequential"
 
 
-def _chat_id(ctx: RunContext, config: dict, score_name: str) -> str | None:
+def _chat_id(ctx: RunContext, config: dict, score_name: str, level: str) -> str | None:
     """The conversation this column holds with the model, or None for a batch column.
 
     Batch means the items are independent, so each one is a fresh question — sharing a transcript
     would be exactly the contamination `batch` promises not to have. Sequential means the opposite,
-    and gets one thread per (workspace, column, conversation): the rubric and every earlier
-    item→verdict pair stay on it, so a later item sends only itself and the provider serves the
-    rest from its prompt cache.
+    and gets one thread per (workspace, column, subject): the rubric and every earlier item→verdict
+    pair stay on it, so a later item sends only itself and the provider serves the rest from its
+    prompt cache. The subject matches the level's sequence:
+
+    - STEP levels → the TRACE. A step judge chains the steps of one message; its `_run_steps` call
+      is always a complete ordered pass, which resets the conversation before item 1.
+    - AGENT_RUN → the THREAD, and only inside a whole-thread pass (`__chain_pass__`, stamped by
+      `evaluate_thread`, which resets the conversation first). A lone re-grade of one mid-thread
+      turn must NOT extend the durable conversation — it would append its item out of order — so
+      it falls back to pasting the earlier turns into its own prompt.
+    - CONVERSATION → never. The thread is one item; there is no sequence to hold a conversation
+      about, and chaining re-grades would show the judge a stale copy of the whole transcript per
+      settle.
 
     Returns None when the checkpointer can't be reached, and that is load-bearing: the callers
     stop pasting the history in once a chat exists, so answering "yes" on a thread that will not
     actually persist would degrade every sequential column to batch — silently, and only in the
     incident where the database is already unhappy.
     """
-    if not _is_sequential(config):
+    if not _is_sequential(config) or level == CONVERSATION:
+        return None
+    if level in STEP_LEVELS:
+        subject = ctx.trace_id
+    elif config.get(CFG_CHAIN_PASS):
+        subject = ctx.thread_id or ctx.trace_id
+    else:
         return None
     from tracely.infrastructure.llm.checkpointer import chat_id, get_checkpointer
 
-    subject = ctx.thread_id or ctx.trace_id
     if not subject or get_checkpointer() is None:
         return None
     return chat_id(ctx.project_id, score_name, subject)
@@ -269,7 +203,7 @@ def _previous_from_config(config: dict) -> dict | None:
     """The cross-item seed for sequential mode (set by EvaluationService for thread runs)."""
     if not _is_sequential(config):
         return None
-    prev = config.get("__previous_result__")
+    prev = config.get(CFG_PREVIOUS)
     return prev if isinstance(prev, dict) else None
 
 
@@ -284,53 +218,51 @@ class LLMJudgeEvaluator(Evaluator):
     def run(self, ctx: RunContext, params: dict) -> list[EvalResult]:
         if not provider.llm_enabled():
             return []
-        # Note: for the judge, `params` is actually the full evaluator config (the runner
-        # passes config|params transparently — both .get("prompt"/"threshold") and
-        # .get("params").get("prompt"/"threshold") work). Resolve both shapes.
-        config = params.get("params") or params
+        config = params  # the full evaluator config — flat, see `base.dispatch`
         if config.get("is_advanced"):
             return self._run_advanced(ctx, config)
         if self.level == CONVERSATION:
             return self._run_conversation(ctx, config)
         if self.level in STEP_LEVELS:
             return self._run_steps(ctx, config)
-        return self._run_trace(ctx, config)
+        return self._run_message(ctx, config)
 
-    # ── per-level context builders ───────────────────────────────────────────
+    # ── per-level runners ────────────────────────────────────────────────────
 
-    def _run_trace(self, ctx: RunContext, config: dict) -> list[EvalResult]:
-        """One grade for the trace: user request vs final answer, grounded in tool results."""
-        user_in = request_for(ctx.root, ctx.spans)
-        answer = answer_for(ctx.root, ctx.spans, TOOL, GENERATION, CHAIN)
-        # An empty answer used to return no result at all, so the worst outcome there is — the
-        # agent crashed, timed out, or replied with nothing — produced no score, and the cell read
-        # "not graded yet" rather than a failure. Grade it against the rubric like anything else,
-        # stating plainly that there was no answer; the rubric decides (a "did it refuse?" column
-        # may well call that a PASS). Only a run with neither a request nor an answer is skipped —
-        # there is genuinely nothing to grade.
-        if not answer and not user_in:
+    def _run_message(self, ctx: RunContext, config: dict) -> list[EvalResult]:
+        """One grade for the message (level AGENT_RUN, one trace): user request vs final answer.
+
+        Only a run with neither a request nor an answer is skipped — an agent that crashed into
+        no answer still gets graded (see `_message_body`); "not graded yet" for the worst outcome
+        there is was the old bug."""
+        body = prompts.message_body(ctx.spans)
+        if not body:
             return []
         # Sequential: the earlier turns are the context this message is judged in. Batch grades the
         # message alone. That is the ONLY difference between the modes at this level — the item
         # itself is `[user, ai]` either way, with no tool dump, no catalog, nothing else bundled
         # in. A judge that needs the tool results should read them at step level, where the tool
-        # call IS the item.
-        chat = _chat_id(ctx, config, self.score_name)
+        # call IS the item. On a chain pass the earlier turns are already on the column's durable
+        # conversation (verdicts included), so only the fallback path pastes them in — but they ARE
+        # what the model is reading, so the recording shows them (`Recording.context`).
+        chat = _chat_id(ctx, config, self.score_name, self.level)
         history = ""
         if _is_sequential(config) and not chat and ctx.thread_spans:
-            lines = _turn_lines(ctx.thread_spans, stop_before=ctx.trace_id)
+            lines = prompts.turn_lines(ctx.thread_spans, stop_before=ctx.trace_id)
             if lines:
                 history = (
                     "Conversation so far (earlier turns, oldest first):\n"
-                    + _clip("\n".join(lines), _TRUNC_TRAJECTORY) + "\n\n"
+                    + prompts.clip("\n".join(lines), prompts.TRUNC_TRAJECTORY) + "\n\n"
                 )
-        body = (
-            f"{history}"
-            f"User request:\n{_clip(user_in, 2000)}\n\n"
-            f"Agent answer:\n{_clip(answer, 2000) or '(the agent produced no answer)'}"
-        )
+        rec = introspection.active()
+        if rec and chat:
+            rec.context = prompts.earlier_messages(ctx.thread_spans, ctx.trace_id)
         result = self._grade(
-            config, body, previous=_previous_from_config(config), chat_id=chat,
+            config, history + body,
+            # On a chain pass the transcript carries the earlier verdicts in the judge's own
+            # words; pasting the seed too would say it twice.
+            previous=None if chat else _previous_from_config(config),
+            chat_id=chat,
         )
         return [result] if result else []
 
@@ -379,7 +311,14 @@ class LLMJudgeEvaluator(Evaluator):
         )
         sequential = _is_sequential(config)
         previous = _previous_from_config(config)
-        chat = _chat_id(ctx, config, self.score_name)
+        chat = _chat_id(ctx, config, self.score_name, self.level)
+        if chat:
+            # This call is a complete ordered pass over the message's steps, and the conversation
+            # is valid for exactly one pass: a re-graded trace (late spans, an on-demand re-run)
+            # must rebuild it from step 1, not append a second copy of every step to it.
+            from tracely.infrastructure.llm.checkpointer import reset_chat
+
+            reset_chat(chat)
         out: list[EvalResult] = []
         for i, s in enumerate(candidates):
             # Name the recorded call for the span it judges. Without this a step-level column
@@ -393,7 +332,7 @@ class LLMJudgeEvaluator(Evaluator):
                 # that shows only step N makes sequential indistinguishable from batch. Record
                 # them (display only; the wire prompt below is unchanged).
                 rec.context = (
-                    "".join(f"{_step_body(candidates, n)}\n\n[user]\n" for n in range(i))
+                    "".join(f"{prompts.step_body(candidates, n)}\n\n[user]\n" for n in range(i))
                     if sequential and i and chat
                     else ""
                 )
@@ -406,16 +345,20 @@ class LLMJudgeEvaluator(Evaluator):
             # fallback path (no checkpointer) pastes them in.
             trajectory = (
                 "Steps already taken in this message (oldest first):\n"
-                + _clip("\n".join(_step_line(p, n) for n, p in enumerate(candidates[:i], start=1)),
-                        _TRUNC_TRAJECTORY)
+                + prompts.clip("\n".join(prompts.step_line(p, n) for n, p in enumerate(candidates[:i], start=1)),
+                        prompts.TRUNC_TRAJECTORY)
                 + "\n\n"
                 if sequential and i and not chat
                 else ""
             )
-            body = trajectory + _step_body(candidates, i)
+            body = trajectory + prompts.step_body(candidates, i)
             result = self._grade(
-                config, body, previous=previous,
-                deps=_deps_for_span(config, s.get("span_id", "")),
+                config, body,
+                # With a chat the transcript carries each step's verdict, so the seed is pasted
+                # only where the fresh conversation has nothing yet: the first step, whose
+                # `previous` is the previous TURN's result of this metric (`__previous_result__`).
+                previous=previous if (not chat or i == 0) else None,
+                deps=_deps(config, s.get("span_id", "")),
                 chat_id=chat,
             )
             if result:
@@ -424,22 +367,24 @@ class LLMJudgeEvaluator(Evaluator):
                     result.comment = (result.comment or "") + coverage
                 out.append(result)
                 if sequential:
-                    previous = _result_payload(result)
+                    previous = chain_payload(value=result.value, verdict=result.verdict, comment=result.comment, string_value=result.string_value)
         return out
 
     def _run_conversation(self, ctx: RunContext, config: dict) -> list[EvalResult]:
         """One grade for the whole thread: a turn-by-turn transcript (ctx.spans spans every
         trace in the thread; each span carries its trace_id)."""
-        lines = _turn_lines(ctx.spans)
+        lines = prompts.turn_lines(ctx.spans)
         if not lines:
             return []
         turns = sum(1 for line in lines if " — user: " in line) or len(lines)
-        transcript = _clip("\n".join(lines), 8000)
+        transcript = prompts.clip("\n".join(lines), 8000)
         # The messages, and nothing else. A conversation-level judge is asked to read a
         # conversation; a tool catalog stapled underneath made it grade tool choice instead, and
         # marked a plain greeting down for not calling an identification tool.
         body = f"Full conversation ({turns} turn{'s' if turns != 1 else ''}):\n{transcript}"
-        result = self._grade(config, body, chat_id=_chat_id(ctx, config, self.score_name))
+        # Never a chat_id here: the thread is one item, and each settle-pass re-grades it whole —
+        # a durable conversation would only show the judge stale copies of the same transcript.
+        result = self._grade(config, body)
         return [result] if result else []
 
     # ── advanced (template) grading ──────────────────────────────────────────
@@ -542,7 +487,7 @@ class LLMJudgeEvaluator(Evaluator):
                     result.comment = (result.comment or "") + coverage
                 out.append(result)
                 if sequential:
-                    previous = _result_payload(result)
+                    previous = chain_payload(value=result.value, verdict=result.verdict, comment=result.comment, string_value=result.string_value)
         return out
 
     def _grade_resolved(self, config: dict, template: str, context) -> EvalResult | None:
@@ -563,21 +508,21 @@ class LLMJudgeEvaluator(Evaluator):
         off to the shared model-call tail.
 
         `chat_id` puts this item into the column's running conversation with the model instead of
-        asking a fresh question. When it is set the transcript IS the continuity — the judge sees
-        the verdicts it gave, in its own words, and `previous` is not pasted in as a paraphrase.
+        asking a fresh question. Callers decide what rides along: they pass `previous` only when
+        the transcript does NOT already carry it (no chat, or the first item of a fresh chat).
         """
         rubric = config.get("prompt") or DEFAULT_JUDGE_PROMPT
-        if previous and not chat_id:
+        if previous:
             body += (
                 "\n\nPrevious result of this metric (the preceding item in the sequence — use "
                 "it for continuity and comparison):\n"
-                + _clip(json.dumps(previous, ensure_ascii=False), 1500)
+                + prompts.clip(json.dumps(previous, ensure_ascii=False), 1500)
             )
         if deps is None:  # trace/conversation grades use every dependency result
-            deps = _deps_all(config)
+            deps = _deps(config)
         if deps:
             dep_lines = "\n".join(
-                f"- {name}: {_clip(json.dumps(v, ensure_ascii=False), 600)}"
+                f"- {name}: {prompts.clip(json.dumps(v, ensure_ascii=False), 600)}"
                 for name, v in deps.items()
             )
             body += (

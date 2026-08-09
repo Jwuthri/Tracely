@@ -27,7 +27,7 @@ TEMPLATES = [
      "config": {"check": "tool_consistency"}},
     {"name": "Latency", "kind": "structural", "score_name": "tracely.run.latency_ms", "level": "AGENT_RUN",
      "description": "Fails if the run exceeds the latency budget.", "recommended": True,
-     "category": "reliability", "config": {"check": "latency", "params": {"budget_ms": 60000}}},
+     "category": "reliability", "config": {"check": "latency", "budget_ms": 60000}},
     {"name": "Answer quality · LLM judge", "kind": "llm_judge", "score_name": "tracely.run.quality",
      "level": "AGENT_RUN", "recommended": True, "category": "quality",
      "description": "An LLM grades the answer for correctness and faithfulness to the tool results.",
@@ -38,7 +38,7 @@ TEMPLATES = [
     {"name": "Required tools", "kind": "structural", "score_name": "tracely.run.required_tools",
      "level": "AGENT_RUN", "recommended": False, "category": "reliability",
      "description": "Fails if specific tools weren't called.",
-     "config": {"check": "required_tools", "params": {"tools": []}}},
+     "config": {"check": "required_tools", "tools": []}},
 
     # ── LLM-judge library · conversation level ─────────────────────────────────
     {"name": "Goal achievement", "kind": "llm_judge", "score_name": "tracely.conv.goal_success",

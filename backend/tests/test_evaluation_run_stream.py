@@ -272,3 +272,43 @@ def test_the_conversation_pass_drops_span_scoped_results(capsys):
     assert [r.name for r in written[0]] == ["conv.judge"]
     # Dropped, but never silently — structlog prints to stdout, so capsys is what sees it.
     assert "tool.success" in capsys.readouterr().out
+
+
+def test_thread_pass_marks_the_chain_and_resets_its_conversations(monkeypatch):
+    """`evaluate_thread` IS the ordered whole-thread pass: it stamps `__chain_pass__` on
+    sequential specs (the one licence to extend a message-level judge's durable conversation)
+    and resets those conversations first, so each pass rebuilds from turn 1 instead of appending
+    a second copy of every turn to what the previous pass left."""
+    from tracely.infrastructure.llm import checkpointer
+
+    seq = {
+        "id": "ev-2", "kind": "llm_judge", "config": {"execution_mode": "sequential"},
+        "score_name": "helpfulness", "level": "AGENT_RUN",
+    }
+    step_seq = {
+        "id": "ev-3", "kind": "llm_judge", "config": {"execution_mode": "sequential"},
+        "score_name": "tool_choice", "level": "TOOL",
+    }
+    resets: list[str] = []
+    monkeypatch.setattr(checkpointer, "reset_chat", resets.append)
+    staged: list[list[dict]] = []
+
+    def fake_trace(self, project_id, trace_id, specs=None, **kw):
+        staged.append(specs)
+        return {"scores": 0, "failures": 0}
+
+    monkeypatch.setattr(EvaluationService, "evaluate_trace", fake_trace)
+    svc = EvaluationService(trace_reader=type("R", (), {
+        "thread_trace_ids": lambda self, p, t: ["t1", "t2"],
+        "read_thread_spans": lambda self, p, t: [],
+    })())
+    svc.evaluate_thread("p1", "th-1", specs=[dict(_SPEC), seq, step_seq])
+
+    # only the message-level judge's conversation lives on the thread subject; the step judge
+    # resets its own per-trace conversation inside its pass
+    assert resets == ["p1:helpfulness:th-1"]
+    for specs in staged:
+        by_name = {s["score_name"]: s for s in specs}
+        assert by_name["helpfulness"]["config"].get("__chain_pass__") is True
+        assert by_name["tool_choice"]["config"].get("__chain_pass__") is True
+        assert "__chain_pass__" not in by_name["tracely.run.outcome"]["config"]

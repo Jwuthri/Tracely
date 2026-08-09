@@ -29,7 +29,14 @@ import structlog
 from tracely.config import settings
 from tracely.domain import introspection
 from tracely.domain.evaluation.evaluators import EvalResult, RunContext, default_registry
-from tracely.domain.evaluation.evaluators.base import CONVERSATION, RUN
+from tracely.domain.evaluation.evaluators.base import (
+    CFG_CHAIN_PASS,
+    CFG_DEPENDENCIES,
+    CFG_PREVIOUS,
+    CONVERSATION,
+    RUN,
+)
+from tracely.domain.evaluation.results import chain_payload
 from tracely.domain.evaluation.targeting import spec_applies
 from tracely.domain.evaluation.template_resolver import references_conversation_scope
 from tracely.domain.traces.spans import root_span
@@ -134,18 +141,12 @@ def _subject_label(ctx) -> str:
 
 
 def _chain_payload(score: dict) -> dict:
-    """A persisted score row → the compact context injected into the NEXT item's prompt in
-    sequential mode (json results keep their schema shape; others collapse to value/verdict)."""
-    sv = score.get("string_value")
-    if sv:
-        try:
-            parsed = json.loads(sv)
-            if isinstance(parsed, dict):
-                return parsed
-        except ValueError:
-            pass
-    out = {"value": score.get("value"), "verdict": score.get("verdict") or None, "reason": score.get("comment") or None}
-    return {k: v for k, v in out.items() if v is not None}
+    """A persisted score row → the compact context that seeds the NEXT turn in sequential mode
+    (one rendering for the whole chain: `results.chain_payload`)."""
+    return chain_payload(
+        value=score.get("value"), verdict=score.get("verdict") or "",
+        comment=score.get("comment") or "", string_value=score.get("string_value") or "",
+    )
 
 
 def _with_previous(spec: dict, chain: dict[str, dict]) -> dict:
@@ -154,7 +155,7 @@ def _with_previous(spec: dict, chain: dict[str, dict]) -> dict:
     prev = chain.get(spec["score_name"])
     if prev is None:
         return spec
-    return {**spec, "config": {**(spec.get("config") or {}), "__previous_result__": prev}}
+    return {**spec, "config": {**(spec.get("config") or {}), CFG_PREVIOUS: prev}}
 
 
 def _topo_sort(specs: list[dict]) -> list[dict]:
@@ -192,7 +193,7 @@ def _inject_dependencies(spec: dict, completed: dict[str, list[dict]]) -> dict:
     deps = {name: completed[name] for name in depends_on if name in completed}
     if not deps:
         return spec
-    return {**spec, "config": {**(spec.get("config") or {}), "__dependencies__": deps}}
+    return {**spec, "config": {**(spec.get("config") or {}), CFG_DEPENDENCIES: deps}}
 
 
 def _needs_thread_context(specs: list[dict]) -> bool:
@@ -202,13 +203,14 @@ def _needs_thread_context(specs: list[dict]) -> bool:
     - an advanced llm_judge referencing a conversation-scoped variable (`@HISTORY`/`@MESSAGES`/
       `@PREVIOUS_*`/`@GOAL`/`@LIST_AGENT`). Purely step-local advanced columns (only
       `@CURRENT_STEP.*` / `@METRIC_PREVIOUS_RESULT`) pay nothing;
-    - any SEQUENTIAL judge, which by definition grades this message in the light of the earlier
-      turns — without the thread it would fall back to grading it alone, i.e. batch.
+    - a sequential MESSAGE-level judge, which grades this message in the light of the earlier
+      turns — without the thread it would fall back to grading it alone, i.e. batch. (A
+      sequential STEP judge chains within its own message and never reads the thread.)
     """
     return any(
         s.get("kind") == "llm_judge"
         and (
-            _execution_mode(s) == "sequential"
+            (_execution_mode(s) == "sequential" and s.get("level") == RUN)
             or (
                 (s.get("config") or {}).get("is_advanced")
                 and references_conversation_scope((s.get("config") or {}).get("template_variables"))
@@ -349,9 +351,29 @@ class EvaluationService:
         total = failures = 0
         if trace_specs:
             sequential_names = {
-                s["score_name"] for s in trace_specs
-                if str((s.get("config") or {}).get("execution_mode") or "batch") == "sequential"
+                s["score_name"] for s in trace_specs if _execution_mode(s) == "sequential"
             }
+            # This loop IS the ordered whole-thread pass, which is the one context where a
+            # message-level judge may extend its durable conversation (`__chain_pass__` — a lone
+            # re-grade of one turn appending mid-thread would corrupt the order). And a
+            # conversation is valid for exactly one pass: this pass re-grades every turn, so it
+            # resets each column's thread conversation first and rebuilds it from turn 1 —
+            # appending to the previous pass's transcript would show the judge a second copy of
+            # every turn, and turn 1 would see the verdicts the last pass gave turns 2..N.
+            if sequential_names:
+                from tracely.infrastructure.llm.checkpointer import chat_id, reset_chat
+
+                trace_specs = [
+                    {**s, "config": {**(s.get("config") or {}), CFG_CHAIN_PASS: True}}
+                    if s["score_name"] in sequential_names
+                    else s
+                    for s in trace_specs
+                ]
+                for name in sorted(
+                    s["score_name"] for s in trace_specs
+                    if s["score_name"] in sequential_names and s["level"] == RUN
+                ):
+                    reset_chat(chat_id(project_id, name, thread_id))
             chain: dict[str, dict] = {}
 
             def capture(score: dict) -> None:
@@ -623,10 +645,10 @@ class EvaluationService:
                         completed[spec["score_name"]] = [
                             {
                                 "span_id": r.target_span_id,
-                                "payload": _chain_payload({
-                                    "string_value": r.string_value, "value": r.value,
-                                    "verdict": r.verdict, "comment": r.comment,
-                                }),
+                                "payload": chain_payload(
+                                    value=r.value, verdict=r.verdict,
+                                    comment=r.comment, string_value=r.string_value,
+                                ),
                             }
                             for r in new_results
                         ]
