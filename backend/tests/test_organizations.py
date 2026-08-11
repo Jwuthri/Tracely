@@ -356,7 +356,18 @@ def test_organization_delete_clears_members_and_invites(sync_db):
         assert s.get(models.OrgMembership, "m3") is not None  # another org is untouched
 
 
-async def test_owner_can_delete_their_organization(client, hosted):
+@pytest.fixture
+def sync_registry(sync_db, monkeypatch):
+    """The delete endpoint does its destructive half through `SyncSessionLocal`, which no
+    dependency override reaches — unpatched the test talks to a real Postgres (green on a dev
+    box, connection-refused in CI). It's empty, so the endpoint deletes nothing; the registry
+    half is covered by test_organization_delete_clears_members_and_invites."""
+    from tracely.api.routers import auth as auth_router
+
+    monkeypatch.setattr(auth_router, "SyncSessionLocal", sync_db)
+
+
+async def test_owner_can_delete_their_organization(client, hosted, sync_registry):
     """The HTTP contract: the guards pass and the caller is handed somewhere to land."""
     await _signup(client, "founder@x.test")
     token = await _signup(client, "solo@x.test")
