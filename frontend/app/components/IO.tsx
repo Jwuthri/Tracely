@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { useState, type ReactNode } from "react";
 import { HighlightedJson } from "./JsonView";
+import { imageSrc } from "./trace-table/format";
 
 // Smart input/output renderer for the timeline span panel. Turns a span's raw input/output — the
 // OpenAI / Anthropic request & response envelopes, tool args/results, framework state, or plain
@@ -312,18 +313,6 @@ function MsgContent({ content }: { content: unknown }) {
   return <ValueBlock value={content} />;
 }
 
-function MediaChip({ label }: { label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-ink-900 px-2 py-1 text-[11px] text-fg-muted">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5 text-fuchsia-400">
-        <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
-        <circle cx="9" cy="9" r="2" />
-        <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-      </svg>
-      {label}
-    </span>
-  );
-}
 
 // Multimodal content parts: text blocks as prose, image blocks as a chip; tool_use blocks are
 // surfaced by the card's ToolCalls (skipped here); anything else as a formatted object.
@@ -343,7 +332,19 @@ function ContentBlocks({ blocks }: { blocks: unknown[] }) {
         return;
       }
       if (type.includes("image") || o.image_url || o.image || (o.source as Record<string, unknown> | undefined)?.media_type) {
-        out.push(<MediaChip key={i} label={type.includes("image") ? "image" : "media"} />);
+        const src = imageSrc(o);
+        // ponytail: plain <img>, click opens full size. No usable src → show the raw block, not a
+        // mute chip that hides what arrived.
+        out.push(
+          src ? (
+            <a key={i} href={src} target="_blank" rel="noopener noreferrer" className="block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={src} alt="image" className="max-h-64 max-w-full rounded-md border border-line object-contain" />
+            </a>
+          ) : (
+            <ValueBlock key={i} value={o} />
+          ),
+        );
         return;
       }
       out.push(<ValueBlock key={i} value={o} />);

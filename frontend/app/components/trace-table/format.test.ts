@@ -10,6 +10,7 @@ import {
   fmtMs,
   fmtScoreValue,
   fmtTokens,
+  imageSrc,
   jsonResultLabel,
   lastTurnMessage,
   messageList,
@@ -265,5 +266,19 @@ describe("nearestAgentLabel inside an eval recording", () => {
   it("leaves a real agent span alone", () => {
     const s = span({ metadata: { "tracely.agent.id": "planner" } });
     expect(nearestAgentLabel(s, [s])).toBe("planner");
+  });
+});
+
+describe("imageSrc", () => {
+  it("reads the provider image shapes", () => {
+    expect(imageSrc({ type: "image_url", image_url: { url: "https://x/a.png" } })).toBe("https://x/a.png");
+    expect(imageSrc({ type: "image_url", image_url: "data:image/png;base64,AAAA" })).toBe("data:image/png;base64,AAAA");
+    expect(imageSrc({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: "A".repeat(20) } })).toBe(
+      `data:image/jpeg;base64,${"A".repeat(20)}`,
+    );
+    expect(imageSrc({ type: "image", source: { type: "url", url: "https://x/b.jpg" } })).toBe("https://x/b.jpg");
+    expect(imageSrc({ type: "image", image: { url: "https://x/c.jpg" } })).toBe("https://x/c.jpg");
+    expect(imageSrc({ type: "image" })).toBeNull();
+    expect(imageSrc({ type: "image", image_url: { url: "javascript:alert(1)" } })).toBeNull();
   });
 });

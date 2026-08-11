@@ -45,6 +45,7 @@ import {
   fmtPanelOutput,
   fmtScoreValue,
   fmtTokens,
+  imageSrc,
   jsonResultLabel,
   lastTurnMessage,
   messageList,
@@ -177,10 +178,11 @@ function classifyBlock(b: unknown): Part {
     const type = String(o.type ?? "").toLowerCase();
     const src = (o.source ?? {}) as Record<string, unknown>;
     if (type.includes("image") || o.image_url || o.image || src.media_type || (src.type === "base64")) {
-      const iu = o.image_url as Record<string, unknown> | string | undefined;
-      const url = (typeof iu === "object" ? (iu?.url as string) : iu) ?? (o.url as string) ?? (src.url as string);
-      const media = (src.media_type as string) ?? (o.mime_type as string) ?? "image";
-      return { kind: "image", url: typeof url === "string" ? url : undefined, label: media };
+      const url = imageSrc(b);
+      // No src we can render (unknown provider shape, non-http scheme) — show the raw block rather
+      // than a mute "image" chip that hides what actually arrived.
+      if (!url) return { kind: "json", data: b };
+      return { kind: "image", url, label: (src.media_type as string) ?? (o.mime_type as string) ?? "image" };
     }
     if (type.includes("file") || type.includes("document") || o.file || o.filename || o.file_id) {
       const file = (o.file ?? {}) as Record<string, unknown>;
@@ -197,9 +199,25 @@ function classifyBlock(b: unknown): Part {
 // the full image inline (a table can hold many of these). When the block carries a url/path the
 // chip is a link that opens the image/document in a new tab.
 function Attachment({ part }: { part: Exclude<Part, { kind: "text" }> }) {
+  const [broken, setBroken] = useState(false);
   if (part.kind === "json") return <JsonPill raw={JSON.stringify(part.data)} />;
   const isImg = part.kind === "image";
   const url = part.url;
+  // ponytail: a plain <img> thumbnail — no lightbox, click opens the full image in a tab. If the
+  // fetch fails (expired signed URL, hotlink block) we fall through to the link chip below.
+  if (isImg && url && !broken) {
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title={`Open ${part.label}`}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={url}
+          alt={part.label}
+          onError={() => setBroken(true)}
+          className="max-h-24 max-w-[200px] rounded-md border border-line object-contain"
+        />
+      </a>
+    );
+  }
   const icon = isImg ? (
     <ImageIcon className="h-3.5 w-3.5 shrink-0 text-fuchsia-400" />
   ) : (

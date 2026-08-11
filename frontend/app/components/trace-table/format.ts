@@ -344,3 +344,28 @@ export function fmtPanelOutput(raw: string): string {
     return raw;
   }
 }
+
+// ── multimodal images ────────────────────────────────────────────────────────────
+// A displayable src for an image content block, across the shapes providers emit:
+// OpenAI `{image_url:{url}}` / `{image_url:"…"}`, Anthropic `{source:{type:"base64",media_type,data}}`
+// or `{source:{type:"url",url}}`, OpenInference `{image:{url}}`. Returns null when the block carries
+// no usable src (a bare `{type:"image"}` reference) — the caller then shows a chip instead.
+export function imageSrc(b: unknown): string | null {
+  if (!b || typeof b !== "object") return null;
+  const o = b as Record<string, unknown>;
+  const src = (o.source ?? o.image ?? {}) as Record<string, unknown>;
+  const iu = o.image_url;
+  const cand =
+    (typeof iu === "string" ? iu : (iu as Record<string, unknown> | undefined)?.url) ??
+    o.url ??
+    src.url ??
+    (typeof o.image === "string" ? o.image : undefined);
+  if (typeof cand === "string" && /^(https?:|data:|blob:)/.test(cand)) return cand;
+  const data = src.data ?? o.data;
+  if (typeof data === "string" && data.length > 16) {
+    if (data.startsWith("data:")) return data;
+    const media = (src.media_type as string) ?? (o.mime_type as string) ?? "image/png";
+    return `data:${media};base64,${data}`;
+  }
+  return null;
+}
