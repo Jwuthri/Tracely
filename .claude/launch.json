@@ -4,23 +4,46 @@
     {
       "name": "mundial26",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 4026,
       "autoPort": true
     },
     {
       "name": "frontend",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["-C", "frontend", "dev"],
+      "runtimeArgs": [
+        "-C",
+        "frontend",
+        "dev"
+      ],
       "port": 3001,
       "autoPort": true
     },
     {
       "name": "docs",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["-C", "docs", "dev"],
+      "runtimeArgs": [
+        "-C",
+        "docs",
+        "dev"
+      ],
       "port": 3002,
       "autoPort": true
+    },
+    {
+      "name": "riffly",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8123",
+        "-d",
+        "/Users/julien/Documents/Repos/Riffly"
+      ],
+      "port": 8123
     }
   ]
 }

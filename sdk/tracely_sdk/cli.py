@@ -396,10 +396,15 @@ def post_pr_check(
 
 
 def _conn(args: argparse.Namespace) -> tuple[str, str, str, str]:
-    api = args.api or os.environ.get("TRACELY_API", "http://localhost:8000")
-    key = args.key or os.environ.get("TRACELY_KEY", "tracely_dev_key")
-    web_url = args.web_url or os.environ.get("TRACELY_WEB_URL", "")
-    agent = args.agent or os.environ.get("TRACELY_AGENT", "")
+    # An unset GitHub secret still renders as an env var set to "" — treat empty as absent, or the
+    # default never applies and the api base becomes "" (urllib: "unknown url type: '/api/…'").
+    def env(name: str, default: str = "") -> str:
+        return (os.environ.get(name) or "").strip() or default
+
+    api = (args.api or "").strip() or env("TRACELY_API", "http://localhost:8000")
+    key = (args.key or "").strip() or env("TRACELY_KEY", "tracely_dev_key")
+    web_url = (args.web_url or "").strip() or env("TRACELY_WEB_URL")
+    agent = (args.agent or "").strip() or env("TRACELY_AGENT")
     return api, key, web_url, agent
 
 

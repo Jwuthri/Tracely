@@ -3,9 +3,10 @@
 @tailwind utilities;
 
 :root {
-  --font-sans: "Hanken Grotesk";
-  --font-mono: "JetBrains Mono";
-  --font-display: "Bricolage Grotesque";
+  /* --font-sans / --font-mono / --font-display are injected on <html> by next/font in
+     app/layout.tsx (self-hosted, no render-blocking request to fonts.googleapis.com). Do not
+     redeclare them here: :root and next/font's class have equal specificity, so whichever
+     stylesheet loads last would silently win. */
   /* The app is dark-only. Without this every NATIVE control — number spinners, select
      dropdowns, checkboxes, date pickers, autofill — renders in light browser chrome. */
   color-scheme: dark;
@@ -43,6 +44,21 @@
   }
   ::-webkit-scrollbar-corner {
     background: transparent;
+  }
+}
+
+@layer base {
+  /* Hero reveal start position, in CSS so it lands on the FIRST paint rather than after
+     hydration — otherwise the block renders in place, GSAP shoves it down 26px, and it slides
+     back, which reads as a jump. Transform only, never opacity: this block is the LCP element
+     and the browser does not count an invisible element as painted (that cost 3.2s of LCP
+     render delay on mobile). Guarded on prefers-reduced-motion so that when the GSAP timeline
+     is skipped entirely the content is not left permanently offset.
+     Keep the 26px in sync with the gsap.set() in app/(marketing)/Landing.tsx. */
+  @media (prefers-reduced-motion: no-preference) {
+    .hero-stagger {
+      transform: translateY(26px);
+    }
   }
 }
 

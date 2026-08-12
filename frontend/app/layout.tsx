@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Bricolage_Grotesque, Hanken_Grotesk, JetBrains_Mono } from "next/font/google";
 
 import "./globals.css";
 import { AuthRootProvider } from "./_providers/AuthRootProvider";
@@ -25,17 +26,37 @@ export const metadata: Metadata = {
   robots: { index: true, follow: true },
 };
 
-const FONTS =
-  "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap";
+// next/font downloads these at BUILD time and serves them from our own origin, which removes the
+// render-blocking round-trip to fonts.googleapis.com. That single request was costing 956ms of
+// blocked render on mobile (Lighthouse, 2026-08-12) for a 2KB stylesheet — the cost was the DNS +
+// TLS + request to a third-party origin, not the payload. It also self-hosts the .woff2 files, so
+// the second hop to fonts.gstatic.com goes away too, along with both preconnects.
+// The `variable` names must match the CSS custom properties tailwind.config.ts reads.
+const fontSans = Hanken_Grotesk({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-sans",
+  display: "swap",
+});
+const fontDisplay = Bricolage_Grotesque({
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
+  variable: "--font-display",
+  display: "swap",
+});
+const fontMono = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-mono",
+  display: "swap",
+});
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href={FONTS} rel="stylesheet" />
-      </head>
+    <html
+      lang="en"
+      className={`${fontSans.variable} ${fontDisplay.variable} ${fontMono.variable}`}
+    >
       <body className="min-h-screen bg-ink font-sans text-fg antialiased">
         {/* The dashboard shell (sidebar/topbar) lives in the (app) route group; (auth) pages render bare. */}
         <AuthRootProvider>{children}</AuthRootProvider>

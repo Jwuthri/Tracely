@@ -292,3 +292,18 @@ def test_min_pass_rate_is_forwarded(monkeypatch):
 
     cli.cmd_simulate(_args(min_pass_rate=0.9))
     assert sent["rate"] == 0.9
+
+
+def test_conn_treats_empty_env_as_unset(monkeypatch):
+    """An unset GitHub secret arrives as TRACELY_API="" — the default must still apply."""
+    from argparse import Namespace
+
+    from tracely_sdk.cli import _conn
+
+    monkeypatch.setenv("TRACELY_API", "")
+    monkeypatch.setenv("TRACELY_KEY", "")
+    args = Namespace(api=None, key=None, web_url=None, agent="planner")
+    api, key, _, agent = _conn(args)
+    assert api == "http://localhost:8000"
+    assert key == "tracely_dev_key"
+    assert agent == "planner"

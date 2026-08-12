@@ -347,7 +347,11 @@ export default function Landing() {
       mm.add("(prefers-reduced-motion: no-preference)", () => {
         /* ---------- initial states (before first paint) ---------- */
         gsap.set(q(".site-nav"), { autoAlpha: 0, y: -16 });
-        gsap.set(q(".hero-stagger"), { autoAlpha: 0, y: 26 });
+        // LCP: the hero subhead inside .hero-stagger is Lighthouse's LCP element. Animating its
+        // OPACITY meant the browser did not count it as painted until GSAP had loaded, hydrated
+        // and run — 3.2s of pure "render delay" on mobile. Transform only: it paints with the
+        // first frame and still slides into place. Never put opacity on the LCP element.
+        gsap.set(q(".hero-stagger"), { y: 26 });
         gsap.set(q(".hero-word"), { yPercent: 115 });
         gsap.set(q(".hero-frame"), { autoAlpha: 0, y: 64, scale: 0.965 });
         gsap.set(q(".float-card"), { autoAlpha: 0, y: 34 });
@@ -384,7 +388,7 @@ export default function Landing() {
           .timeline({ defaults: { ease: "power3.out" }, delay: 0.15 })
           .to(q(".site-nav"), { autoAlpha: 1, y: 0, duration: 0.6 })
           .to(q(".hero-word"), { yPercent: 0, duration: 0.9, stagger: 0.06, ease: "power4.out" }, 0.15)
-          .to(q(".hero-stagger"), { autoAlpha: 1, y: 0, duration: 0.7, stagger: 0.1 }, 0.45)
+          .to(q(".hero-stagger"), { y: 0, duration: 0.7, stagger: 0.1 }, 0.45)
           .to(q(".hero-frame"), { autoAlpha: 1, y: 0, scale: 1, duration: 1.0 }, 0.75)
           .to(q(".float-card"), { autoAlpha: 1, y: 0, duration: 0.7, stagger: 0.15 }, 1.1)
           .add(() => loop.play(), 1.5);
