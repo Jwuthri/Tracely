@@ -1053,6 +1053,8 @@ export default function Landing() {
                 agents · © 2026
               </p>
               <div className="flex items-center gap-6 text-sm text-fg-faint">
+                {/* Internal links are how crawl budget and authority reach new content pages. */}
+                <a className="transition hover:text-fg" href="/langfuse-alternatives">Compare</a>
                 <a className="transition hover:text-fg" href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
                 <a className="transition hover:text-fg" href={DOCS} target="_blank" rel="noreferrer">Docs</a>
                 <a className="transition hover:text-fg" href={APP}>Dashboard</a>
