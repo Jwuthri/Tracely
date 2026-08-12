@@ -12,6 +12,11 @@ import { PageShell, prose } from "../_components/PageShell";
 // against our design dossier (which was reverse-engineered from Langfuse v3.177.1 and is now stale
 // — they have since shipped CI/CD experiments). Opinions are labelled as opinions. If you edit
 // this page, keep that split: a false claim here costs more than the page earns.
+//
+// AND: before listing something as a competitor's trade-off, check we don't do the same thing.
+// "Self-hosting means ClickHouse + Postgres + Redis + S3" was on this page as a Langfuse downside
+// until someone noticed that is *exactly* Tracely's stack (see CLAUDE.md, "Five stores"). A reader
+// who spots that stops believing the rest of the page. Shared cost is not a differentiator.
 export const metadata: Metadata = {
   title: { absolute: "Langfuse Alternatives (2026): 6 Options, One Opinion" },
   description:
@@ -32,8 +37,8 @@ const TOOLS = [
     oss: "MIT core",
     bestFor: "The default. Mature tracing, prompt management with versioning, evaluators, datasets and experiments — and the biggest community here.",
     watchOut:
-      "Self-hosting is ClickHouse + Postgres + Redis + S3. Evaluators read one observation in isolation. Prompt management is a large part of the value you're carrying.",
-    pick: "You want one mature tool for tracing, prompts and evals, and the infra cost is acceptable.",
+      "Evaluators read one observation in isolation — no conversation-level target. CI experiments need a dataset you author and make live model calls on every run. Prompt management is a large surface to carry if your prompts live in Git.",
+    pick: "You want one mature tool for tracing, prompts and evals, and the largest community in the category.",
   },
   {
     name: "LangSmith",
@@ -72,7 +77,21 @@ const TOOLS = [
   },
 ];
 
-const JSON_LD = {
+const JSON_LD = [
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Tracely", item: SITE_URL },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: "Langfuse alternatives",
+        item: `${SITE_URL}/langfuse-alternatives`,
+      },
+    ],
+  },
+  {
   "@context": "https://schema.org",
   "@type": "FAQPage",
   mainEntity: [
@@ -81,7 +100,7 @@ const JSON_LD = {
       name: "Is Langfuse open source?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Yes. The Langfuse core is MIT-licensed and self-hostable, though some enterprise features are commercially licensed. Self-hosting requires running ClickHouse, Postgres, Redis and S3-compatible storage.",
+        text: "Yes. The Langfuse core is MIT-licensed and can be self-hosted, though some enterprise features are commercially licensed.",
       },
     },
     {
@@ -109,7 +128,8 @@ const JSON_LD = {
       },
     },
   ],
-};
+  },
+];
 
 function Verdict({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -162,8 +182,8 @@ export default function Page() {
           live in the trajectory, not in a single span.
         </Verdict>
         <Verdict label="When to stay">
-          You want prompt management, you have the infra budget, and your failures are single-call quality
-          problems rather than multi-step ones.
+          You want prompt management, you value the largest community in the category, and your failures
+          are single-call quality problems rather than multi-step ones.
         </Verdict>
       </div>
 
@@ -213,7 +233,14 @@ export default function Page() {
         Tracely runs judges at <strong className="text-fg">conversation, run or span level</strong> — it&apos;s
         a field on the evaluator, not an architecture you work around. If your agents are single-call
         classifiers this is irrelevant and Langfuse is fine. If they take six steps and call four tools,
-        it&apos;s most of the failures you care about.
+        it&apos;s most of the failures you care about. We go deeper on the trade-offs in{" "}
+        <Link
+          className="text-signal underline decoration-signal/30 underline-offset-4 transition hover:decoration-signal"
+          href="/llm-evaluation"
+        >
+          our guide to LLM evaluation
+        </Link>
+        .
       </p>
 
       {/* --------------------------------- opinion -------------------------------- */}

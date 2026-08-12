@@ -5,7 +5,7 @@ import { SITE_URL } from "@/app/lib/site";
 // Public, indexable routes only — the dashboard, auth pages and /share links are noindex (set on
 // their layouts) and have no business here. Add every new marketing page to this list; a page
 // missing from the sitemap is a page Google discovers late or not at all.
-const ROUTES = ["", "/langfuse-alternatives"];
+const ROUTES = ["", "/llm-evaluation", "/langfuse-alternatives"];
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const lastModified = new Date();

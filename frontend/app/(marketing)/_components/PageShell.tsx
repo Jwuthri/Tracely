@@ -10,6 +10,7 @@ import { DOCS_URL, GITHUB_URL } from "@/app/lib/site";
 // Only routes that exist. A nav entry pointing at an unbuilt page is a 404 for readers and a dead
 // internal link for crawlers — add each entry in the same commit as the page it points to.
 const NAV = [
+  { href: "/llm-evaluation", label: "LLM evaluation" },
   { href: "/langfuse-alternatives", label: "Comparisons" },
   { href: DOCS_URL, label: "Docs", external: true },
   { href: "/#pricing", label: "Pricing" },

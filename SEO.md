@@ -89,6 +89,23 @@ volume is the wrong audience.
 
 Rewritten against the data. Ordered by expected return per hour.
 
+### Shipped
+
+- **`/llm-evaluation`** — pillar guide. `llm evaluation` (1,000, KD 14) + `llm evals` (480) +
+  `llm evaluation metrics` (260). `TechArticle` + `BreadcrumbList` + `FAQPage` schema.
+- **`/langfuse-alternatives`** — `langfuse alternatives` (140, KD 0, $36.73 CPC).
+  `BreadcrumbList` + `FAQPage`.
+
+Both are in `sitemap.ts`, the shell nav, the landing footer, and cross-link each other. `docs/pages/evaluations.mdx`
+and `replay.mdx` link out to them, which is how docs authority reaches the marketing pages.
+
+**Two rules for every future page on this site**, both learned the hard way:
+1. Verify competitor claims against their *live docs*, never the design dossier — it's pinned to
+   Langfuse v3.177.1 and they've shipped CI/CD experiments since.
+2. Before listing something as a competitor's downside, check Tracely doesn't do the same thing.
+   "Self-hosting means ClickHouse + Postgres + Redis + S3" shipped as a Langfuse trade-off before
+   someone noticed that is exactly our stack.
+
 ### Tier 1 — do first
 
 **`/llm-as-a-judge`** — target `llm as a judge` (2,400) + `llm judge` (260) + `llm as judge evaluation` (50)
