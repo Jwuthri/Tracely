@@ -31,7 +31,9 @@ function Mark({ size = 30 }: { size?: number }) {
 
 export function PageShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-ink-950">
+    // overflow-x-clip lets content pages use full-bleed (w-screen) decoration inside the fixed
+    // column without producing a horizontal scrollbar.
+    <div className="min-h-screen overflow-x-clip bg-ink-950">
       <header className="sticky top-0 z-50 border-b border-line/60 bg-ink-950/80 backdrop-blur-md">
         <nav className="mx-auto flex h-16 max-w-[1100px] items-center justify-between px-6">
           <Link href="/" className="flex items-center gap-2.5">
