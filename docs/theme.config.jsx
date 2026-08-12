@@ -1,4 +1,9 @@
+import { useRouter } from "next/router";
+import { useConfig } from "nextra-theme-docs";
+
 const REPO = "https://github.com/Jwuthri/Tracely";
+const SITE = "https://tracely-studio.xyz";
+const DOCS = "https://doc.tracely-studio.xyz";
 
 // The app's sidebar mark (frontend/app/components/Sidebar.tsx), reused so docs and product share a face.
 const Logo = () => (
@@ -32,21 +37,46 @@ const config = {
   footer: {
     content: (
       <span style={{ fontSize: 13 }}>
-        Tracely — trace-native CI/CD for AI agents · the recorded run <em>is</em> the test.
+        {/* Links back to the marketing origin on every page: docs pages are the ones that earn
+            inbound links, and this is how that authority reaches tracely-studio.xyz. */}
+        <a href={SITE}>Tracely</a> — trace-native CI/CD for AI agents · the recorded run{" "}
+        <em>is</em> the test.
       </span>
     ),
   },
-  head: (
-    <>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <meta name="theme-color" content="#090b10" />
-      <meta property="og:title" content="Tracely SDK" />
-      <meta
-        property="og:description"
-        content="Instrument your AI agents and ship their traces to Tracely over OTLP."
-      />
-    </>
-  ),
+  // Overriding `head` REPLACES Nextra's default, which is the only thing that emits <title> and
+  // <meta description> — the previous static fragment silently shipped every docs page with no
+  // title at all. Anything set here must therefore cover those too.
+  head: function Head() {
+    const { asPath } = useRouter();
+    const { title: pageTitle, frontMatter } = useConfig();
+    // Docs live on their own subdomain, so each page needs its own self-canonical — otherwise
+    // /cli, /cli/ and /cli?x= all compete with each other as separate results.
+    const url = `${DOCS}${asPath === "/" ? "" : asPath.split("?")[0].split("#")[0]}`;
+    // The landing page's own H1 is already "Tracely SDK", so suffixing it would read
+    // "Tracely SDK — Tracely SDK docs". Give the root a search-facing title instead.
+    const title =
+      !pageTitle || pageTitle.includes("Tracely")
+        ? "Tracely SDK docs — OpenTelemetry tracing for AI agents"
+        : `${pageTitle} — Tracely SDK docs`;
+    const description =
+      frontMatter.description ||
+      "Instrument your AI agents and ship their traces to Tracely over OTLP.";
+    return (
+      <>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="theme-color" content="#090b10" />
+        <title>{title}</title>
+        <meta name="description" content={description} />
+        <link rel="canonical" href={url} />
+        <meta property="og:url" content={url} />
+        <meta property="og:site_name" content="Tracely" />
+        <meta property="og:title" content={title} />
+        <meta property="og:description" content={description} />
+        <meta name="twitter:card" content="summary_large_image" />
+      </>
+    );
+  },
   sidebar: { defaultMenuCollapseLevel: 1, toggleButton: true },
   toc: { backToTop: true, title: "On this page" },
   editLink: { content: "Edit this page on GitHub" },

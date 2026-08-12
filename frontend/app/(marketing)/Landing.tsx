@@ -583,9 +583,9 @@ export default function Landing() {
               </h1>
 
               <p className="hero-stagger mx-auto mt-7 max-w-2xl text-balance text-lg leading-relaxed text-fg-muted">
-                Tracely grades every agent trace as it lands, clusters the failures into issues, freezes
-                the bad runs into hermetic replayable cases — and blocks the pull request that would ship
-                them again.
+                Tracely is LLM observability that closes the loop: it grades every agent trace as it
+                lands, clusters the failures into issues, freezes the bad runs into hermetic replayable
+                cases — and blocks the pull request that would ship them again.
               </p>
 
               <p className="hero-stagger mt-6 font-mono text-[13px] tracking-tight text-fg-faint">
@@ -807,7 +807,7 @@ export default function Landing() {
           <div className="mx-auto max-w-[1200px]">
             <Eyebrow>Derived from the trace</Eyebrow>
             <h2 className="sec-reveal mt-6 text-center font-display text-4xl font-bold tracking-tight sm:text-5xl">
-              Everything downstream of one artifact.
+              Everything downstream of one trace.
             </h2>
             <p className="sec-reveal mx-auto mt-5 max-w-2xl text-center text-fg-muted">
               Scores, clusters, cases, gates and trends are all computed from the trace — so they never

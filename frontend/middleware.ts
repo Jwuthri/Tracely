@@ -18,6 +18,9 @@ const PUBLIC = [
   /^\/sign-in/,
   /^\/sign-up/,
   /^\/share\//, // public conversation links — the token in the path is the credential
+  // Crawler-facing files. Behind the wall they 307 to /login, so Google indexes a login page and
+  // Slack unfurls nothing — the sitemap silently never gets read.
+  /^\/(sitemap\.xml|robots\.txt|opengraph-image)/,
   /^\/api\/health/,
   /^\/api\/auth\//,
 ];
@@ -33,6 +36,9 @@ export default async function middleware(req: NextRequest, ev: NextFetchEvent) {
       "/sign-in(.*)",
       "/sign-up(.*)",
       "/share/(.*)",
+      "/sitemap.xml",
+      "/robots.txt",
+      "/opengraph-image(.*)",
       "/api/health",
       "/api/auth/(.*)",
     ]);

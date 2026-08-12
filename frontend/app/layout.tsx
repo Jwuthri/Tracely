@@ -1,9 +1,28 @@
+import type { Metadata } from "next";
+
 import "./globals.css";
 import { AuthRootProvider } from "./_providers/AuthRootProvider";
+import { SITE_DESCRIPTION, SITE_TITLE, SITE_URL } from "./lib/site";
 
-export const metadata = {
-  title: "Tracely — trace-native CI/CD for AI agents",
-  description: "Production traces become regression tests.",
+// Site-wide defaults. `metadataBase` is what turns the relative OG/canonical paths every other
+// route emits into the absolute URLs Google and Slack require — without it Next warns and falls
+// back to localhost. Individual routes override `title`/`description`; the (app), (auth) and
+// /share routes additionally override `robots` to noindex.
+// ponytail: no `keywords` meta — Google has ignored it since 2009, and Bing treats it as spam.
+export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
+  title: { default: SITE_TITLE, template: "%s — Tracely" },
+  description: SITE_DESCRIPTION,
+  applicationName: "Tracely",
+  openGraph: {
+    type: "website",
+    siteName: "Tracely",
+    url: SITE_URL,
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+  },
+  twitter: { card: "summary_large_image", title: SITE_TITLE, description: SITE_DESCRIPTION },
+  robots: { index: true, follow: true },
 };
 
 const FONTS =

@@ -32,6 +32,7 @@ import functools
 import inspect
 import json
 import logging
+import os
 import re
 import threading
 from contextlib import contextmanager
@@ -307,6 +308,11 @@ def init(
         _provider = provider
         _tracer = provider.get_tracer("tracely-sdk")
         _initialized = True
+    # OpenInference replaces any base64 image data URL longer than 32,000 chars with the literal
+    # "__REDACTED__" before the span leaves the process — that cap is below a single phone photo, so
+    # every real vision input arrived unviewable. Raise it (still bounded; the exporter has to carry
+    # it) unless the host explicitly set the env var.
+    os.environ.setdefault("OPENINFERENCE_BASE64_IMAGE_MAX_LENGTH", "4000000")
     _activate_instrumentors(instrument)  # idempotent; re-runnable to add providers later
     return _tracer  # type: ignore[return-value]
 
