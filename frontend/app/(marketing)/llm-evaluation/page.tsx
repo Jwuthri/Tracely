@@ -261,7 +261,15 @@ export default function Page() {
         A model scores the output against a rubric you write. This is the only practical way to measure
         groundedness, faithfulness to retrieved context, tone, or whether a task was completed. It costs
         money and tokens per evaluation, and it is <em>itself</em> a model that can be wrong — which is
-        why the calibration step below is not optional.
+        why the calibration step below is not optional. Full treatment, including the five biases that
+        break judges and the rubric patterns that survive them, in{" "}
+        <Link
+          className="text-signal underline decoration-signal/30 underline-offset-4 transition hover:decoration-signal"
+          href="/llm-as-a-judge"
+        >
+          our LLM-as-a-judge guide
+        </Link>
+        .
       </p>
       <h3 className={prose.h3}>3. Human review</h3>
       <p className={prose.p}>

@@ -93,8 +93,13 @@ Rewritten against the data. Ordered by expected return per hour.
 
 - **`/llm-evaluation`** — pillar guide. `llm evaluation` (1,000, KD 14) + `llm evals` (480) +
   `llm evaluation metrics` (260). `TechArticle` + `BreadcrumbList` + `FAQPage` schema.
+- **`/llm-as-a-judge`** — deep dive, the category's biggest term. `llm as a judge` (2,400, KD 31) +
+  `llm judge` (260) + `what is llm as a judge` (110). `TechArticle` + `BreadcrumbList` + `FAQPage`.
 - **`/langfuse-alternatives`** — `langfuse alternatives` (140, KD 0, $36.73 CPC).
   `BreadcrumbList` + `FAQPage`.
+
+Cluster structure: `/llm-evaluation` is the pillar, `/llm-as-a-judge` the deep dive on one method,
+reciprocally linked so they reinforce rather than cannibalise each other.
 
 Both are in `sitemap.ts`, the shell nav, the landing footer, and cross-link each other. `docs/pages/evaluations.mdx`
 and `replay.mdx` link out to them, which is how docs authority reaches the marketing pages.
@@ -154,23 +159,72 @@ judge calibration vs human labels. These earn HN/Reddit links, which is the actu
 
 ---
 
-## 3. Phase 4 — off-page (now the highest-ROI work)
+## 3. Phase 4 — off-page (the actual bottleneck)
 
-The SERP data changed my mind about priority: **listicle inclusion beats another landing page.**
+**This is the work that matters now.** More pages won't help until the domain has authority, and
+authority is referring domains.
 
-Roughly 15 "best LLM observability tools" listicles rank for the money terms — confident-ai,
-langchain, posthog, galileo, mirascope, openobserve, comet, braintrust, mlflow, voltagent, zenml,
-cekura, langwatch. Tracely is in none of them. Each inclusion is a backlink *and* a referral from a
-page that already ranks. Most accept submissions or update on request.
+### What we're up against, measured
 
-Also:
-- **Reddit ranks #1 for `llm observability tools` and top-5 for `ai agent testing` and `llm testing`.**
-  Genuine participation in r/LangChain, r/LLMDevs, r/AI_Agents reaches the same audience faster than
-  any page we write. Participate, don't drop links.
-- **Awesome lists** — `awesome-llmops`, `awesome-llm-observability`. Cheap, permanent PRs.
-- **GitHub stars** — the repo is itself a ranking signal and the main referral source for dev tools.
-- **Show HN** on a post from Tier 4, not on the product page.
-- `link-prospecting` skill can mine competitor backlink profiles for more (~30 credits/domain).
+Langfuse's profile (pulled 2026-08-12): **43,930 backlinks from 4,014 referring domains, rank 57.**
+Twelve months ago it was 1,268 referring domains — they added ~2,750 in a year, currently running
+**200–400 new referring domains per month.** Tracely is starting from approximately zero.
+
+That gap doesn't close with content. But their profile shows *exactly* how they built it, and most
+of it is mechanical rather than clever.
+
+### Where their links actually come from — ranked by how copyable it is
+
+**1. Integration partners (the biggest replicable win).** `dify.ai`, `lamatic.ai`, `llamaindex.ai`,
+`crewai.com`, `railway.com`, `pipedream.com`, `microsoft.github.io`, `stripe.com` all link to
+Langfuse — because Langfuse integrates with them and appears in *their* docs and integration
+directories. These are high-authority, permanent, editorially-given links.
+
+Tracely's SDK already supports OpenAI, Anthropic, Gemini, LangChain, LangGraph, LiteLLM, CrewAI and
+Mistral. **Every one of those projects has an integrations page or ecosystem list we are not on.**
+That's the single highest-value backlink action available, and it's a PR to a docs repo, not
+outreach. Pair each one with the matching `/integrations/<framework>` page from Tier 3.
+
+**2. Package registries.** `pypi.org` and `npmjs.com` both link to Langfuse. `tracely-ai` is on
+PyPI already — make sure the package metadata points at `tracely-studio.xyz`, not just the repo.
+Free link, already earned, possibly not claimed.
+
+**3. Self-host and OSS directories.** `selfhost.directory`, `saashub.com`, `webcatalog.io`,
+`mcp.directory`, `toolerific.ai`, `seektool.ai`, `aitoolsatlas.ai`, `bestfreeai.tools`. Individually
+low quality, collectively a real chunk of their 4,014. Tracely being MIT with a `docker compose` path
+is a strong fit for the self-host ones specifically. An afternoon of form-filling.
+
+**4. Dev communities.** `dev.to`, `zenn.dev`, `qiita.com`, `deepwiki.com`. Note that two of those are
+Japanese — Langfuse has meaningful JP developer traction and nobody in this category is competing
+there.
+
+**5. The listicles.** ~15 "best LLM observability tools" posts rank for the money terms —
+confident-ai, langchain, posthog, galileo, mirascope, openobserve, comet, braintrust, mlflow,
+voltagent, zenml, cekura, langwatch. Tracely is in none. Each is a backlink *and* a referral from a
+page that already ranks. Most accept submissions.
+
+**6. Awesome lists** — `awesome-llmops`, `awesome-llm-observability`, `awesome-selfhosted`. Cheap,
+permanent PRs.
+
+**7. Reddit.** Ranks **#1** for `llm observability tools` and top-5 for `ai agent testing` and
+`llm testing`. Not a backlink (nofollow) but the audience is identical and it converts faster than
+anything above. Participate, don't drop links.
+
+### What NOT to copy
+
+Langfuse's single largest referring domain is `pebbleai.app` (4,051 backlinks, spam score 14), and
+several others in the top 10 are scraper sites with spam scores of 25–39. Those are noise, not
+strategy. Their `clickhouse.com` links (2,461) come from the acquisition — not replicable.
+
+### The order to do it in
+
+1. Integration-partner docs PRs — highest authority, permanent, and we've earned them by shipping
+   the integrations.
+2. PyPI/npm metadata — free, five minutes.
+3. Self-host + OSS directories — one afternoon, ~20 links.
+4. Listicle submissions — email, slow, but each one also sends referral traffic.
+5. Awesome-list PRs.
+6. Show HN on a real engineering post, never on the product page.
 
 ---
 

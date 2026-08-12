@@ -1056,6 +1056,7 @@ export default function Landing() {
                 {/* Internal links are how crawl budget and authority reach new content pages.
                     Add every new marketing route here as well as to app/sitemap.ts. */}
                 <a className="transition hover:text-fg" href="/llm-evaluation">LLM evaluation</a>
+                <a className="transition hover:text-fg" href="/llm-as-a-judge">LLM-as-a-judge</a>
                 <a className="transition hover:text-fg" href="/langfuse-alternatives">Compare</a>
                 <a className="transition hover:text-fg" href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
                 <a className="transition hover:text-fg" href={DOCS} target="_blank" rel="noreferrer">Docs</a>
