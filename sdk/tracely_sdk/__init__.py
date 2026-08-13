@@ -47,7 +47,7 @@ from opentelemetry.sdk.trace import SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Span, Status, StatusCode
 
-from tracely_sdk.export import download_export, export_conversations
+from tracely_sdk.export import download_export, export_conversations, remember_connection
 
 __all__ = [
     "init",
@@ -284,6 +284,12 @@ def init(
     Streaming token usage requires `stream_options={"include_usage": True}` on OpenAI calls (R3)."""
     global _tracer, _provider, _env, _initialized
     _env = env
+    # The read path (`export_conversations`) reuses this, so a process that traces can also export
+    # without restating the endpoint. OUTSIDE the build-once guard below: the exporter is built once,
+    # but an app that already called init() must still be able to point a later, explicit
+    # init(endpoint=…, api_key=…) at a workspace and have the export follow it — silently ignoring
+    # that call is worse than reads and writes disagreeing.
+    remember_connection(endpoint, api_key)
     if not (_initialized and _provider is not None):
         provider = tracer_provider
         if provider is None:

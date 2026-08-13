@@ -18,6 +18,7 @@ trap — span ids are base64, and a wrong one silently vanishes instead of error
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -48,7 +49,7 @@ mcp = FastMCP(
 )
 
 
-async def _call(ctx: Context, method: str, path: str, **kw: Any) -> Any:
+async def _call(ctx: Context, method: str, path: str, ndjson: bool = False, **kw: Any) -> Any:
     """Issue `method path` against our own FastAPI app, as the caller.
 
     The MCP client's `Authorization` (an ingest key, or a session JWT + `x-tracely-project`) is
@@ -74,6 +75,8 @@ async def _call(ctx: Context, method: str, path: str, **kw: Any) -> Any:
         r = await client.request(method, path, timeout=60.0, **kw)
     if r.status_code >= 400:
         raise ValueError(f"Tracely API {r.status_code}: {r.text[:500]}")
+    if ndjson:  # /api/export streams one JSON object per line, so `r.json()` would choke
+        return [json.loads(line) for line in r.text.splitlines() if line.strip()]
     return r.json()
 
 
@@ -101,6 +104,36 @@ async def search_traces(ctx: Context, query: str) -> list[dict]:
     """Find conversations whose user message contains `query` (min 2 characters). Also matches
     registry objects (agents, cases, clusters) by name."""
     return await _call(ctx, "GET", "/api/search", params={"q": query})
+
+
+# Whole conversations are the largest thing this server can return — every turn, every span,
+# every score. A workspace-sized export would evict the rest of the caller's context, so the tool
+# caps what a single call can pull; narrow with `meta`/`from_ts` rather than raising it.
+_EXPORT_MAX = 25
+
+
+@mcp.tool()
+async def export_conversations(
+    ctx: Context,
+    limit: int = 5,
+    meta: str | None = None,
+    from_ts: str | None = None,
+    to_ts: str | None = None,
+) -> list[dict]:
+    """Whole conversations, newest first — each with its turns, the spans behind every turn, and
+    the scores at both levels. `list_traces` answers "what ran"; this answers "what was actually
+    said, step by step".
+
+    `meta` filters on span metadata as `key=value` (e.g. `business_id=2a73b883-…`) — the way to
+    pull one tenant's traffic out of a shared workspace. `from_ts`/`to_ts` are ISO-8601 UTC bounds
+    on the trace start. `limit` is capped at 25 conversations per call: these payloads are large,
+    so narrow the window instead of asking for more.
+    """
+    params: dict[str, Any] = {"limit": max(1, min(limit, _EXPORT_MAX))}
+    for k, v in (("meta", meta), ("from_ts", from_ts), ("to_ts", to_ts)):
+        if v:
+            params[k] = v
+    return await _call(ctx, "GET", "/api/export", ndjson=True, params=params)
 
 
 # ── evaluators (the columns of the traces table) ──────────────────────────────

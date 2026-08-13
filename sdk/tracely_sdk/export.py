@@ -25,6 +25,16 @@ from typing import IO, Any
 # that hangs mid-dump fails instead of pinning a CI job forever.
 _TIMEOUT_S = 60
 
+# What `init()` was given, so the read path follows the write path: exporting from the process that
+# emits the traces should not need the connection restated as env vars. Empty until init() runs.
+_conn: dict[str, str] = {}
+
+
+def remember_connection(endpoint: str, api_key: str) -> None:
+    """Record the connection `init()` built its exporter with. Called once, from `init()`."""
+    _conn["api"] = endpoint.rstrip("/")
+    _conn["key"] = api_key
+
 
 def _open(
     api: str | None,
@@ -33,9 +43,15 @@ def _open(
     from_ts: str | None,
     to_ts: str | None,
     evals: bool,
+    meta: str | None,
 ):
-    base = (api or os.environ.get("TRACELY_API") or "http://localhost:8000").strip().rstrip("/")
-    token = (key or os.environ.get("TRACELY_KEY") or "tracely_dev_key").strip()
+    # Explicit argument, then whatever `init()` is pointed at, then the environment — an argument
+    # is the most deliberate, and a stale env var must not redirect an export away from the
+    # workspace this process is writing to.
+    base = (
+        api or _conn.get("api") or os.environ.get("TRACELY_API") or "http://localhost:8000"
+    ).strip().rstrip("/")
+    token = (key or _conn.get("key") or os.environ.get("TRACELY_KEY") or "tracely_dev_key").strip()
     query = urllib.parse.urlencode(
         # Falsy params are dropped rather than sent empty: `limit=0` means "everything", and
         # `?limit=` would reach the server as a 422 instead.
@@ -46,6 +62,7 @@ def _open(
                 ("from_ts", from_ts),
                 ("to_ts", to_ts),
                 ("evals", "true" if evals else ""),
+                ("meta", meta),
             )
             if v
         }
@@ -63,6 +80,7 @@ def export_conversations(
     from_ts: str | None = None,
     to_ts: str | None = None,
     evals: bool = False,
+    meta: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield every conversation in the workspace, newest first — each one the full object the UI's
     copy button produces (turns, per-turn steps, scores, cost).
@@ -72,9 +90,10 @@ def export_conversations(
 
     `api`/`key` default to `TRACELY_API` / `TRACELY_KEY`. `limit` caps conversations (0 = all),
     `from_ts`/`to_ts` are ISO-8601 UTC bounds on the trace start, `evals=True` also yields
-    Tracely's own internal runs.
+    Tracely's own internal runs. `meta="business_id=2a73…"` keeps only conversations whose span
+    metadata carries that exact key/value — one tenant's traffic out of a shared workspace.
     """
-    with _open(api, key, limit, from_ts, to_ts, evals) as response:
+    with _open(api, key, limit, from_ts, to_ts, evals, meta) as response:
         for line in response:
             line = line.strip()
             if line:
@@ -90,13 +109,14 @@ def download_export(
     from_ts: str | None = None,
     to_ts: str | None = None,
     evals: bool = False,
+    meta: str | None = None,
 ) -> int:
     """Copy the raw NDJSON to a path or an open binary file, returning the bytes written.
 
     Separate from `export_conversations` so an archive dump never round-trips through
     parse-then-re-serialise — that path is where a float or a datetime quietly changes shape.
     """
-    with _open(api, key, limit, from_ts, to_ts, evals) as response, _sink(dest) as fh:
+    with _open(api, key, limit, from_ts, to_ts, evals, meta) as response, _sink(dest) as fh:
         written = 0
         while chunk := response.read(64 * 1024):
             fh.write(chunk)

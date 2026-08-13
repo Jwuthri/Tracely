@@ -150,3 +150,39 @@ async def test_key_is_required_and_scoped(client, sync_db, make_workspace):
         )
     async with mcp_session("mcp_key_b") as s:
         assert payload(await s.call_tool("list_evaluators", {})) == []
+
+
+async def test_export_conversations_parses_ndjson_and_caps_the_limit(
+    client, sync_db, make_workspace, monkeypatch
+):
+    """The export endpoint streams NDJSON, so the tool must not hand it to `r.json()`. The cap is
+    the other half: a whole workspace would evict the caller's context."""
+    from tracely.api.routers import sessions as sessions_router
+
+    asked: list[int] = []
+
+    async def fake_overview(project_id, limit, offset, *a, **kw):
+        asked.append(limit)
+        return [{"thread": "t-1", "metadata": '{"business_id": "A"}'}] if offset == 0 else []
+
+    async def fake_turns(project_id, thread_id, advisory):
+        return [{"trace_id": "tr-1", "input": "hi", "output": "yo"}]
+
+    monkeypatch.setattr(sessions_router.async_reader, "sessions_overview", fake_overview)
+    monkeypatch.setattr(sessions_router.async_reader, "session_turns", fake_turns)
+    monkeypatch.setattr(sessions_router.async_reader, "thread_spans_full", lambda *a: _empty([]))
+    monkeypatch.setattr(sessions_router.async_reader, "conversation_scores", lambda *a: _empty([]))
+    monkeypatch.setattr(sessions_router.async_reader, "scores_by_trace", lambda *a: _empty({}))
+    monkeypatch.setattr(sessions_router, "advisory_score_names", lambda p: _empty([]))
+
+    await make_workspace("mcp-export", "mcp_key_export", "export@x.test")
+    async with mcp_session("mcp_key_export") as s:
+        convs = payload(
+            await s.call_tool("export_conversations", {"limit": 999, "meta": "business_id=A"})
+        )
+    assert [c["thread_id"] for c in convs] == ["t-1"]
+    assert convs[0]["messages"][0]["input"] == "hi"
+
+
+async def _empty(value):
+    return value

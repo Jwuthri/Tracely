@@ -101,6 +101,10 @@ async def _export_thread(project_id: str, thread_id: str, advisory: Sequence[str
             "end_time": _iso(s.get("end_time")),
             "input": s.get("input"),
             "output": s.get("output"),
+            # Already in the row we selected — dropping them made a span export useless for the
+            # question people actually ask of one ("what did the agent call, with what?").
+            "tool_calls": s.get("tool_calls") or None,
+            "tool_call_names": list(s.get("tool_call_names") or []),
         })
 
     return {
@@ -133,6 +137,17 @@ def _iso(v) -> str | None:
     return v.isoformat() if hasattr(v, "isoformat") else (v or None)
 
 
+def _meta_of(row: dict) -> dict:
+    """A listing row's metadata, which the reader hands over as a JSON string. Unparseable is
+    treated as "no metadata" rather than an error: one malformed map must not abort an export that
+    is already streaming."""
+    try:
+        parsed = json.loads(row.get("metadata") or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 _EXPORT_PAGE = 200  # threads per sessions_overview call
 
 
@@ -142,6 +157,7 @@ async def export_workspace(
     from_ts: str | None = None,
     to_ts: str | None = None,
     evals: bool = False,
+    meta: str | None = None,
     project_id: str = Depends(get_project_id),
 ) -> StreamingResponse:
     """Every conversation in the workspace as NDJSON — one line per thread, each line exactly what
@@ -154,8 +170,14 @@ async def export_workspace(
     `limit` caps the thread count (0 = all); `from_ts`/`to_ts`/`evals` mean what they do on
     `GET /sessions`. Like that list, content-less 1-turn threads (no input, no output, not failing)
     are not emitted — they carry nothing to export.
+
+    `meta=<key>=<value>` keeps only conversations whose merged span metadata has that exact pair —
+    `meta=business_id=2a73b883-…` for one tenant's traffic. Matched against the listing row, which
+    already carries the map, so a non-matching conversation costs one comparison instead of the
+    four queries its export would have taken.
     """
     advisory = await advisory_score_names(project_id)
+    meta_key, _, meta_value = (meta or "").partition("=")
 
     async def gen() -> AsyncIterator[str]:
         offset = seen = 0
@@ -165,6 +187,8 @@ async def export_workspace(
                 include_internal=evals,
             )
             for row in page:
+                if meta_key and _meta_of(row).get(meta_key) != meta_value:
+                    continue
                 payload = await _export_thread(project_id, row["thread"], advisory)
                 # default=str: score rows carry datetimes that FastAPI would have encoded for us —
                 # streaming means we do our own dumping, and a raw TypeError here would truncate an

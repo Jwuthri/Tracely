@@ -702,6 +702,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         from_ts=args.from_ts,
         to_ts=args.to_ts,
         evals=args.evals,
+        meta=args.meta,
     )
     if args.out:
         print(f"wrote {args.out} ({written} bytes)", file=sys.stderr)
@@ -791,6 +792,7 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--from-ts", dest="from_ts", help="ISO-8601 UTC lower bound on trace start")
     e.add_argument("--to-ts", dest="to_ts", help="ISO-8601 UTC upper bound on trace start")
     e.add_argument("--evals", action="store_true", help="also dump Tracely's own internal runs")
+    e.add_argument("--meta", metavar="KEY=VALUE", help="only conversations with this metadata pair")
     # `_conn` reads all four connection fields; export has no use for the last two.
     e.set_defaults(web_url=None, agent=None)
 

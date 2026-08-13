@@ -22,13 +22,23 @@ def stub_ch(monkeypatch):
 
     async def sessions_overview(project_id, limit, offset, *a, **kw):
         calls.append((limit, offset))
-        return [{"thread": t} for t in threads[offset : offset + limit]]
+        return [
+            # every other conversation belongs to tenant A, and t-4 carries broken metadata
+            {"thread": t, "metadata": (
+                "not json" if t == "t-4" else
+                json.dumps({"business_id": "A" if i % 2 == 0 else "B", "env": "sandbox"})
+            )}
+            for i, t in enumerate(threads)
+        ][offset : offset + limit]
 
     async def session_turns(project_id, thread_id, advisory):
         return [{"trace_id": f"{thread_id}-tr", "input": "hi", "output": "yo", "tokens": 3}]
 
     async def thread_spans_full(project_id, thread_id):
-        return [{"trace_id": f"{thread_id}-tr", "span_id": "s1", "name": "root"}]
+        return [{
+            "trace_id": f"{thread_id}-tr", "span_id": "s1", "name": "root",
+            "tool_calls": '[{"name": "search"}]', "tool_call_names": ["search"],
+        }]
 
     async def conversation_scores(project_id, thread_id):
         # a datetime here is what breaks a naive json.dumps
@@ -64,7 +74,10 @@ async def test_export_streams_every_thread_across_pages(client, stub_ch):
 
     lines = [json.loads(x) for x in r.text.strip().split("\n")]
     assert [x["thread_id"] for x in lines] == [f"t-{i}" for i in range(5)]
-    assert lines[0]["messages"][0]["steps"][0]["span_id"] == "s1"
+    step = lines[0]["messages"][0]["steps"][0]
+    assert step["span_id"] == "s1"
+    # a span export that drops the tool calls cannot answer "what did the agent call?"
+    assert step["tool_call_names"] == ["search"] and "search" in step["tool_calls"]
     assert lines[0]["conversation_scores"][0]["ts"] == "2026-01-01 00:00:00"
     # paged, and stopped on the short page instead of looping forever
     assert stub_ch == [(2, 0), (2, 2), (2, 4)]
@@ -80,3 +93,34 @@ async def test_export_honours_limit(client, stub_ch):
 async def test_export_requires_auth(client, stub_ch):
     r = await client.get("/api/export")
     assert r.status_code in (401, 403)
+
+
+# ── metadata filter ──────────────────────────────────────────────────────────
+
+
+async def test_meta_filter_keeps_only_matching_conversations(client, stub_ch):
+    tok = await _token(client)
+    r = await client.get(
+        "/api/export?meta=business_id=A", headers={"Authorization": f"Bearer {tok}"}
+    )
+    assert r.status_code == 200, r.text
+    lines = [json.loads(x) for x in r.text.strip().split("\n")]
+    assert [x["thread_id"] for x in lines] == ["t-0", "t-2"]  # t-4's metadata is unparseable
+
+
+async def test_unparseable_metadata_does_not_abort_the_stream(client, stub_ch):
+    """A malformed map on one conversation must not kill an export that is already streaming."""
+    tok = await _token(client)
+    r = await client.get(
+        "/api/export?meta=env=sandbox", headers={"Authorization": f"Bearer {tok}"}
+    )
+    assert r.status_code == 200
+    assert [json.loads(x)["thread_id"] for x in r.text.strip().split("\n")] == [
+        "t-0", "t-1", "t-2", "t-3",
+    ]
+
+
+async def test_no_meta_filter_exports_everything(client, stub_ch):
+    tok = await _token(client)
+    r = await client.get("/api/export", headers={"Authorization": f"Bearer {tok}"})
+    assert len(r.text.strip().split("\n")) == 5
