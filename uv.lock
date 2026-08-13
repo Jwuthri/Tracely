@@ -5384,7 +5384,7 @@ wheels = [
 
 [[package]]
 name = "tracely-ai"
-version = "0.3.1"
+version = "0.3.2"
 source = { editable = "sdk" }
 dependencies = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
