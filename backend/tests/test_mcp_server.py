@@ -166,7 +166,8 @@ async def test_export_conversations_parses_ndjson_and_caps_the_limit(
         asked.append(limit)
         if offset:
             return []
-        return [{"thread": f"t-{i}", "metadata": '{"business_id": "A"}'} for i in range(40)]
+        # already-parsed dict — the shape `sessions_overview` really returns
+        return [{"thread": f"t-{i}", "metadata": {"business_id": "A"}} for i in range(40)]
 
     async def fake_turns(project_id, thread_id, advisory):
         return [{"trace_id": f"{thread_id}-tr", "input": "hi", "output": "yo"}]

@@ -138,14 +138,12 @@ def _iso(v) -> str | None:
 
 
 def _meta_of(row: dict) -> dict:
-    """A listing row's metadata, which the reader hands over as a JSON string. Unparseable is
-    treated as "no metadata" rather than an error: one malformed map must not abort an export that
-    is already streaming."""
-    try:
-        parsed = json.loads(row.get("metadata") or "{}")
-    except (TypeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+    """A listing row's metadata. `sessions_overview` hands it over already parsed by
+    `parse_thread_meta`, with the `tracely.metadata.` prefix stripped — so `meta=business_id=…`
+    matches the key the UI shows, not the raw attribute name. Anything else is "no metadata":
+    a surprise from one conversation must not abort an export that is already streaming."""
+    meta = row.get("metadata")
+    return meta if isinstance(meta, dict) else {}
 
 
 _EXPORT_PAGE = 200  # threads per sessions_overview call

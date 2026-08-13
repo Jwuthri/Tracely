@@ -23,10 +23,13 @@ def stub_ch(monkeypatch):
     async def sessions_overview(project_id, limit, offset, *a, **kw):
         calls.append((limit, offset))
         return [
-            # every other conversation belongs to tenant A, and t-4 carries broken metadata
+            # The shape `sessions_overview` actually returns: metadata already parsed by
+            # `parse_thread_meta` into a dict with the `tracely.metadata.` prefix stripped. Stubbing
+            # the raw SQL string here instead is what let a filter that matched nothing ship green.
+            # Every other conversation is tenant A; t-4's metadata is the wrong type entirely.
             {"thread": t, "metadata": (
-                "not json" if t == "t-4" else
-                json.dumps({"business_id": "A" if i % 2 == 0 else "B", "env": "sandbox"})
+                "not a dict" if t == "t-4" else
+                {"business_id": "A" if i % 2 == 0 else "B", "env": "sandbox"}
             )}
             for i, t in enumerate(threads)
         ][offset : offset + limit]
@@ -105,11 +108,11 @@ async def test_meta_filter_keeps_only_matching_conversations(client, stub_ch):
     )
     assert r.status_code == 200, r.text
     lines = [json.loads(x) for x in r.text.strip().split("\n")]
-    assert [x["thread_id"] for x in lines] == ["t-0", "t-2"]  # t-4's metadata is unparseable
+    assert [x["thread_id"] for x in lines] == ["t-0", "t-2"]  # t-4's metadata is unusable
 
 
-async def test_unparseable_metadata_does_not_abort_the_stream(client, stub_ch):
-    """A malformed map on one conversation must not kill an export that is already streaming."""
+async def test_unusable_metadata_does_not_abort_the_stream(client, stub_ch):
+    """A wrong-typed map on one conversation must not kill an export that is already streaming."""
     tok = await _token(client)
     r = await client.get(
         "/api/export?meta=env=sandbox", headers={"Authorization": f"Bearer {tok}"}
