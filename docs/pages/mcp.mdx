@@ -47,6 +47,7 @@ install and nothing to run: the endpoint is part of the API, hosted or self-host
 |---|---|
 | `list_traces` · `get_trace` | recent runs with their verdict; one run in full — spans, I/O, scores. |
 | `search_traces` | find conversations by what the user said. |
+| `export_conversations` | whole conversations — every turn, its spans and its scores. `meta="business_id=…"` narrows to one tenant; capped at 25 per call. |
 | `list_clusters` · `get_cluster` | recurring failure modes, and the traces behind one. |
 | `list_evaluators` · `list_evaluator_templates` | the columns you have; the catalog you can copy from. |
 | `create_evaluator` · `update_evaluator` | add a column; edit or retire one (`enabled: false`). |

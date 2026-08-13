@@ -157,16 +157,19 @@ async def test_export_conversations_parses_ndjson_and_caps_the_limit(
 ):
     """The export endpoint streams NDJSON, so the tool must not hand it to `r.json()`. The cap is
     the other half: a whole workspace would evict the caller's context."""
+    from tracely.api import mcp_server
     from tracely.api.routers import sessions as sessions_router
 
     asked: list[int] = []
 
     async def fake_overview(project_id, limit, offset, *a, **kw):
         asked.append(limit)
-        return [{"thread": "t-1", "metadata": '{"business_id": "A"}'}] if offset == 0 else []
+        if offset:
+            return []
+        return [{"thread": f"t-{i}", "metadata": '{"business_id": "A"}'} for i in range(40)]
 
     async def fake_turns(project_id, thread_id, advisory):
-        return [{"trace_id": "tr-1", "input": "hi", "output": "yo"}]
+        return [{"trace_id": f"{thread_id}-tr", "input": "hi", "output": "yo"}]
 
     monkeypatch.setattr(sessions_router.async_reader, "sessions_overview", fake_overview)
     monkeypatch.setattr(sessions_router.async_reader, "session_turns", fake_turns)
@@ -180,8 +183,10 @@ async def test_export_conversations_parses_ndjson_and_caps_the_limit(
         convs = payload(
             await s.call_tool("export_conversations", {"limit": 999, "meta": "business_id=A"})
         )
-    assert [c["thread_id"] for c in convs] == ["t-1"]
-    assert convs[0]["messages"][0]["input"] == "hi"
+    # 40 conversations matched, but a tool call may not pull more than _EXPORT_MAX of them
+    assert len(convs) == mcp_server._EXPORT_MAX
+    assert [c["thread_id"] for c in convs] == [f"t-{i}" for i in range(mcp_server._EXPORT_MAX)]
+    assert convs[0]["messages"][0]["input"] == "hi"  # NDJSON parsed, not handed to r.json()
 
 
 async def _empty(value):
