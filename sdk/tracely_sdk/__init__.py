@@ -47,6 +47,8 @@ from opentelemetry.sdk.trace import SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Span, Status, StatusCode
 
+from tracely_sdk.export import download_export, export_conversations
+
 __all__ = [
     "init",
     "trace",
@@ -74,6 +76,8 @@ __all__ = [
     "call_llm",
     "call_tool",
     "ToolError",
+    "export_conversations",
+    "download_export",
 ]
 
 log = logging.getLogger("tracely")

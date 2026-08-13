@@ -217,6 +217,35 @@ All three **exit 0 (PASS) / 1 (FAIL) / 2 (no answer — timeout, unreachable API
 
 ---
 
+## 4. Export a workspace
+
+```bash
+tracely export [--out dump.ndjson] [--limit N] [--from-ts …] [--to-ts …] [--evals]
+```
+
+NDJSON — one line per conversation, each line the full object (turns, per-turn steps, scores,
+tokens, cost) that `GET /api/sessions/{thread}/export` returns for a single thread. Streamed and
+paged server-side (`GET /api/export`), so a workspace bigger than memory still exports. Without
+`--out` it goes to stdout and pipes into `jq`; the "wrote …" line goes to stderr so stdout stays
+pure NDJSON.
+
+In Python, the same dump as a generator — nothing is materialised twice, so `break` when you have
+enough:
+
+```python
+import tracely_sdk as tracely
+
+for conv in tracely.export_conversations(limit=100):        # TRACELY_API / TRACELY_KEY
+    print(conv["thread_id"], conv["turns"], conv["cost_usd"])
+
+tracely.download_export("dump.ndjson", from_ts="2026-08-01T00:00:00")   # raw bytes, no re-encode
+```
+
+Content-less 1-turn threads (no input, no output, not failing) are not emitted; `--evals` /
+`evals=True` adds Tracely's own internal runs.
+
+---
+
 ## Examples (`sdk/examples/` + `sdk/example.py`)
 
 [`examples/README.md`](examples/README.md) is the full index — **one runnable file per way of

@@ -5,7 +5,11 @@ Pure HTTP shaping — all ClickHouse access lives in `infrastructure.clickhouse.
 
 from __future__ import annotations
 
+import json
+from collections.abc import AsyncIterator, Sequence
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
@@ -68,7 +72,13 @@ async def export_session(thread_id: str, project_id: str = Depends(get_project_i
     session fetch plus one trace fetch per turn: on a 60-turn thread that was 61 requests, and the
     result depended on which rows happened to be expanded.
     """
-    advisory = await advisory_score_names(project_id)
+    return await _export_thread(project_id, thread_id, await advisory_score_names(project_id))
+
+
+async def _export_thread(project_id: str, thread_id: str, advisory: Sequence[str]) -> dict:
+    """One conversation's export payload. Shared with the bulk export so a line of the NDJSON dump
+    and a single-thread fetch are byte-identical — two shapes for "the conversation" is exactly the
+    drift that makes an export untrustworthy."""
     turns = await async_reader.session_turns(project_id, thread_id, advisory)
     spans = await async_reader.thread_spans_full(project_id, thread_id)
     conv_scores = await async_reader.conversation_scores(project_id, thread_id)
@@ -121,6 +131,63 @@ async def export_session(thread_id: str, project_id: str = Depends(get_project_i
 
 def _iso(v) -> str | None:
     return v.isoformat() if hasattr(v, "isoformat") else (v or None)
+
+
+_EXPORT_PAGE = 200  # threads per sessions_overview call
+
+
+@router.get("/export")
+async def export_workspace(
+    limit: int = 0,
+    from_ts: str | None = None,
+    to_ts: str | None = None,
+    evals: bool = False,
+    project_id: str = Depends(get_project_id),
+) -> StreamingResponse:
+    """Every conversation in the workspace as NDJSON — one line per thread, each line exactly what
+    `GET /sessions/{thread_id}/export` returns for that thread.
+
+    Streamed and paged (`_EXPORT_PAGE` threads per query) rather than assembled into one list: a
+    workspace's whole history does not fit in the response buffer of the box exporting it, and a
+    client that has to wait for the last thread before seeing the first cannot resume.
+
+    `limit` caps the thread count (0 = all); `from_ts`/`to_ts`/`evals` mean what they do on
+    `GET /sessions`. Like that list, content-less 1-turn threads (no input, no output, not failing)
+    are not emitted — they carry nothing to export.
+    """
+    advisory = await advisory_score_names(project_id)
+
+    async def gen() -> AsyncIterator[str]:
+        offset = seen = 0
+        while True:
+            page = await async_reader.sessions_overview(
+                project_id, _EXPORT_PAGE, offset, from_ts, to_ts, advisory,
+                include_internal=evals,
+            )
+            for row in page:
+                payload = await _export_thread(project_id, row["thread"], advisory)
+                # default=str: score rows carry datetimes that FastAPI would have encoded for us —
+                # streaming means we do our own dumping, and a raw TypeError here would truncate an
+                # otherwise-good export mid-line.
+                yield json.dumps(payload, default=str) + "\n"
+                seen += 1
+                if limit and seen >= limit:
+                    return
+            if len(page) < _EXPORT_PAGE:
+                return
+            offset += _EXPORT_PAGE
+
+    # ponytail: 4 queries per thread (reuses the single-thread path). Batch by trace_id chunks if
+    # exporting a large workspace gets slow.
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-ndjson",
+        headers={
+            "Content-Disposition": 'attachment; filename="tracely-export.ndjson"',
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 class DeleteSessionsBody(BaseModel):

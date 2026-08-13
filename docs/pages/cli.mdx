@@ -13,6 +13,7 @@ exit `0` (PASS) / `1` (FAIL) / `2` (never got an answer), plus a GitHub commit s
 tracely simulate [<agent> | --agent a,b | --all] [--min-pass-rate 0.9] [--timeout 900] [--github]
 tracely gate     <agent> [--env ci] [--api …] [--key …] [--pr N] [--sha …] [--github]
 tracely replay   <agent> (--entrypoint module:func | --cmd "…") [--live] [--github]
+tracely export   [--out dump.ndjson] [--limit N] [--from-ts …] [--to-ts …] [--evals]
 ```
 
 ## `tracely simulate`
@@ -81,6 +82,22 @@ tracely replay planner --cmd "python my_agent.py"
   `gate` grades traces your CI already emitted. They answer different questions; most teams run
   `simulate` plus one of the other two. See [Scenarios](/scenarios) and [Hermetic replay](/replay).
 </Callout>
+
+## `tracely export`
+
+Not a gate — it ships with the same CLI because it needs the same `TRACELY_API` / `TRACELY_KEY`.
+Dumps the workspace's conversations as **NDJSON**, one line per conversation, each line the full
+object (turns, per-turn steps, scores, tokens, cost).
+
+```bash
+tracely export --out dump.ndjson            # or pipe: tracely export | jq -r .thread_id
+```
+
+Streamed and paged server-side, so a workspace bigger than memory still exports. Without `--out` it
+goes to stdout and the "wrote …" line goes to stderr, keeping stdout pure NDJSON. `--limit N` caps
+the conversation count, `--from-ts`/`--to-ts` bound the trace start (ISO-8601 UTC), `--evals` also
+dumps Tracely's own internal runs. The Python equivalents are
+[`export_conversations` / `download_export`](/api-reference#export).
 
 ## What gating checks
 

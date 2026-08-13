@@ -26,6 +26,8 @@ import sys
 import urllib.error
 import urllib.request
 
+from tracely_sdk.export import download_export
+
 MARKER = "<!-- tracely-gate -->"
 STATUS_CONTEXT = "tracely/regression-gate"
 ICON = {"PASS": "✓", "FAIL": "✗", "SKIP": "–", "NO_COVERAGE": "⚠", "UNGRADED": "⚠"}
@@ -685,6 +687,27 @@ def cmd_replay(args: argparse.Namespace) -> int:
     return 0 if data["status"] == "PASS" else 1
 
 
+def cmd_export(args: argparse.Namespace) -> int:
+    """Dump the workspace's conversations as NDJSON — one line per conversation.
+
+    Defaults to stdout so it pipes into jq; `--out` writes a file and reports the size on stderr,
+    keeping stdout pure NDJSON either way.
+    """
+    api, key, _, _ = _conn(args)
+    written = download_export(
+        args.out or sys.stdout.buffer,
+        api=api,
+        key=key,
+        limit=args.limit,
+        from_ts=args.from_ts,
+        to_ts=args.to_ts,
+        evals=args.evals,
+    )
+    if args.out:
+        print(f"wrote {args.out} ({written} bytes)", file=sys.stderr)
+    return 0
+
+
 def _add_common_gate_flags(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--env", default=os.environ.get("TRACELY_GATE_ENV", "ci"))
     sp.add_argument("--api", help="Tracely API base (TRACELY_API)")
@@ -760,6 +783,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_common_gate_flags(s)
 
+    e = sub.add_parser("export", help="dump the workspace's conversations as NDJSON")
+    e.add_argument("--out", help="file to write (default: stdout)")
+    e.add_argument("--api", help="Tracely API base (TRACELY_API)")
+    e.add_argument("--key", help="Tracely ingest key (TRACELY_KEY)")
+    e.add_argument("--limit", type=int, default=0, help="max conversations (default: all)")
+    e.add_argument("--from-ts", dest="from_ts", help="ISO-8601 UTC lower bound on trace start")
+    e.add_argument("--to-ts", dest="to_ts", help="ISO-8601 UTC upper bound on trace start")
+    e.add_argument("--evals", action="store_true", help="also dump Tracely's own internal runs")
+    # `_conn` reads all four connection fields; export has no use for the last two.
+    e.set_defaults(web_url=None, agent=None)
+
     args = p.parse_args(argv)
     args.agent = getattr(args, "agent_opt", None) or args.agent  # allow positional or --agent
     if args.command == "gate":
@@ -768,6 +802,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_replay(args)
     if args.command == "simulate":
         return cmd_simulate(args)
+    if args.command == "export":
+        return cmd_export(args)
     return 2
 
 

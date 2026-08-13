@@ -259,6 +259,33 @@ deltas automatically. `set_state` outside any recording span warns and drops (ca
 agent=None)`, `with fixtures(bundle): …`, `fixture(kind, name)`, and the `ToolError` exception — see
 [Hermetic replay](/replay).
 
+## Export
+
+The SDK's one **read** call — pull a workspace's conversations back out (everything else here
+writes traces).
+
+```python
+for conv in tracely.export_conversations(limit=100):
+    print(conv["thread_id"], conv["turns"], conv["cost_usd"])
+    for m in conv["messages"]:
+        print(" ", m["index"], m["input"], "->", m["output"], m["scores"])
+
+tracely.download_export("dump.ndjson", from_ts="2026-08-01T00:00:00")
+```
+
+`export_conversations(*, api=None, key=None, limit=0, from_ts=None, to_ts=None, evals=False)` is a
+**generator** — a workspace's whole history is never materialised, so `break` when you have enough.
+Each item is one conversation: turns, per-turn steps, scores, tokens and cost.
+
+`download_export(dest, ...)` takes the same keywords and copies the raw NDJSON to a path or an open
+binary file, returning the bytes written — no parse/re-encode round-trip. A handle you pass in stays
+open; only files it opened itself are closed.
+
+`api`/`key` default to `TRACELY_API` / `TRACELY_KEY`, and the ingest key is the workspace scope, so
+nothing takes a project id. `limit=0` means everything; `from_ts`/`to_ts` are ISO-8601 UTC bounds on
+the trace start; `evals=True` also yields Tracely's own internal runs. Content-less 1-turn threads
+(no input, no output, not failing) are not emitted.
+
 ## What Tracely reads
 
 Beyond standard `gen_ai.*` / OpenInference attributes, these `tracely.*` hints become **indexed
