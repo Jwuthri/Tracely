@@ -256,6 +256,7 @@ Three Celery tasks, each a thin dispatch into a service class: `ingest_otlp_blob
 | `GET /api/sessions?evals=true` | `sessions.py` | the thread list, **plus** Tracely's own runs as rows (`internal_kind`, `subject_id`). The one list reader that opts out of the `_REAL` filter. |
 | `GET /api/sessions`, `/api/sessions/{thread}` | `sessions.py` | conversations (grouped by `conversation_id`) + per-turn rollups (tokens, input/output split, model, cost, verdict). |
 | `GET /api/sessions/{thread}/agents` | `sessions.py` | the conversation's agents — declared (SDK catalog) or derived from spans. |
+| `GET /api/sessions/{thread}/export` · `GET /api/export` | `sessions.py` | one conversation as JSON (the table's copy button); the whole workspace as streamed NDJSON — one line per thread, same shape, paged 200 threads at a time (`limit`, `from_ts`, `to_ts`, `evals`). |
 | `GET …/{thread}/rolling-summary` · `…/by-level` · `POST …/generate` | `sessions.py` | the accumulated conversation summary (whole / per-level) + on-demand rebuild. |
 | `GET /api/search` | `search.py` | ⌘K search over conversations/issues/cases/gates. |
 | `GET /api/stats` · `POST /api/promote` · `GET /api/cases` · `GET /api/cases/{id}` · `DELETE /api/cases/{id}` · `POST /api/cases/{id}/replay` | `cases.py` | dashboard stats; promote a trace → case; case list/detail; delete a case (+ its replays and per-gate verdicts); manual replay. |
@@ -275,6 +276,7 @@ Three Celery tasks, each a thin dispatch into a service class: `ingest_otlp_blob
 | `POST /auth/sync` | `auth.py` | Clerk-mode user sync. |
 | `DELETE /api/project/data` | `admin.py` | wipe the project: every trace/score in ClickHouse + all derived registry rows (agents, cases, gates, clusters, meta-analyses, summaries, annotations). Keeps configuration — keys, users, evaluators, monitors. Requires `{"confirm": "DELETE"}`. |
 | `GET /api/health` | `health.py` | readiness — `200` healthy / `503` when ClickHouse or Postgres is unreachable. |
+| `GET/POST/DELETE /mcp` | `mcp_server.py` | MCP (streamable HTTP): ~11 tools over traces, clusters, evaluators and trends for a coding agent. Not a router — each tool calls the endpoints above in-process over an ASGI transport, forwarding the caller's key, so there is no second implementation of anything and no DB access here. |
 
 Every read/write is scoped by `project_id`, resolved from the `Authorization: Bearer <ingest-key>` header (`auth.get_project_id`).
 

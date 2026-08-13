@@ -49,7 +49,7 @@ Five stores: **ClickHouse** (`events` one row per span + `scores`, `ReplacingMer
 | `domain/` | Pure logic, **no I/O**. Stats, verdict policy, contracts, trajectories, template resolution. |
 | `infrastructure/` | Every adapter: `clickhouse/`, `db/`, `blob/`, `queue/`, `llm/`, `notifications/`, `registry/`. |
 | `services/` | Use-case orchestrator classes (`IngestionService`, `EvaluationService`, `GateService`, …). |
-| `api/`, `workers/` | Thin. Routers shape HTTP; tasks dispatch into a service. |
+| `api/`, `workers/` | Thin. Routers shape HTTP; tasks dispatch into a service. `api/mcp_server.py` mounts an MCP server at `/mcp` whose tools call those routers in-process over an ASGI transport (forwarding the caller's key) — never the DB. |
 
 `workers/` is a deployable shim that imports `tracely.workers.tasks`. `sdk/` is the instrumentation SDK **and** the `tracely simulate` / `gate` / `replay` CI CLI. `simulate` is the scenario path (one agent, `--agent a,b`, or `--all` = every agent with an enabled scenario); the fan-out is CLI-side — one `GateRun` per agent, aggregated into one commit status and one PR comment.
 

@@ -1,0 +1,66 @@
+---
+description: "Point Claude Code, Cursor or any MCP client at your Tracely workspace: read traces, inspect failure clusters, and add evaluation columns from the editor."
+---
+
+import { Callout } from "nextra/components";
+
+# MCP server
+
+Every Tracely backend serves an [MCP](https://modelcontextprotocol.io) endpoint at **`/mcp`**, so a
+coding agent can work with your traces the way you do — read what failed, look at the spans, and add
+an evaluation column — without you leaving the editor or writing a line of API glue.
+
+## Connect
+
+```bash
+claude mcp add --transport http tracely https://api.tracely-studio.xyz/mcp \
+  --header "Authorization: Bearer $TRACELY_KEY"
+```
+
+Self-hosting? Use your own API host — `http://localhost:8000/mcp` for the docker-compose stack.
+
+Any MCP client works. The generic config, for the ones that take JSON:
+
+```json
+{
+  "mcpServers": {
+    "tracely": {
+      "type": "http",
+      "url": "https://api.tracely-studio.xyz/mcp",
+      "headers": { "Authorization": "Bearer ${TRACELY_KEY}" }
+    }
+  }
+}
+```
+
+The key is one of your workspace's ingest keys — the same key the SDK sends. There is nothing to
+install and nothing to run: the endpoint is part of the API, hosted or self-hosted.
+
+<Callout type="info">
+  The key **is** the workspace. A tool call can only ever read and write the project its key
+  belongs to, because each one goes through the same `project_id` scoping as the REST API.
+</Callout>
+
+## Tools
+
+| Tool | Does |
+|---|---|
+| `list_traces` · `get_trace` | recent runs with their verdict; one run in full — spans, I/O, scores. |
+| `search_traces` | find conversations by what the user said. |
+| `list_clusters` · `get_cluster` | recurring failure modes, and the traces behind one. |
+| `list_evaluators` · `list_evaluator_templates` | the columns you have; the catalog you can copy from. |
+| `create_evaluator` · `update_evaluator` | add a column; edit or retire one (`enabled: false`). |
+| `get_trends` · `get_ops_metrics` | failures over time; latency, throughput, tokens, cost. |
+
+A useful thing to ask for, once it's connected:
+
+> Look at the last 20 traces, find what's failing, and add an evaluation column that catches it.
+
+## What it deliberately can't do
+
+Nothing deletes, and nothing touches billing, keys or workspace settings — retiring a column is
+`update_evaluator(enabled=false)`, which keeps the scores it already produced.
+
+There's no tool for sending traces either: that's the [SDK's](/quickstart) job. Traces arrive as
+OTLP, whose span ids are base64 — hand-written ones don't error, they just quietly never join up
+with anything.

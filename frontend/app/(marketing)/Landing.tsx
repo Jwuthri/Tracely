@@ -10,6 +10,7 @@ gsap.registerPlugin(useGSAP, ScrollTrigger);
 const GITHUB = "https://github.com/Jwuthri/Tracely";
 const APP = "/dashboard"; // same app — the authed shell lives in the (app) route group
 const DOCS = "https://doc.tracely-studio.xyz";
+const API = "https://api.tracely-studio.xyz"; // the hosted backend — self-hosters swap in their own
 
 /* ---------------------------------- ui bits ---------------------------------- */
 
@@ -328,6 +329,18 @@ const PY_LINES: ReactNode[] = [
   <span key="8" className={c.p}>{"    "}OpenAI().chat.completions.create(...)  <span className={c.cm}># traced — zero span code</span></span>,
 ];
 
+const MCP_LINES: ReactNode[] = [
+  <span key="0" className={c.cm}># one line — the endpoint ships with the API</span>,
+  <span key="1"><span className={c.fn}>claude</span><span className={c.p}> mcp add --transport http tracely {"\\"}</span></span>,
+  <span key="2" className={c.p}>{"  "}<span className={c.s}>{API}/mcp</span> {"\\"}</span>,
+  <span key="3" className={c.p}>{"  "}--header <span className={c.s}>&quot;Authorization: Bearer $TRACELY_KEY&quot;</span></span>,
+  <span key="4">{" "}</span>,
+  <span key="5" className={c.cm}>› what failed in the last 20 traces, and</span>,
+  <span key="6" className={c.cm}>{"  "}add a column that catches it next time</span>,
+  <span key="7">{" "}</span>,
+  <span key="8"><span className={c.kw}>✓</span><span className={c.p}> get_trace, list_clusters, create_evaluator …</span></span>,
+];
+
 /* ---------------------------------- page ---------------------------------- */
 
 export default function Landing() {
@@ -550,6 +563,7 @@ export default function Landing() {
             <a className="transition hover:text-fg" href="#features">Features</a>
             <a className="transition hover:text-fg" href="#gate">CI gate</a>
             <a className="transition hover:text-fg" href="#sdk">SDK</a>
+            <a className="transition hover:text-fg" href="#mcp">MCP</a>
             <a className="transition hover:text-fg" href="#pricing">Pricing</a>
             <a className="transition hover:text-fg" href={DOCS} target="_blank" rel="noreferrer">Docs</a>
           </div>
@@ -952,6 +966,57 @@ export default function Landing() {
               <pre className="overflow-x-auto p-5 font-mono text-[12.5px] leading-[1.8]">
                 {PY_LINES.map((l, i) => (
                   <span key={i} className="py-line block">
+                    {l}
+                  </span>
+                ))}
+              </pre>
+            </div>
+          </div>
+        </section>
+
+        {/* =================================== mcp =================================== */}
+        <section id="mcp" className="scroll-mt-24 px-6 py-28">
+          <div className="mx-auto grid max-w-[1200px] items-center gap-12 lg:grid-cols-2">
+            <div>
+              <div className="sec-reveal flex items-center gap-4">
+                <span className="eyebrow whitespace-nowrap">MCP</span>
+                <div className="hairline-x flex-1" />
+              </div>
+              <h2 className="sec-reveal mt-6 font-display text-4xl font-bold tracking-tight sm:text-5xl">
+                Ask your editor
+                <br />
+                what broke.
+              </h2>
+              <p className="sec-reveal mt-5 max-w-xl leading-relaxed text-fg-muted">
+                Every Tracely deployment is also an MCP server. Point Claude Code or Cursor at it and
+                your coding agent reads the failing traces, opens the cluster behind them, and writes
+                the evaluator that catches it next time — authenticated by an ordinary ingest key,
+                scoped to that one workspace. Nothing to install, nothing extra to run.
+              </p>
+              <div className="sec-reveal mt-7 flex flex-wrap gap-2.5">
+                {["read traces", "inspect clusters", "create evaluators", "trends & cost"].map((t) => (
+                  <span key={t} className="rounded-full border border-line bg-ink-800/60 px-3.5 py-1.5 font-mono text-[11px] text-fg-muted">
+                    {t}
+                  </span>
+                ))}
+              </div>
+              <div className="sec-reveal mt-9">
+                <a className={btnGhost} href={`${DOCS}/mcp`} target="_blank" rel="noreferrer">
+                  Connect your agent <IconArrow className="h-3.5 w-3.5" />
+                </a>
+              </div>
+            </div>
+
+            <div className="sec-reveal overflow-hidden glass">
+              <div className="flex items-center justify-between border-b border-line/70 px-5 py-3">
+                <span className="font-mono text-[11px] text-fg-faint">terminal</span>
+                <span className="rounded border border-line bg-ink-900 px-2 py-0.5 font-mono text-[10px] text-fg-faint">
+                  11 tools · streamable HTTP
+                </span>
+              </div>
+              <pre className="overflow-x-auto p-5 font-mono text-[12.5px] leading-[1.8]">
+                {MCP_LINES.map((l, i) => (
+                  <span key={i} className="block">
                     {l}
                   </span>
                 ))}

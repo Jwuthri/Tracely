@@ -32,6 +32,7 @@ from tracely.api.routers import (
 )
 from sqlalchemy import select
 
+from tracely.api import mcp_server
 from tracely.api.routers import auth as auth_router
 from tracely.auth import AuthError
 from tracely.config import settings
@@ -98,7 +99,10 @@ async def lifespan(app: FastAPI):
     # Model prices come from OpenRouter's published catalog, not a list we maintain. Loaded in the
     # background — a 10s network timeout must never hold up the health check.
     asyncio.create_task(asyncio.to_thread(_warm_pricing))
-    yield
+    # The MCP endpoint's streamable-HTTP transport needs its session manager running for the
+    # lifetime of the app; it has no lifespan of its own, so this is the only place to run it.
+    async with mcp_server.mcp.session_manager.run():
+        yield
     # Release pooled connections so reloads/restarts/shutdowns don't leak sockets + file descriptors.
     await close_async_client()
     await async_engine.dispose()
@@ -165,3 +169,8 @@ if settings.auth_mode == "local":
     app.include_router(auth_router.local_router)
 elif settings.auth_mode == "clerk":
     app.include_router(auth_router.clerk_router)
+
+# MCP (streamable HTTP) — the same API, driven by an agent. Authenticated per-request by the
+# caller's own Bearer key, exactly like every router above. Wired at import so the session
+# manager exists by the time `lifespan` runs it.
+mcp_server.mount(app)

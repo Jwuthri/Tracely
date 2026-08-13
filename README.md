@@ -314,6 +314,23 @@ optional and only builds the "view gate run" link in the PR comment.
 
 ---
 
+## Drive it from your editor
+
+Every backend serves an [MCP](https://modelcontextprotocol.io) endpoint at `/mcp`, so a coding agent
+reads your traces and writes your evaluators without any glue code:
+
+```bash
+claude mcp add --transport http tracely http://localhost:8000/mcp \
+  --header "Authorization: Bearer tracely_dev_key"
+```
+
+Then: *"look at the last 20 traces, find what's failing, and add an evaluation column that catches
+it."* Eleven tools over traces, failure clusters, evaluators and trends — scoped to the key's
+workspace, same as every other call. On hosted Tracely the endpoint is
+`https://api.tracely-studio.xyz/mcp`. [Docs](https://doc.tracely-studio.xyz/mcp)
+
+---
+
 ## Architecture
 
 The write path deliberately mirrors Langfuse's proven design — reimplemented in Python, with agent
@@ -372,6 +389,8 @@ The core **trace → detect → cluster → regression → gate** loop is end-to
   `@HISTORY`) + a **conversation-agents** panel.
 - **Judge calibration** — label judge verdicts against human review, get per-evaluator agreement, and
   catch an over-flagging judge before you let it gate a release.
+- **MCP** — the API doubles as an MCP server (`/mcp`): a coding agent reads traces, inspects failure
+  clusters and creates evaluators itself, authenticated by an ordinary ingest key.
 - **Auth** — three modes: `dev` (open), `local` (email/password + invites, self-host), `clerk` (hosted).
   Team management, API keys, invitations, account settings.
 

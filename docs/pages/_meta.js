@@ -9,5 +9,6 @@ export default {
   scenarios: "Scenarios (multi-turn)",
   replay: "Hermetic replay",
   cli: "CI gate CLI",
+  mcp: "MCP server",
   "self-hosting": "Self-hosting",
 };
