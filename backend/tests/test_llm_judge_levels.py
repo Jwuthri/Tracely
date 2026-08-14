@@ -401,6 +401,24 @@ def test_a_run_with_neither_request_nor_answer_is_skipped(monkeypatch):
     assert _judge(RUN).run(_ctx([_span(input="", output="")]), {"prompt": "Grade."}) == []
 
 
+def test_include_answer_false_grades_the_user_message_alone(monkeypatch):
+    """A classification column (intent) labels what the USER wanted: sending the agent's answer
+    would both double the item and let the label follow what the agent DID."""
+    prompts: list = []
+    _stub_structured(monkeypatch, {"score": 1.0, "reason": "x"}, prompts=prompts)
+    spans = [_span(input="where is my refund?", output="Here are our shipping FAQs.")]
+    _judge(RUN).run(_ctx(spans), {"prompt": "Label.", "include_answer": False})
+    assert "where is my refund?" in prompts[0]
+    assert "shipping FAQs" not in prompts[0]
+
+
+def test_include_answer_false_skips_a_turn_with_no_user_message(monkeypatch):
+    """No user message ⇒ no user intent to label — don't spend a call on the agent's monologue."""
+    _stub_structured(monkeypatch, {"score": 1.0, "reason": "x"})
+    spans = [_span(input="", output="Your order shipped.")]
+    assert _judge(RUN).run(_ctx(spans), {"prompt": "Label.", "include_answer": False}) == []
+
+
 # ── the advanced template is sent once, not twice ─────────────────────────────
 
 

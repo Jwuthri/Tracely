@@ -123,27 +123,25 @@ TEMPLATES = [
     # Recommended, and sequential on purpose: the point is the intent TRAJECTORY (greeting →
     # faq → checkout), so each turn is labeled with the earlier turns' labels already on the
     # judge's conversation. Informational — no threshold, so it never emits a verdict and can't
-    # move the trace badge or a gate. Pinned to a nano model: one extra call per turn, on every
-    # trace, in every workspace.
+    # move the trace badge or a gate. Pinned to a nano model, and the label is the ENTIRE output
+    # (no `reason` field — an explanation per turn costs more than the label it explains): one
+    # extra call per turn, on every trace, in every workspace.
     {"name": "Conversation intent", "kind": "llm_judge", "score_name": "tracely.run.intent",
      "level": "AGENT_RUN", "recommended": True, "category": "insight",
      "description": "Labels each turn's user intent in the light of the intents already seen.",
-     "config": {"output_type": "json", "execution_mode": "sequential",
+     "config": {"output_type": "json", "execution_mode": "sequential", "include_answer": False,
                 "model": "openai/gpt-5.4-nano", "prompt": (
-         "You label the user's intent, turn by turn, for one conversation with an AI agent. "
-         "You are shown the turns in order and you have already labeled the earlier ones — stay "
-         "consistent with those labels and treat them as the conversation so far. Label ONLY the "
-         "newest turn, from the user's message (the agent's answer is context, not the subject). "
-         "Pick the single closest value from the allowed list; use `other` only when nothing "
-         "fits. A follow-up that continues the previous turn's topic keeps that turn's intent."
+         "You label the user's intent, message by message, in one conversation with an AI agent. "
+         "You are shown the messages in order and you have already labeled the earlier ones — "
+         "stay consistent with those labels and treat them as the conversation so far. "
+         "Label ONLY the newest message. Pick the single closest value from the allowed list; use "
+         "`other` only when nothing fits. A follow-up that continues the previous message's topic "
+         "keeps that message's intent."
      ), "output_schema": {
          "type": "object",
          "properties": {
-             # `intent` is first on purpose: the table cell headlines the first short string
-             # field (frontend/app/components/trace-table/format.ts:jsonResultLabel).
              "intent": {"type": "string", "enum": INTENTS,
                         "description": "The user's intent on this turn"},
-             "reason": {"type": "string", "description": "A few words on why, citing the user's message"},
          },
          "required": ["intent"],
      }}},

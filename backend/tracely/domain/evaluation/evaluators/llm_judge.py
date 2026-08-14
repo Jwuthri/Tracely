@@ -225,7 +225,7 @@ class LLMJudgeEvaluator(Evaluator):
         Only a run with neither a request nor an answer is skipped — an agent that crashed into
         no answer still gets graded (see `_message_body`); "not graded yet" for the worst outcome
         there is was the old bug."""
-        body = prompts.message_body(ctx.spans)
+        body = prompts.message_body(ctx.spans, include_answer=config.get("include_answer", True) is not False)
         if not body:
             return []
         # Sequential: the earlier turns are the context this message is judged in. Batch grades the

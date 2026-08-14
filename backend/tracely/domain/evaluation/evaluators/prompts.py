@@ -61,12 +61,22 @@ def by_trace(spans: list[dict]) -> list[list[dict]]:
     return list(grouped.values())
 
 
-def message_body(spans: list[dict]) -> str:
+def message_body(spans: list[dict], *, include_answer: bool = True) -> str:
     """One message as the judge reads it: user request vs final answer. Empty only when there is
     neither — an agent that crashed into silence still gets graded, stating plainly that there was
-    no answer (the rubric decides what that means; a "did it refuse?" column may call it a PASS)."""
+    no answer (the rubric decides what that means; a "did it refuse?" column may call it a PASS).
+
+    `include_answer=False` sends the user's message alone, for a column that labels what the USER
+    wanted (intent). Two reasons, and cost is the smaller one: the answer is the long half of
+    every item, and a judge that reads it labels what the agent DID — hiding exactly the mismatch
+    (user asked for a refund, agent answered an FAQ) the label exists to expose. It costs little
+    context: a sequential column already has the earlier turns, answers included, on its
+    conversation, so a terse "yes" still resolves against the question that prompted it. With no
+    user message there is no intent to label, so the item is skipped."""
     root = root_span(spans)
     user_in = request_for(root, spans)
+    if not include_answer:
+        return f"User message:\n{clip(user_in, 2000)}" if user_in else ""
     answer = answer_for(root, spans, TOOL, GENERATION, CHAIN)
     if not answer and not user_in:
         return ""

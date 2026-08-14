@@ -96,6 +96,9 @@ def test_intent_column_is_recommended_and_sequential():
     assert t["recommended"] is True
     assert t["config"]["execution_mode"] == "sequential"
     assert t["config"].get("threshold") is None  # a label, never a verdict
+    # the user's message alone: the agent's answer is the long half of the item, and reading it
+    # makes the label follow what the agent did instead of what the user asked for
+    assert t["config"]["include_answer"] is False
 
 
 def test_intent_labels_render_in_the_trace_table_cell():
