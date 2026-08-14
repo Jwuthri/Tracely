@@ -15,6 +15,16 @@ DEFAULT_JUDGE_PROMPT = (
     "not the absence of prose."
 )
 
+# The intent vocabulary of `tracely.run.intent`. Deliberately generic (support / commerce /
+# assistant shapes) and short: every value must stay under 24 characters or the trace-table cell
+# stops headlining it. Domain-specific workspaces edit the enum on the installed column.
+INTENTS = [
+    "greeting", "smalltalk", "faq_question", "product_inquiry", "recommendation",
+    "task_request", "order_status", "checkout", "booking", "account_management",
+    "billing_payment", "technical_support", "complaint", "refund_cancellation",
+    "human_handoff", "clarification", "feedback", "farewell", "other",
+]
+
 # `recommended: True` → installed automatically (project seeding). Everything else is
 # library-only: shown in Browse Library, installed on demand. `category` groups the library UI.
 TEMPLATES = [
@@ -110,20 +120,30 @@ TEMPLATES = [
          "user did not themselves provide in this conversation. Set pass=true when no such data is "
          "exposed; set pass=false when it is, quoting the leaked fragment in the reason."
      )}},
-    {"name": "Intent category", "kind": "llm_judge", "score_name": "tracely.run.intent",
-     "level": "AGENT_RUN", "recommended": False, "category": "insight",
-     "description": "Classifies what the user was trying to do this turn.",
-     "config": {"output_type": "json", "prompt": (
-         "Classify the user's intent for this turn into exactly one category: question "
-         "(seeking information), task_request (asking the agent to do something), complaint "
-         "(reporting a problem or dissatisfaction), purchase (buying/ordering), smalltalk, "
-         "or other."
+    # Recommended, and sequential on purpose: the point is the intent TRAJECTORY (greeting →
+    # faq → checkout), so each turn is labeled with the earlier turns' labels already on the
+    # judge's conversation. Informational — no threshold, so it never emits a verdict and can't
+    # move the trace badge or a gate. Pinned to a nano model: one extra call per turn, on every
+    # trace, in every workspace.
+    {"name": "Conversation intent", "kind": "llm_judge", "score_name": "tracely.run.intent",
+     "level": "AGENT_RUN", "recommended": True, "category": "insight",
+     "description": "Labels each turn's user intent in the light of the intents already seen.",
+     "config": {"output_type": "json", "execution_mode": "sequential",
+                "model": "openai/gpt-5.4-nano", "prompt": (
+         "You label the user's intent, turn by turn, for one conversation with an AI agent. "
+         "You are shown the turns in order and you have already labeled the earlier ones — stay "
+         "consistent with those labels and treat them as the conversation so far. Label ONLY the "
+         "newest turn, from the user's message (the agent's answer is context, not the subject). "
+         "Pick the single closest value from the allowed list; use `other` only when nothing "
+         "fits. A follow-up that continues the previous turn's topic keeps that turn's intent."
      ), "output_schema": {
          "type": "object",
          "properties": {
-             "intent": {"type": "string",
-                        "enum": ["question", "task_request", "complaint", "purchase", "smalltalk", "other"],
-                        "description": "The user's intent this turn"},
+             # `intent` is first on purpose: the table cell headlines the first short string
+             # field (frontend/app/components/trace-table/format.ts:jsonResultLabel).
+             "intent": {"type": "string", "enum": INTENTS,
+                        "description": "The user's intent on this turn"},
+             "reason": {"type": "string", "description": "A few words on why, citing the user's message"},
          },
          "required": ["intent"],
      }}},

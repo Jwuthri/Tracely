@@ -73,11 +73,11 @@ def test_unknown_sort_falls_back_instead_of_interpolating():
     """A renamed column in a bookmarked URL shows the default order; it never reaches the query."""
     for hostile in ("", "cost", "1; DROP TABLE events", "last_ts DESC, 1", None):
         clause = session_order_clause(hostile, "desc")  # type: ignore[arg-type]
-        assert clause == "ORDER BY last_ts DESC, last_ts DESC"
+        assert clause == "ORDER BY last_ts DESC, last_ts DESC, thread ASC"
 
 
 def test_direction_is_two_valued():
-    assert session_order_clause("tokens", "asc").endswith("ASC, last_ts DESC")
+    assert "ASC, last_ts DESC" in session_order_clause("tokens", "asc")
     for junk in ("ASC; DELETE", "descending", "", None):
         assert " DESC, last_ts DESC" in session_order_clause("tokens", junk)  # type: ignore[arg-type]
 
@@ -86,4 +86,18 @@ def test_every_sort_is_tie_broken():
     """Without this, page 2 of a duration-sorted list repeats rows from page 1 and drops others."""
     for key in SESSION_SORTS:
         for order in ("asc", "desc"):
-            assert session_order_clause(key, order).endswith(", last_ts DESC")
+            assert ", last_ts DESC" in session_order_clause(key, order)
+
+
+def test_the_order_is_total():
+    """The last tie-break must be a column that is UNIQUE per row, or the order still is not total
+    and LIMIT/OFFSET keeps dropping threads.
+
+    This is the regression: `recent` sorts on `last_ts`, so the clause used to end
+    "last_ts DESC, last_ts DESC" — a tie-break on the very column being tied. A whole-workspace
+    export paged 200 at a time and silently came back short."""
+    for key in SESSION_SORTS:
+        for order in ("asc", "desc"):
+            clause = session_order_clause(key, order)
+            assert clause.endswith(", thread ASC")
+            assert clause[: -len(", thread ASC")].count("thread") == 0

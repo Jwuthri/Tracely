@@ -142,6 +142,7 @@ Plus a **⌘K command palette** to jump anywhere.
 | **Tool consistency** | 🥷 **silent failure** — a tool *requested* but never executed |
 | **Latency** | over the latency budget |
 | **Answer quality (LLM judge)** | wrong/unfaithful answers — grades the agent's *real* answer against its tool results (needs a key) |
+| **Conversation intent (LLM judge)** | labels each turn — `greeting → faq_question → checkout` — chained, so every turn is read against the intents before it (needs a key) |
 
 > 🥷 **Silent failures are the star** — a run with zero error spans can still be broken (the model claims it called a tool but didn't, then hallucinates). No structural-only tool catches this.
 

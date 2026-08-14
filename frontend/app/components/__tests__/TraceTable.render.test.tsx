@@ -240,3 +240,28 @@ describe("TraceTable column alignment", () => {
     expect(Number(empty.querySelector("td")!.getAttribute("colSpan"))).toBe(cells(header));
   });
 });
+
+// ── classification columns ───────────────────────────────────────────────────
+// A json judge with no threshold emits no PASS/FAIL, so the cell's badge is the predicted label
+// itself (`tracely.run.intent` → `checkout`) and the pill beside it carries the reason.
+
+describe("TraceTable classification badge", () => {
+  it("badges a verdict-less json score with its label, not with its raw JSON", async () => {
+    const { listEvaluators } = await import("@/app/lib/evaluators");
+    vi.mocked(listEvaluators).mockResolvedValueOnce([{
+      id: "e1", name: "Conversation intent", description: "", kind: "llm_judge",
+      score_name: "tracely.run.intent", level: "AGENT_RUN", enabled: true, config: {},
+    }]);
+    const turn: FullTurn = {
+      ...turnWith([]),
+      scores: [{
+        name: "tracely.run.intent", evaluation_level: "AGENT_RUN", observation_id: null,
+        value: null, verdict: "", comment: "user is paying", data_type: "TEXT",
+        string_value: '{"intent":"checkout","reason":"user is paying"}',
+      }],
+    };
+    render(<TraceTable conversations={[conv({ turnsData: [turn] })]} />);
+    expect(await screen.findByText("checkout")).toBeInTheDocument();
+    expect(screen.getByText("user is paying")).toBeInTheDocument();
+  });
+});

@@ -338,12 +338,17 @@ def session_order_clause(sort: str, order: str) -> str:
     """ORDER BY for the threads list. Unknown keys fall back to the default rather than raising:
     a sort is a view preference, and 400-ing a stale link is worse than showing the usual order.
 
-    The `last_ts` tie-break is load-bearing, not cosmetic. Ties are the common case here (duration
-    0, tokens 0), and LIMIT/OFFSET over a non-deterministic order silently repeats some threads on
-    page 2 while dropping others entirely."""
+    The tie-breaks are load-bearing, not cosmetic. Ties are the common case here (duration 0,
+    tokens 0), and LIMIT/OFFSET over a non-deterministic order silently repeats some threads on
+    page 2 while dropping others entirely.
+
+    `thread` is the one that makes the order TOTAL, and it is why this ends in a unique column
+    rather than `last_ts`: under the default `recent` sort the expression IS `last_ts`, so
+    "… last_ts DESC, last_ts DESC" tie-broke nothing and paging quietly lost conversations — which
+    a whole-workspace export makes obvious and the UI's "Load more" does not."""
     expr = SESSION_SORTS.get(sort, SESSION_SORTS["recent"])
     direction = "ASC" if str(order).lower() == "asc" else "DESC"
-    return f"ORDER BY {expr} {direction}, last_ts DESC"
+    return f"ORDER BY {expr} {direction}, last_ts DESC, thread ASC"
 
 
 async def sessions_overview(

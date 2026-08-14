@@ -809,6 +809,17 @@ function VerdictChip({ verdict }: { verdict: string }) {
   );
 }
 
+// A classification column (intent, risk_level…) never emits PASS/FAIL — the predicted LABEL is
+// its badge. Same shape as VerdictChip so a mixed row reads as one family of chips; lowercase,
+// because `technical_support` shouted in caps is unreadable at 9px.
+function LabelChip({ label }: { label: string }) {
+  return (
+    <span className="inline-flex shrink-0 items-center rounded border border-info/30 bg-info/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold tracking-wider text-info">
+      {label}
+    </span>
+  );
+}
+
 const EvalSpinner = () => (
   <span className="inline-flex items-center gap-1.5 text-[11px] text-fg-faint">
     <span className="h-3 w-3 animate-spin rounded-full border-2 border-line border-t-signal" />
@@ -819,7 +830,10 @@ const EvalSpinner = () => (
 // One metric result in a cell: verdict chip + value (or reason teaser), click → floating
 // detail panel with the judge's full reasoning.
 function EvalScorePill({ score, evaluator, busy }: { score: EvalScore; evaluator: EvaluatorDef; busy: boolean }) {
-  const val = fmtScoreValue(score) || score.comment || "";
+  // Label first: with the intent in the badge, the pill beside it carries the judge's reason
+  // instead of repeating the label.
+  const label = score.verdict ? null : jsonResultLabel(score.string_value ?? "");
+  const val = (label ? score.comment : fmtScoreValue(score) || score.comment) || "";
   const icon = (
     <IconBox accent={score.verdict === "FAIL" ? "fuchsia" : "cyan"}>
       <span className="text-[10px] font-bold">✓</span>
@@ -839,7 +853,7 @@ function EvalScorePill({ score, evaluator, busy }: { score: EvalScore; evaluator
     // max-w-full + overflow-hidden: the pill can NEVER bleed into the neighboring column —
     // the teaser text is hard-trimmed to fit and the full reason lives in the click panel.
     <span className={clsx("inline-flex max-w-full items-center gap-1.5 overflow-hidden", busy && "opacity-50")}>
-      {score.verdict ? <VerdictChip verdict={score.verdict} /> : null}
+      {score.verdict ? <VerdictChip verdict={score.verdict} /> : label ? <LabelChip label={label} /> : null}
       {val ? (
         <Pill
           iconBox={icon}

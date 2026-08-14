@@ -384,15 +384,15 @@ async def test_chain_progress_reports_sequential_columns(client, sync_db, monkey
 
     r = await client.get("/api/sessions/th-1/chain-progress", headers=_bearer(tok))
     assert r.status_code == 200
-    metrics = r.json()["metrics"]
-    # the workspace bootstrap seeds batch columns; only the sequential one reports chain state
-    assert [m["score_name"] for m in metrics] == ["helpfulness"]
-    (m,) = metrics
+    metrics = {m["score_name"]: m for m in r.json()["metrics"]}
+    # the bootstrap's batch columns don't chain; its sequential intent column does, alongside ours
+    assert set(metrics) == {"helpfulness", "tracely.run.intent"}
+    m = metrics["helpfulness"]
     assert (m["chained"], m["turns"], m["up_to_date"]) == (2, 3, False)
     assert m["last_payload"] == {"verdict": "PASS", "value": 0.9}
     assert isinstance(m["updated_at"], str)
 
     # a thread with no progress rows still lists the column, at zero
     r = await client.get("/api/sessions/th-other/chain-progress", headers=_bearer(tok))
-    (m,) = r.json()["metrics"]
+    m = next(m for m in r.json()["metrics"] if m["score_name"] == "helpfulness")
     assert (m["chained"], m["up_to_date"], m["last_payload"]) == (0, False, None)

@@ -77,3 +77,31 @@ def test_threshold_is_within_the_normalized_score_range(t):
         pytest.skip("informational column")
     # _json_result clamps value into 0..1, so a threshold outside it is always-pass/always-fail.
     assert 0.0 < float(thr) <= 1.0, f"{t['score_name']} threshold {thr} outside (0, 1]"
+
+
+# ── the intent column's label contract ───────────────────────────────────────────
+# `tracely.run.intent` is informational (no threshold, no verdict): its whole output is a label
+# the trace table shows. The frontend headlines the FIRST short string field that isn't prose
+# (`trace-table/format.ts:jsonResultLabel`, ≤ 24 chars), so a long enum value or a reordered
+# schema silently turns the cell into raw JSON.
+
+
+def _intent_template():
+    return next(t for t in TEMPLATES if t["score_name"] == "tracely.run.intent")
+
+
+def test_intent_column_is_recommended_and_sequential():
+    """Installed in every new workspace, and chained so each turn sees the earlier intents."""
+    t = _intent_template()
+    assert t["recommended"] is True
+    assert t["config"]["execution_mode"] == "sequential"
+    assert t["config"].get("threshold") is None  # a label, never a verdict
+
+
+def test_intent_labels_render_in_the_trace_table_cell():
+    t = _intent_template()
+    props = (t["config"]["output_schema"] or {}).get("properties") or {}
+    assert next(iter(props)) == "intent", "the label field must come first (jsonResultLabel)"
+    enum = props["intent"]["enum"]
+    assert enum and all(len(v) <= 24 for v in enum), f"too long to headline: {[v for v in enum if len(v) > 24]}"
+    assert len(set(enum)) == len(enum)
