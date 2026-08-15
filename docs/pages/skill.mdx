@@ -1,0 +1,45 @@
+---
+description: "Install the Tracely agent skill so Claude Code, Cursor or Copilot can instrument your agents, design evaluators and wire the CI gate without you pasting snippets."
+---
+
+import { Callout } from "nextra/components";
+
+# Agent skill
+
+Everything on this site, packaged so your **coding agent** can act on it. One command:
+
+```bash
+npx skills add https://github.com/Jwuthri/Tracely --skill tracely
+```
+
+Installed via the open-source [`skills`](https://github.com/vercel-labs/skills) CLI — Claude Code,
+Cursor, Copilot, Antigravity and anything else it targets. `-g` installs it for every project on the
+machine; `--agent '*'` installs it into every agent you have. It is plain Markdown with YAML
+frontmatter, so copying [`skills/tracely/`](https://github.com/Jwuthri/Tracely/tree/master/skills/tracely)
+into your project by hand works too.
+
+## What it carries
+
+A short entry point plus five references the agent loads only when the task calls for them:
+
+| Reference | Covers |
+|---|---|
+| `automatic.md` | [`instrument="auto"`](/automatic), provider + framework extras, `trace()`, `@observe`, drop-ins, LangGraph, LiteLLM, agent SDKs, redaction, threads, and the [OTLP conventions](/automatic) for non-Python services. |
+| `manual.md` | The full [manual span API](/instrumentation) — every observation type, handoffs, RAG, state deltas, multimodal I/O, and the [record-replay seam](/replay). |
+| `evaluators.md` | [Evaluation columns](/evaluations): structural vs judge, levels, `@VARIABLE` templates, advisory verdicts, sequential grading, targeting and sampling. |
+| `ci-gate.md` | [Scenarios](/scenarios), adversarial suites, [hermetic replay](/replay) and the [CLI](/cli) + GitHub Action. |
+| `troubleshooting.md` | Symptom → cause → fix, ordered by how often it's the answer. |
+
+The entry point leads with the handful of conventions that fail **silently** when you get them
+wrong — a missing conversation id, a swallowed tool error, no `flush()`, a dropped `traceparent`, the
+inverted polarity of an adversarial scenario. Each one produces a green-looking workspace that can't
+answer the question it was set up for.
+
+<Callout type="info">
+  **Skill vs [MCP server](/mcp).** The skill gives your agent the know-how; the MCP server gives it
+  your data. They compose — running both is the intended setup, and it's what turns *"add tracing
+  here"* into *"look at the last 20 traces, work out what's failing, and add a column that catches
+  it."*
+</Callout>
+
+More on the [Tracely site](https://tracely-studio.xyz/agent-skill).

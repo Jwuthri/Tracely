@@ -92,3 +92,42 @@ def test_turns_reusing_span_ids_stay_separate():
     assert actors["audit"]["parent"] == "billing"   # not support, whose span also had id "1"
     assert actors["support"]["parent"] == ""
     assert actors["support"]["events"] == 2
+
+
+def test_chain_wrappers_are_containers_not_work():
+    """A harness's turn wrapper (CHAIN) brackets everyone else's spans; scoring it as activity
+    made its agent look busy for the whole conversation (real trace: `agent_teams.turn`)."""
+    spans = [
+        span("w", "", "CHAIN", "agent_teams.turn", 0, 6000, agent="team"),
+        span("g", "", "GENERATION", "chat", 100, 400, agent="supervisor"),
+    ]
+    r = build_replay(spans)
+    by_name = {e["name"]: e for e in r["events"]}
+    assert by_name["agent_teams.turn"]["kind"] == "turn"
+    assert by_name["agent_teams.turn"]["container"] is True
+    assert by_name["chat"]["container"] is False
+
+
+def test_subagent_edge_from_a_tool_call_named_after_an_agent():
+    """Real multi-agent traces call a sub-agent as a tool and often lose the parent span, so the
+    nesting is gone — the tool NAME is the surviving edge."""
+    spans = [
+        dict(span("s", "missing-parent", "GENERATION", "chat", 0, 300, agent="sup"),
+             tool_call_names=["agent_faq"]),
+        span("f", "also-missing", "GENERATION", "chat", 400, 300, agent="faq"),
+    ]
+    r = build_replay(spans, {"sup": "supervisor", "faq": "agent_faq"})
+    actors = {a["id"]: a for a in r["actors"]}
+    assert actors["faq"]["parent"] == "sup"
+    assert actors["faq"]["kind"] == "subagent"
+    assert actors["sup"]["depth"] == 0
+
+
+def test_tool_call_edges_cannot_build_a_cycle():
+    spans = [
+        dict(span("a", "", "GENERATION", "chat", 0, 100, agent="one"), tool_call_names=["two"]),
+        dict(span("b", "", "GENERATION", "chat", 200, 100, agent="two"), tool_call_names=["one"]),
+    ]
+    r = build_replay(spans, {"one": "one", "two": "two"})
+    depths = {a["id"]: a["depth"] for a in r["actors"]}
+    assert max(depths.values()) <= 1        # terminates, no runaway walk

@@ -4,8 +4,9 @@ import clsx from "clsx";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  activeAt, currentByActor, fmtMs, kindStyle, onStage, orderActors, toPlayEvents,
-  type PlayEvent, type ReplayActor, type ReplayEvent,
+  activeAt, currentByActor, findSpan, fmtMs, isContainer, kindStyle, onStage, orderActors,
+  payloadText, toPlayEvents,
+  type PlayEvent, type ReplayActor, type ReplayEvent, type SpanDetail,
 } from "./timeline";
 
 /* The conversation, acted out: one character per agent, sub-agents pulled in under the agent
@@ -38,14 +39,23 @@ export function ConversationStage({ threadId }: { threadId: string }) {
 
   useEffect(() => {
     if (!playing || !total) return;
+    // The clock advances every frame but only COMMITS at ~25fps: a React commit here re-renders
+    // every step row and lane block, and 60fps of that is pure waste — the stage reads identically.
+    const COMMIT_MS = 40;
+    let pending = 0;
     const tick = (now: number) => {
       const dt = last.current ? now - last.current : 16;
       last.current = now;
-      setT((prev) => {
-        const next = prev + dt * speed;
-        if (next >= total) { setPlaying(false); return total; }
-        return next;
-      });
+      pending += dt * speed;
+      if (pending >= COMMIT_MS) {
+        const step = pending;
+        pending = 0;
+        setT((prev) => {
+          const next = prev + step;
+          if (next >= total) { setPlaying(false); return total; }
+          return next;
+        });
+      }
       raf.current = requestAnimationFrame(tick);
     };
     raf.current = requestAnimationFrame(tick);
@@ -57,6 +67,29 @@ export function ConversationStage({ threadId }: { threadId: string }) {
 
   const live = activeAt(events, t);
   const logRef = useRef<HTMLDivElement>(null);
+  const [selected, setSelected] = useState<PlayEvent | null>(null);
+  const [spans, setSpans] = useState<Record<string, SpanDetail[]>>({});
+
+  // The step's real input/output lives on the trace, not in the replay script (which stays small).
+  // Fetched once per trace and cached, so clicking around a conversation costs one request a turn.
+  useEffect(() => {
+    const trace = selected?.trace_id;
+    if (!trace || spans[trace]) return;
+    let alive = true;
+    fetch(`/api/trace?id=${encodeURIComponent(trace)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => alive && setSpans((prev) => ({ ...prev, [trace]: d.spans ?? [] })))
+      .catch(() => alive && setSpans((prev) => ({ ...prev, [trace]: [] })));
+    return () => { alive = false; };
+  }, [selected, spans]);
+
+  const pick = (e: PlayEvent) => { setSelected(e); setT(e.pt); setPlaying(false); };
+  const liveKey = live.length ? `${live[0].trace_id}:${live[0].span_id}` : "";
+  useEffect(() => {
+    if (!liveKey) return;
+    logRef.current?.querySelector(`[data-step="${CSS.escape(liveKey)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [liveKey]);
   const current = currentByActor(events, t);
   const liveIds = new Set(live.map((e) => e.span_id));
   const played = events.filter((e) => e.pt <= t);
@@ -73,7 +106,7 @@ export function ConversationStage({ threadId }: { threadId: string }) {
     );
   }
 
-  const restart = () => { setT(0); setPlaying(true); };
+  const restart = () => { setT(0); setPlaying(true); setSelected(null); };
 
   return (
     <div className="space-y-4">
@@ -105,7 +138,7 @@ export function ConversationStage({ threadId }: { threadId: string }) {
             {actors.map((a) => {
               const here = onStage(a, events, t);
               const doing = current[a.id];
-              const busy = live.some((e) => e.actor === a.id);
+              const busy = live.some((e) => e.actor === a.id && !isContainer(e));
               const failed = played.some((e) => e.actor === a.id && e.status === "error");
               return (
                 <div key={a.id}
@@ -149,6 +182,15 @@ export function ConversationStage({ threadId }: { threadId: string }) {
               );
             })}
           </div>
+          {selected && (
+            <StepDetail
+              event={selected}
+              actor={actors.find((a) => a.id === selected.actor)}
+              span={findSpan(spans[selected.trace_id], selected.span_id)}
+              loading={!spans[selected.trace_id]}
+              onClose={() => setSelected(null)}
+            />
+          )}
         </div>
 
         {/* ── step log, synced to the playhead ── */}
@@ -163,11 +205,13 @@ export function ConversationStage({ threadId }: { threadId: string }) {
               const st = kindStyle(e.kind);
               return (
                 <button key={`${e.trace_id}:${e.span_id}`}
-                  ref={isLive ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined}
-                  onClick={() => { setT(e.pt); setPlaying(false); }}
+                  data-step={`${e.trace_id}:${e.span_id}`}
+                  onClick={() => pick(e)}
                   className={clsx("flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-all",
                     done ? "opacity-100" : "opacity-30",
-                    isLive && "bg-signal/10 ring-1 ring-signal/30",
+                    selected?.span_id === e.span_id && selected?.trace_id === e.trace_id
+                      ? "bg-signal/20 ring-1 ring-signal/60"
+                      : isLive && "bg-signal/10 ring-1 ring-signal/30",
                     e.status === "error" && done && "bg-fail-dim/40")}>
                   <span className="w-[34px] shrink-0 text-right font-mono text-[9px] text-fg-faint">{fmtMs(e.t_ms)}</span>
                   <span style={{ color: st.color }} className="shrink-0 text-[11px]">{st.icon}</span>
@@ -181,7 +225,8 @@ export function ConversationStage({ threadId }: { threadId: string }) {
       </div>
 
       {/* ── lanes + scrubber ── */}
-      <Lanes actors={actors} events={events} total={total} t={t} onSeek={(v) => { setT(v); setPlaying(false); }} />
+      <Lanes actors={actors} events={events} total={total} t={t}
+        onSeek={(v) => { setT(v); setPlaying(false); }} onPick={pick} selected={selected} />
 
       <p className="text-[12px] text-fg-muted">
         Long pauses between turns are squeezed so the replay stays watchable — the timestamps in the
@@ -191,8 +236,9 @@ export function ConversationStage({ threadId }: { threadId: string }) {
   );
 }
 
-function Lanes({ actors, events, total, t, onSeek }: {
+function Lanes({ actors, events, total, t, onSeek, onPick, selected }: {
   actors: ReplayActor[]; events: PlayEvent[]; total: number; t: number; onSeek: (v: number) => void;
+  onPick: (e: PlayEvent) => void; selected: PlayEvent | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const seek = (clientX: number) => {
@@ -213,15 +259,19 @@ function Lanes({ actors, events, total, t, onSeek }: {
             <div className="relative h-5 flex-1 rounded bg-ink-800">
               {events.filter((e) => e.actor === a.id).map((e) => {
                 const st = kindStyle(e.kind);
+                const wrap = isContainer(e);
                 return (
                   <span key={e.span_id}
                     onClick={() => onSeek(e.pt)}
-                    title={`${e.name} · ${fmtMs(e.dur_ms)}`}
-                    className="absolute top-1 h-3 cursor-pointer rounded-[2px] transition-opacity hover:opacity-100"
+                    title={wrap ? `${e.name} · wraps ${fmtMs(e.dur_ms)} of the turn` : `${e.name} · ${fmtMs(e.dur_ms)}`}
+                    className={clsx("absolute cursor-pointer transition-opacity hover:opacity-100",
+                      wrap ? "top-0 h-5 rounded-[3px] border border-dashed" : "top-1 h-3 rounded-[2px]")}
                     style={{
                       left: `${(e.pt / total) * 100}%`,
                       width: `${Math.max(0.6, (e.pdur / total) * 100)}%`,
-                      background: e.status === "error" ? "#fb7185" : st.color,
+                      ...(wrap
+                        ? { borderColor: `${st.color}66`, background: `${st.color}0f` }
+                        : { background: e.status === "error" ? "#fb7185" : st.color }),
                       opacity: e.pt <= t ? 0.95 : 0.28,
                     }} />
                 );
@@ -260,6 +310,72 @@ function Character({ actor, busy, here, failed }: { actor: ReplayActor; busy: bo
       </svg>
       {busy && <span className="absolute -right-1 -top-1 h-3 w-3 animate-ping rounded-full bg-ok/70" />}
       {failed && <span className="absolute -bottom-1 -right-1 grid h-4 w-4 place-items-center rounded-full bg-fail text-[9px] font-bold text-ink-900">!</span>}
+    </div>
+  );
+}
+
+/** What actually happened in the selected step: the real timestamp, the model, and the span's
+ *  input/output pulled from its trace. Shown on the stage so the character and the detail are
+ *  read together rather than in two places. */
+function StepDetail({ event, actor, span, loading, onClose }: {
+  event: PlayEvent; actor?: ReplayActor; span: SpanDetail | null; loading: boolean; onClose: () => void;
+}) {
+  const st = kindStyle(event.kind);
+  const input = payloadText(span?.input);
+  const output = payloadText(span?.output);
+  return (
+    <div className="stage-pop mt-4 rounded-xl border border-line-bright bg-ink-900/80 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span style={{ color: st.color }} className="text-[13px]">{st.icon}</span>
+        <span className="font-mono text-[13px] font-semibold">{event.name}</span>
+        <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-fg-muted">
+          {st.label}
+        </span>
+        {event.status === "error" && (
+          <span className="rounded border border-fail/50 bg-fail-dim/50 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-fail">
+            failed
+          </span>
+        )}
+        <button onClick={onClose} className="ml-auto font-mono text-[11px] text-fg-faint hover:text-fg">✕ close</button>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[10.5px] text-fg-faint">
+        <span>by <span className="text-fg-muted">{actor?.name ?? event.actor}</span></span>
+        <span>at {fmtMs(event.t_ms)}</span>
+        <span>took {fmtMs(span?.latency_ms ?? event.dur_ms)}</span>
+        {event.model && <span>{event.model}</span>}
+        {span?.tokens ? <span>{span.tokens.toLocaleString("en-US")} tokens</span> : null}
+      </div>
+
+      {event.status === "error" && (span?.status_message || event.detail) && (
+        <p className="mt-2 rounded-md border border-fail/30 bg-fail-dim/30 px-2.5 py-1.5 font-mono text-[11px] text-fail">
+          {span?.status_message || event.detail}
+        </p>
+      )}
+
+      {loading ? (
+        <p className="mt-3 font-mono text-[11px] text-fg-faint">loading step data…</p>
+      ) : input || output ? (
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {[["input", input], ["output", output]].map(([label, body]) =>
+            body ? (
+              <div key={label}>
+                <div className="mb-1 font-mono text-[9px] uppercase tracking-wider text-fg-faint">{label}</div>
+                <pre className="max-h-[160px] overflow-auto rounded-md border border-line bg-ink-950/60 p-2.5 font-mono text-[11px] leading-relaxed text-fg-muted">
+                  {body}
+                </pre>
+              </div>
+            ) : null,
+          )}
+        </div>
+      ) : (
+        <p className="mt-3 font-mono text-[11px] text-fg-faint">This span recorded no input or output.</p>
+      )}
+
+      <Link href={`/traces/${encodeURIComponent(event.trace_id)}`}
+        className="mt-3 inline-block font-mono text-[11px] text-signal hover:underline">
+        open this turn's full trace →
+      </Link>
     </div>
   );
 }

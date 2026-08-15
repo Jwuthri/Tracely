@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeAt, currentByActor, onStage, orderActors, toPlayEvents, type ReplayActor, type ReplayEvent } from "./timeline";
+import { activeAt, currentByActor, findSpan, isContainer, onStage, orderActors, payloadText, toPlayEvents, type ReplayActor, type ReplayEvent } from "./timeline";
 
 const ev = (t: number, dur: number, actor: string, kind: string, name: string): ReplayEvent => ({
   t_ms: t, dur_ms: dur, actor, kind, name, status: "ok", model: "", detail: "",
@@ -47,4 +47,31 @@ it("orderActors nests sub-agents under their parent", () => {
     { id: "audit", parent: "billing" },
   ] as ReplayActor[];
   expect(orderActors(as).map((a) => a.id)).toEqual(["billing", "audit", "support"]);
+});
+
+it("isContainer keeps turn wrappers out of 'what is this agent doing'", () => {
+  const wrapper: ReplayEvent = { ...ev(0, 6000, "team", "turn", "agent_teams.turn"), container: true };
+  const work: ReplayEvent = ev(100, 400, "sup", "llm", "chat");
+  const { events } = toPlayEvents([wrapper, work]);
+  expect(isContainer(events[0])).toBe(true);
+  expect(isContainer(events[1])).toBe(false);
+  expect(currentByActor(events, 200).team).toBeUndefined();  // the wrapper is not an action
+  expect(currentByActor(events, 200).sup.name).toBe("chat");
+});
+
+describe("step detail helpers", () => {
+  it("findSpan matches within the given trace only", () => {
+    const spans = [{ span_id: "1" }, { span_id: "2", output: "x" }];
+    expect(findSpan(spans, "2")?.output).toBe("x");
+    expect(findSpan(spans, "9")).toBeNull();
+    expect(findSpan(undefined, "1")).toBeNull();
+  });
+
+  it("payloadText pretty-prints JSON and passes plain text through", () => {
+    expect(payloadText('{"a":1}')).toBe('{\n  "a": 1\n}');
+    expect(payloadText({ b: 2 })).toBe('{\n  "b": 2\n}');
+    expect(payloadText("hello")).toBe("hello");
+    expect(payloadText("{not json")).toBe("{not json");
+    expect(payloadText(null)).toBe("");
+  });
 });

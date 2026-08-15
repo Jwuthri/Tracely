@@ -16,6 +16,7 @@ from typing import Any
 # observation type -> replay event kind. Anything else rides as "step".
 _KIND = {
     "AGENT": "turn",
+    "CHAIN": "turn",
     "SUBAGENT": "spawn",
     "GENERATION": "llm",
     "EMBEDDING": "llm",
@@ -116,8 +117,30 @@ def build_replay(spans: list[dict], names: dict[str, str] | None = None) -> dict
             }
         seen[key]["last_ms"] = max(seen[key]["last_ms"], _ms(t0, end))
 
+    # Multi-agent harnesses call a sub-agent as a TOOL, and often emit spans whose real parent
+    # span was never exported — so nesting alone loses the hierarchy. A tool call NAMED after
+    # another actor is an explicit, non-heuristic edge: the caller owns the callee.
+    by_name: dict[str, str] = {}
+    for key, actor in seen.items():
+        by_name[str(actor["name"]).lower()] = key
+        by_name[key.lower()] = key
+    for span in rows:
+        caller = actor_of[ref(span, span.get("span_id"))]
+        for tool in span.get("tool_call_names") or []:
+            callee = by_name.get(str(tool).lower())
+            if callee and callee != caller and not parent_of.get(callee):
+                parent_of[callee] = caller
+
     for key, actor in seen.items():
         parent = parent_of.get(key, "")
+        # never let an edge point back into the callee's own subtree (would spin the depth walk)
+        cursor, hops = parent, 0
+        while cursor and hops < 16:
+            if cursor == key:
+                parent = ""
+                break
+            cursor = parent_of.get(cursor, "")
+            hops += 1
         actor["parent"] = parent if parent in seen else ""
         depth, cursor, hops = 0, actor["parent"], 0
         while cursor and hops < 16:
@@ -146,6 +169,9 @@ def build_replay(spans: list[dict], names: dict[str, str] | None = None) -> dict
                 "kind": kind,
                 "name": str(span.get("name") or kind),
                 "status": "error" if error else "ok",
+                # Containers bracket other spans rather than doing work — the UI shows them as the
+                # turn's envelope, and never as the agent "working".
+                "container": kind in ("turn", "spawn"),
                 "model": str(span.get("model_id") or ""),
                 "detail": _preview(span.get("status_message") or span.get("output")),
                 "span_id": sid,

@@ -14,7 +14,7 @@ request that would ship them again.
 production trace  →  failure detection  →  regression test  →  CI gate
 ```
 
-[**Website**](https://tracely-studio.xyz) · [**Docs**](https://doc.tracely-studio.xyz) · [**Guided tour**](OVERVIEW.md) · [**2-min demo**](DEMO.md) · [**Design dossier**](design/README.md)
+[**Website**](https://tracely-studio.xyz) · [**Docs**](https://doc.tracely-studio.xyz) · [**Agent skill**](#teach-your-coding-agent-tracely) · [**Guided tour**](OVERVIEW.md) · [**2-min demo**](DEMO.md) · [**Design dossier**](design/README.md)
 
 [![CI](https://github.com/Jwuthri/Tracely/actions/workflows/ci.yml/badge.svg)](https://github.com/Jwuthri/Tracely/actions/workflows/ci.yml) [![PyPI](https://img.shields.io/pypi/v/tracely-ai?logo=pypi&logoColor=white)](https://pypi.org/project/tracely-ai/) [![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](https://pypi.org/project/tracely-ai/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Stars](https://img.shields.io/github/stars/Jwuthri/Tracely?style=flat&logo=github)](https://github.com/Jwuthri/Tracely/stargazers)
 
@@ -331,6 +331,50 @@ workspace, same as every other call. On hosted Tracely the endpoint is
 
 ---
 
+## Teach your coding agent Tracely
+
+MCP gives your agent your *data*. The **Tracely skill** gives it the *know-how* — how to instrument,
+what to evaluate, and how to wire the gate — so "add Tracely to this agent" is one sentence instead
+of a docs tab.
+
+```bash
+npx skills add https://github.com/Jwuthri/Tracely --skill tracely
+```
+
+Works with Claude Code, Cursor, Copilot, Antigravity and anything else the
+[`skills`](https://github.com/vercel-labs/skills) CLI supports — add `-g` for a global install,
+`--agent '*'` for every agent on the machine.
+
+<table>
+<tr><td width="50%">
+
+**Knows the whole surface**
+
+- **Automatic tracing** — `init(instrument="auto")`, provider + framework extras, `@observe`,
+  drop-ins, LangGraph, LiteLLM, agent SDKs, redaction
+- **Manual spans** — every observation type, handoffs, RAG, state deltas, multimodal I/O
+- **Non-Python** — the OTLP conventions to emit from TypeScript, Go or Ruby
+- **Evaluators** — structural vs judge, levels, `@VARIABLE` templates, advisory verdicts, sampling
+- **CI gate** — scenarios, red-team runs, hermetic replay, the GitHub Action
+- **Troubleshooting** — symptom → cause → fix for the failures that look like success
+
+</td><td width="50%">
+
+**And the traps that silently produce a useless workspace**
+
+- a missing `conversation` id turns one thread into twelve orphan rows
+- a swallowed tool error is invisible to detection, clustering *and* the gate
+- no `flush()` and a script loses its last spans
+- a dropped `traceparent` makes the gate blind to what your agent *did*
+- an adversarial scenario is **inverted** — goal achieved means the attack won
+
+</td></tr>
+</table>
+
+Prefer to read it yourself? It's plain Markdown: [`skills/tracely/`](skills/tracely/SKILL.md).
+
+---
+
 ## Architecture
 
 The write path deliberately mirrors Langfuse's proven design — reimplemented in Python, with agent
@@ -365,6 +409,7 @@ One deliberate adaptation: ClickHouse server-side `async_insert` instead of an i
 | [`frontend/`](frontend/README.md) | The Next.js web app — trace explorer, clusters, cases, gates, trends, settings, auth. |
 | [`sdk/`](sdk/README.md) | The Python SDK (instrument agents over OTLP, hermetic record-replay) + the `tracely` CI gate CLI. |
 | [`docs/`](docs/README.md) | The published SDK docs site (Nextra). `make docs` → :3002. |
+| [`skills/`](skills/tracely/SKILL.md) | The Tracely agent skill — `npx skills add https://github.com/Jwuthri/Tracely --skill tracely`. |
 | [`scripts/`](scripts/README.md) | Dev/demo helpers (raw-OTLP sender, one-command `seed_demo.py`, gate shim). |
 | [`design/`](design/README.md) | The full design dossier — reverse-engineered Langfuse + every Tracely design decision. |
 

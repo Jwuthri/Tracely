@@ -13,6 +13,7 @@ const NAV = [
   { href: "/llm-evaluation", label: "LLM evaluation" },
   { href: "/llm-as-a-judge", label: "LLM-as-a-judge" },
   { href: "/langfuse-alternatives", label: "Comparisons" },
+  { href: "/agent-skill", label: "Agent skill" },
   { href: DOCS_URL, label: "Docs", external: true },
   { href: "/#pricing", label: "Pricing" },
 ];

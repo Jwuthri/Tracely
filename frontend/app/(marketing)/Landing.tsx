@@ -1127,6 +1127,7 @@ export default function Landing() {
                 <a className="transition hover:text-fg" href="/llm-evaluation">LLM evaluation</a>
                 <a className="transition hover:text-fg" href="/llm-as-a-judge">LLM-as-a-judge</a>
                 <a className="transition hover:text-fg" href="/langfuse-alternatives">Compare</a>
+                <a className="transition hover:text-fg" href="/agent-skill">Agent skill</a>
                 <a className="transition hover:text-fg" href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
                 <a className="transition hover:text-fg" href={DOCS} target="_blank" rel="noreferrer">Docs</a>
                 <a className="transition hover:text-fg" href={APP}>Dashboard</a>

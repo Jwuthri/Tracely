@@ -10,5 +10,6 @@ export default {
   replay: "Hermetic replay",
   cli: "CI gate CLI",
   mcp: "MCP server",
+  skill: "Agent skill",
   "self-hosting": "Self-hosting",
 };
