@@ -5,14 +5,23 @@ seeder is idempotent by `score_name`."""
 
 from __future__ import annotations
 
+
 DEFAULT_JUDGE_PROMPT = (
-    "You are grading an AI agent's answer for correctness, faithfulness to its tool results, and "
-    "helpfulness. Give a LOW score to answers that are unhelpful, self-contradictory, absurd, or "
-    "that state facts not supported by (or contradicting) the tool results. An agent may answer "
-    "by ACTING instead of writing text — rendering a card or rich UI element, or handing the "
-    "conversation to a human agent (such an answer is labeled `[no text reply — …]`). That is a "
-    "legitimate reply: grade whether the action and its content addressed the user's request, "
-    "not the absence of prose."
+    "You are grading an AI agent's answer for correctness, faithfulness to the evidence it "
+    "gathered, and helpfulness. Give a LOW score to answers that are unhelpful, "
+    "self-contradictory, absurd, or that state facts not supported by (or contradicting) the "
+    "evidence below. An agent may answer by ACTING instead of writing text — rendering a card or "
+    "rich UI element, or handing the conversation to a human agent (such an answer is labeled "
+    "`[no text reply — …]`). That is a legitimate reply: grade whether the action and its content "
+    "addressed the user's request, not the absence of prose.\n\n"
+    "A section reading `[No … available]` means the turn produced nothing of that kind. No tools "
+    "and no retrieval means the agent answered from the conversation and its own knowledge: judge "
+    "that against the request and the conversation, and do NOT treat plausible general knowledge "
+    "as a hallucination just because no tool backed it.\n\n"
+    "## User request\n@CURRENT_MESSAGE.input\n\n"
+    "## Tool calls and their results\n@CURRENT_STEPS.tool\n\n"
+    "## Retrieved context\n@CURRENT_STEPS.retriever\n\n"
+    "## Agent answer\n@CURRENT_MESSAGE.output"
 )
 
 # The intent vocabulary of `tracely.run.intent`. Deliberately generic (support / commerce /
@@ -48,7 +57,11 @@ TEMPLATES = [
      # advisory: a subjective-quality FAIL is recorded + shown per-trace, but doesn't flip the roll-up
      # verdict (threads dot / trace badge / session / trends), which reflect structural failures.
      # See domain.evaluation.verdict + repositories.advisory_score_names.
-     "config": {"prompt": DEFAULT_JUDGE_PROMPT, "threshold": 0.6, "output_type": "score", "advisory": True}},
+     # `is_advanced` is declared, not inferred: the seeder inserts this config verbatim and never
+     # runs the API's `_stamp_advanced`, so without it the judge takes the basic path and sends
+     # the raw `@VARIABLE` text to the model as a rubric.
+     "config": {"prompt": DEFAULT_JUDGE_PROMPT, "threshold": 0.6, "output_type": "score",
+                "advisory": True, "is_advanced": True}},
     {"name": "Required tools", "kind": "structural", "score_name": "tracely.run.required_tools",
      "level": "AGENT_RUN", "recommended": False, "category": "reliability",
      "description": "Fails if specific tools weren't called.",

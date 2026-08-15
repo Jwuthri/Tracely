@@ -13,8 +13,10 @@ Prompt architecture (the invariant the whole judge rests on):
 Item bodies per level:
 
 - CONVERSATION → `turn_lines`: the whole thread as compact `Turn n — user/agent` lines.
-- AGENT_RUN (message) → `message_body`: `User request / Agent answer`, the pair alone. A judge
-  that needs tool results should grade at step level, where the tool call IS the item.
+- AGENT_RUN (message) → `message_body`: `User request / Agent answer`, the pair alone
+  (`include_answer=False` drops the answer for a column that labels what the USER wanted). A
+  rubric that needs the steps — tool results, retrievals — is an ADVANCED column: it asks for
+  them by name with `@CURRENT_STEPS.tool`, which is the one mechanism for choosing context.
 - SPAN/TOOL/GENERATION/CHAIN (step) → `step_body`: `Step i of n — TYPE name` + the step's I/O.
 
 Sequential-mode context, when the durable judge conversation is unavailable (see

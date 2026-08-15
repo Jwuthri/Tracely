@@ -337,6 +337,30 @@ def test_advanced_sends_the_resolved_template_as_the_human_message(monkeypatch):
     assert systems == [ADVANCED_SYSTEM]
 
 
+def test_advanced_message_judge_can_grade_against_the_tool_results(monkeypatch):
+    """The whole point of the advanced path at message level: the basic item is `[request,
+    answer]`, so a faithfulness rubric has to ask for the evidence by name — and gets the tool
+    and retrieval steps, not the model calls."""
+    prompts: list = []
+    _stub_structured(monkeypatch, {"score": 1.0, "reason": "grounded"}, prompts=prompts)
+    spans = [
+        _span(span_id="root", type="AGENT", input="when is my parcel collected?",
+              output="Kept for 5 working days."),
+        _span(span_id="tool-1", type="TOOL", name="pickup_policy", parent_span_id="root",
+              is_app_root=0, input="{}", output="Parcels are held for 5 working days."),
+        _span(span_id="gen-1", type="GENERATION", parent_span_id="root", is_app_root=0,
+              input="system rubble", output="Kept for 5 working days."),
+    ]
+    config = {
+        "is_advanced": True,
+        "prompt": "Answer: @CURRENT_MESSAGE.output\n\nEvidence:\n@CURRENT_STEPS.tool",
+        "threshold": 0.6,
+    }
+    assert [r.verdict for r in _judge(RUN).run(_ctx(spans), config)] == ["PASS"]
+    assert "held for 5 working days" in prompts[0]  # the evidence reached the judge
+    assert "system rubble" not in prompts[0]  # the model call did not
+
+
 def test_advanced_history_uses_full_thread_spans(monkeypatch):
     """At message level @HISTORY is the WHOLE conversation — the service feeds `thread_spans` even
     though `ctx.spans` is only the current turn."""

@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { useEffect, useMemo, useState, type SVGProps } from "react";
+import { useEffect, useMemo, useRef, useState, type SVGProps } from "react";
 import { createPortal } from "react-dom";
 import {
   createEvaluator,
@@ -249,6 +249,9 @@ export function AddColumnModal({
   const [templates, setTemplates] = useState<EvaluatorTemplate[] | null>(null);
   const [judgeModels, setJudgeModels] = useState<JudgeModels | null>(null);
   const [allEvaluators, setAllEvaluators] = useState<EvaluatorDef[] | null>(null);
+  // The form exactly as it was seeded on open. Anything else means unsaved work, and closing
+  // has to ask first — a half-written rubric is 5 minutes of typing, not a stray click.
+  const seededForm = useRef("");
 
   // (Re)seed on open: editing jumps straight to the form. Templates refetch every open so
   // `installed` flags stay truthful after a save; models refetch until a non-empty list lands.
@@ -269,30 +272,30 @@ export function AddColumnModal({
       void listJudgeModels().then(setJudgeModels).catch(() => {});
     }
     if (editing) {
-      setForm(formFromConfig(
+      setForm(seed(formFromConfig(
         {
           name: editing.name, description: editing.description, kind: editing.kind,
           level: editing.level, enabled: editing.enabled,
         },
         editing.config ?? {},
-      ));
+      )));
       setPromptMode(modeForConfig(editing.config ?? {}));
       setStep("config");
     } else if (prefill) {
       // a suggested/draft evaluator (e.g. from a failure cluster): seed the form for review, skip
       // the type picker, land on Configure so the user confirms/edits before creating.
-      setForm(formFromConfig(
+      setForm(seed(formFromConfig(
         {
           name: prefill.name, description: prefill.description, kind: prefill.kind,
           level: prefill.level, enabled: true,
         },
         prefill.config ?? {},
         prefill.score_name,
-      ));
+      )));
       setPromptMode(modeForConfig(prefill.config ?? {}));
       setStep("config");
     } else {
-      setForm(EMPTY_FORM);
+      setForm(seed(EMPTY_FORM));
       setPromptMode("basic");
       setStep("type");
     }
@@ -318,6 +321,26 @@ export function AddColumnModal({
     }
     return groups.filter((g) => g.items.length > 0);
   }, [templates]);
+
+  // Remember a freshly seeded form as the pristine baseline, and pass it through to setForm.
+  function seed(f: FormState): FormState {
+    seededForm.current = JSON.stringify(f);
+    return f;
+  }
+
+  // The only way out. Backdrop clicks don't close this modal at all (too easy to lose a rubric
+  // to a stray click or a text selection dragged past the edge); X and Esc confirm if dirty.
+  function requestClose() {
+    const dirty = JSON.stringify(form) !== seededForm.current || aiText.trim() !== "";
+    if (!dirty || window.confirm("Discard this evaluation column? Your changes will be lost.")) onClose();
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") requestClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   if (!open) return null;
   if (typeof window === "undefined") return null;
@@ -430,21 +453,25 @@ export function AddColumnModal({
     : ["type", "config", ...(form.outputType === "json" ? ["schema" as Step] : [])];
 
   return createPortal(
-    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/75 p-4 backdrop-blur-sm sm:p-8" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/75 p-4 backdrop-blur-sm sm:p-8"
+      role="dialog"
+      aria-modal="true"
+      aria-label={editing ? "Edit evaluation column" : "Add evaluation column"}
+    >
       <div
         className={clsx(
           "mt-4 w-full max-w-xl overflow-hidden rounded-xl border border-line bg-ink-900 shadow-2xl shadow-black/70",
           "border-l-4 transition-colors duration-300",
           levelColors.lborder,
         )}
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="border-b border-line px-5 py-4">
           <div className="flex items-center justify-between">
             <h2 className="text-[13.5px] font-semibold tracking-tight text-fg">
               {editing ? "Edit Evaluation Column" : "Add Evaluation Column"}
             </h2>
-            <button onClick={onClose} className="rounded-md p-1 text-fg-faint transition-colors hover:bg-ink-700 hover:text-fg-muted" aria-label="Close">
+            <button onClick={requestClose} className="rounded-md p-1 text-fg-faint transition-colors hover:bg-ink-700 hover:text-fg-muted" aria-label="Close">
               <XIcon className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -978,7 +1005,7 @@ export function AddColumnModal({
 
               <div className="sticky bottom-0 z-10 -mx-5 -mb-5 mt-1 flex items-center justify-between border-t border-line bg-ink-900/95 px-5 py-3 backdrop-blur-sm">
                 <button
-                  onClick={() => (editing ? onClose() : setStep("type"))}
+                  onClick={() => (editing ? requestClose() : setStep("type"))}
                   className="rounded-lg border border-line px-3.5 py-1.5 text-[12px] text-fg-faint transition-colors hover:border-line-bright hover:text-fg-muted"
                 >
                   {editing ? "Cancel" : "Back"}

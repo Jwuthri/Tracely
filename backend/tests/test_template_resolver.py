@@ -179,6 +179,38 @@ def test_step_number_excludes_root_wrapper():
     assert "get_weather" in _resolve("@PREVIOUS_STEP.tool_call", ctx2).resolved_text
 
 
+# ── @CURRENT_STEPS.<type>: the message-level rubric's way to ask for the evidence ────────────
+# A basic AGENT_RUN item is `[user request, agent answer]` and nothing else, so a faithfulness
+# rubric grades a retrieved fact as invented. Advanced mode fixes that by naming what it needs —
+# and `.tool` keeps a 30-step trace's model calls and reasoning out of the prompt.
+
+
+def test_current_steps_filters_by_step_type():
+    ctx = build_context("AGENT_RUN", thread_spans=_trace_with_steps(), current_trace_id="t1")
+    tools = _resolve("@CURRENT_STEPS.tool", ctx).resolved_text
+    assert "get_weather" in tools and "sunny, 70F" in tools
+    assert "Step 2" not in tools  # the GENERATION step is not a tool
+    assert "get_weather" not in _resolve("@CURRENT_STEPS.generation", ctx).resolved_text
+
+
+def test_bare_current_steps_still_takes_every_step():
+    ctx = build_context("AGENT_RUN", thread_spans=_trace_with_steps(), current_trace_id="t1")
+    text = _resolve("@CURRENT_STEPS", ctx).resolved_text
+    assert "Step 1" in text and "Step 2" in text
+
+
+def test_a_step_type_the_turn_never_used_is_a_soft_miss():
+    """`[No CURRENT_STEPS.retriever available]` tells the judge the turn retrieved nothing —
+    silence would read as "no evidence exists", which is the false-hallucination bug again."""
+    ctx = build_context("AGENT_RUN", thread_spans=_trace_with_steps(), current_trace_id="t1")
+    assert _resolve("@CURRENT_STEPS.retriever", ctx).resolved_text == "[No CURRENT_STEPS.retriever available]"
+
+
+def test_step_type_filters_are_offered_at_message_level():
+    steps = next(v for v in variables_for_level("AGENT_RUN") if v.name == "CURRENT_STEPS")
+    assert [p for p, _ in steps.props][:2] == ["tool", "retriever"]
+
+
 def test_bare_current_step_dumps_fields():
     ctx = build_context("SPAN", thread_spans=_trace_with_steps(), current_trace_id="t1", current_span_id="tool-1")
     text = _resolve("@CURRENT_STEP", ctx).resolved_text
@@ -222,3 +254,27 @@ def test_wanted_vars_skips_unreferenced():
     assert ctx.history is None
     assert _resolve("@HISTORY", ctx).resolved_text == "[No HISTORY available]"
     assert "get_weather" in _resolve("@CURRENT_STEP.tool_call", ctx).resolved_text
+
+
+# ── the AI generator is told about all of this ───────────────────────────────
+# "Use AI" writes the rubric someone else will trust. Its system prompt renders the variable
+# catalog from TEMPLATE_VARIABLES, so a variable that exists is a variable it knows about; a
+# hand-maintained list in the prompt would silently rot the day one is added.
+
+
+def test_generator_prompt_lists_every_variable_of_every_level():
+    from tracely.domain.evaluation.generation import _variable_catalog
+
+    catalog = _variable_catalog()
+    for level in ("CONVERSATION", "AGENT_RUN", "SPAN"):
+        for v in variables_for_level(level):
+            assert f"@{v.name}" in catalog, f"{v.name} is missing from the generator's prompt"
+            for prop, _ in v.props:
+                assert f"@{v.name}.{prop}" in catalog
+
+
+def test_generator_prompt_teaches_advanced_mode():
+    from tracely.domain.evaluation.generation import _SYSTEM
+
+    assert "ADVANCED" in _SYSTEM and "@CURRENT_STEPS.tool" in _SYSTEM
+    assert "{variables}" in _SYSTEM  # the catalog is injected at call time, never hard-coded

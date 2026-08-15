@@ -123,7 +123,7 @@ For `json`, the configured JSON Schema is the contract. The stored payload conta
 
 - `@HISTORY` — formatted conversation history
 - `@CURRENT_MESSAGE.input` / `.output` — the current turn
-- `@CURRENT_STEPS` — steps in the current trace
+- `@CURRENT_STEPS` — every step of the current turn; `@CURRENT_STEPS.tool` / `.retriever` / `.generation` / `.thinking` / `.chain` narrow it to one step type. This is how a message-level rubric grades against the evidence — the basic AGENT_RUN item is the request and the answer only, so a faithfulness rubric without it calls every correctly looked-up fact invented
 - `@CURRENT_STEP.tool_call` / `.tool_result` — the evaluated step
 - `@PREVIOUS_USER_MSG` / `@PREVIOUS_ASSISTANT_MSG`
 - `@METRIC_PREVIOUS_RESULT` — the previous result in sequential mode

@@ -4,6 +4,15 @@ One `create_agent` call (LangChain on OpenRouter, see `infrastructure.llm.provid
 structured response schema. The output is a DRAFT: the UI pre-fills the manual form (and the
 schema builder, for json outputs) with it for review/editing — generation never creates the
 evaluator directly.
+
+The generator writes ADVANCED templates by default: a rubric plus the `@VARIABLES` that carry
+exactly the context it grades. That is not a stylistic preference — a basic column is fed one
+fixed item per level (`evaluators/prompts.py`), so a metric that needs anything else, most often
+the turn's tool results (`@CURRENT_STEPS.tool`), silently grades without the evidence it names
+and marks correct answers unsupported. The variable catalog in the system prompt is RENDERED FROM
+`TEMPLATE_VARIABLES`, so a new variable reaches the generator the moment it exists — the prompt
+cannot drift from what the resolver actually supports. No `is_advanced` flag is generated: the
+API stamps it from the `@VARIABLES` present in the prompt (`_stamp_advanced`).
 """
 
 from __future__ import annotations
@@ -13,6 +22,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from tracely.domain.evaluation.template_resolver import TEMPLATE_VARIABLES, catalog_level
 from tracely.infrastructure.llm import provider
 
 LEVELS = ("CONVERSATION", "AGENT_RUN", "SPAN")
@@ -40,7 +50,62 @@ And produces exactly one output type:
 
 Write the grading rubric like a strict senior reviewer would: second person, specific, naming
 the failure modes to look for, and concrete about what earns a high vs low grade. Do NOT
-mention JSON or output formatting in the rubric — the platform handles that."""
+mention JSON or output formatting in the rubric — the platform handles that.
+
+## Choose the context: ADVANCED (default) vs BASIC
+
+Each level auto-feeds a judge ONE fixed item, and nothing else:
+- CONVERSATION -> the turn-by-turn transcript
+- AGENT_RUN    -> the user request and the agent's final answer. NOT the tool calls, NOT the
+                  retrieved documents, NOT the reasoning.
+- SPAN         -> one step's input and output
+
+Write an ADVANCED prompt — a rubric with `@VARIABLE` placeholders resolved against the real
+trace — whenever the metric needs anything other than that exact item. This is the normal case:
+faithfulness/hallucination needs `@CURRENT_STEPS.tool` (the evidence) next to the answer;
+anything about earlier turns needs `@HISTORY` or `@PREVIOUS_ASSISTANT_MSG`; anything about the
+user's goal needs `@GOAL`. Use BASIC (a rubric with NO variables) only when the level's default
+item is already exactly what you would have asked for.
+
+Rules for an advanced prompt, in order of what breaks when you get them wrong:
+1. NOTHING is auto-injected. The template is the entire message the judge sees — if you don't
+   reference the user's request, the judge never sees it. Include every variable it needs.
+2. Use only variables listed for the level you chose; a variable from another level resolves to
+   `[No X available]` and the judge grades on a blank.
+3. Prefer the narrowest one that answers the question: `@CURRENT_STEPS.tool` over
+   `@CURRENT_STEPS`, `@PREVIOUS_ASSISTANT_MSG` over `@HISTORY`. Wide variables are slower,
+   dearer, and bury the signal.
+4. Structure it: the instruction first, then each variable under its own labelled heading
+   (`## Tool results` then `@CURRENT_STEPS.tool`), so the judge can tell the rubric from the data.
+5. State what a missing value means. A variable can resolve to `[No CURRENT_STEPS.tool
+   available]`; say whether that is a pass, a fail, or irrelevant.
+
+## The variables, by level
+{variables}
+
+## Execution mode
+"batch" (default) grades each item independently. Choose "sequential" ONLY when the grade
+genuinely depends on the ones before it (drift, escalation, repetition, a running label): items
+are then graded in order, and at AGENT_RUN level in advanced mode the previous item's result
+reaches the judge ONLY through `@METRIC_PREVIOUS_RESULT` — reference it in the template or the
+chain carries nothing."""
+
+
+def _variable_catalog() -> str:
+    """The `@VARIABLE` catalog, rendered per level from `TEMPLATE_VARIABLES`. Generated rather
+    than hand-written so a new variable is offered to the generator the day it ships."""
+    blocks = []
+    for level in LEVELS:
+        cl = catalog_level(level)
+        lines = []
+        for v in TEMPLATE_VARIABLES:
+            if cl not in v.levels:
+                continue
+            # the bare ref works for every variable; props are the narrower forms
+            refs = " ".join([f"@{v.name}"] + [f"@{v.name}.{p}" for p, _ in v.props])
+            lines.append(f"  {refs} — {v.description}")
+        blocks.append(f"{level}:\n" + "\n".join(lines))
+    return "\n".join(blocks)
 
 
 class GeneratedSchemaField(BaseModel):
@@ -64,6 +129,9 @@ class GeneratedEvaluatorDraft(BaseModel):
     threshold: float | None = Field(default=None, description='0..1 pass threshold, only for "score"')
     schema_fields: list[GeneratedSchemaField] | None = Field(
         default=None, description='the output object fields, only for "json"'
+    )
+    execution_mode: str = Field(
+        default="batch", description='"batch", or "sequential" when the grade depends on the earlier items'
     )
 
 
@@ -102,7 +170,7 @@ def generate_evaluator_config(description: str, project_id: str) -> dict[str, An
         draft = provider.run_structured_agent(
             f"Design an evaluation metric for: {description.strip()[:2000]}",
             response_format=GeneratedEvaluatorDraft,
-            system_prompt=_SYSTEM,
+            system_prompt=_SYSTEM.replace("{variables}", _variable_catalog()),
         )
     level = draft.level.upper().strip()
     if level not in LEVELS:
@@ -114,6 +182,8 @@ def generate_evaluator_config(description: str, project_id: str) -> dict[str, An
         "prompt": draft.prompt.strip(),
         "output_type": output_type,
     }
+    if draft.execution_mode.lower().strip() == "sequential":
+        config["execution_mode"] = "sequential"
     if output_type == "json":
         schema = _schema_from_fields(draft.schema_fields or [])
         if schema is not None:

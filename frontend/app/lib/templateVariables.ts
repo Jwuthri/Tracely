@@ -21,6 +21,16 @@ export type TemplateVar = {
 // Group 1 = UPPERCASE name, group 2 = optional lowercase `.property`. Same regex the backend uses.
 export const VARIABLE_RE = /@([A-Z_]+)(?:\.([a-z_]+))?/g;
 
+// `@CURRENT_STEPS.<type>` — the turn's steps of one type. The backend matches any lowercase prop
+// against the span type, so this list is autocomplete, not a whitelist.
+const STEP_TYPE_PROPS: TemplateVarProp[] = [
+  { name: "tool", description: "Only the TOOL steps — each call with its arguments and result" },
+  { name: "retriever", description: "Only the RETRIEVER steps — the retrieved context" },
+  { name: "generation", description: "Only the GENERATION steps — the model calls" },
+  { name: "thinking", description: "Only the THINKING steps — the agent's reasoning" },
+  { name: "chain", description: "Only the CHAIN steps" },
+];
+
 const STEP_PROPS: TemplateVarProp[] = [
   { name: "tool_call", description: "The tool invocation (name + arguments) at this step" },
   { name: "tool_result", description: "The tool's returned result" },
@@ -55,7 +65,13 @@ export const TEMPLATE_VARIABLES: TemplateVar[] = [
       { name: "role", description: "Always 'assistant'" },
     ],
   },
-  { name: "CURRENT_STEPS", description: "All steps of the current turn, formatted", type: "string", levels: ["message", "step"] },
+  {
+    name: "CURRENT_STEPS",
+    description: "All steps of the current turn, formatted — narrow it to one step type",
+    type: "object",
+    levels: ["message", "step"],
+    props: STEP_TYPE_PROPS,
+  },
   { name: "CURRENT_STEPS_COUNT", description: "Number of steps in the current turn", type: "string", levels: ["message", "step"] },
   // step only
   { name: "PREVIOUS_STEP", description: "The previous step in this turn", type: "object", levels: ["step"], props: STEP_PROPS },

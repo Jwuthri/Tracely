@@ -48,6 +48,7 @@ THINKING = "THINKING"
 CL_CONVERSATION = "conversation"
 CL_MESSAGE = "message"
 CL_STEP = "step"
+_ALL = (CL_CONVERSATION, CL_MESSAGE, CL_STEP)
 
 # Group 1 = UPPERCASE variable name, group 2 = optional lowercase `.property`. The SAME regex is
 # used to extract (here + the frontend) and to resolve. Case matters: `email@x.com` / lowercase
@@ -88,7 +89,16 @@ class TemplateVariable:
         }
 
 
-_ALL = (CL_CONVERSATION, CL_MESSAGE, CL_STEP)
+# `@CURRENT_STEPS.<type>` — the turn's steps of one type. The resolver matches ANY lowercase prop
+# against the span's `type`, so this tuple is autocomplete metadata, not a whitelist; it lists the
+# types worth grading against (the ingest vocabulary is `otel/types.py`).
+_STEP_TYPE_PROPS = (
+    ("tool", "Only the TOOL steps — each call with its arguments and result"),
+    ("retriever", "Only the RETRIEVER steps — the retrieved context"),
+    ("generation", "Only the GENERATION steps — the model calls"),
+    ("thinking", "Only the THINKING steps — the agent's reasoning"),
+    ("chain", "Only the CHAIN steps"),
+)
 _STEP_PROPS = (
     ("tool_call", "The tool invocation (name + arguments) at this step"),
     ("tool_result", "The tool's returned result"),
@@ -122,7 +132,12 @@ TEMPLATE_VARIABLES: tuple[TemplateVariable, ...] = (
         "CURRENT_MESSAGE", "The turn under evaluation", "object", (CL_MESSAGE, CL_STEP),
         props=(("input", "The user request"), ("output", "The assistant answer"), ("role", "Always 'assistant'")),
     ),
-    TemplateVariable("CURRENT_STEPS", "All steps of the current turn, formatted", "string", (CL_MESSAGE, CL_STEP)),
+    TemplateVariable(
+        "CURRENT_STEPS",
+        "All steps of the current turn, formatted — `.tool` / `.retriever` / … narrow it to one "
+        "step type, which is how a message-level rubric asks for the evidence it grades against",
+        "object", (CL_MESSAGE, CL_STEP), props=_STEP_TYPE_PROPS,
+    ),
     TemplateVariable("CURRENT_STEPS_COUNT", "Number of steps in the current turn", "string", (CL_MESSAGE, CL_STEP)),
     # step only
     TemplateVariable("PREVIOUS_STEP", "The previous step in this turn", "object", (CL_STEP,), props=_STEP_PROPS),
@@ -197,6 +212,7 @@ class EvaluationContext:
     previous_assistant_msg: str | None = None
     current_message: dict[str, Any] | None = None  # {input, output, role}
     current_steps: str | None = None
+    current_step_spans: list[dict[str, Any]] = field(default_factory=list)
     current_steps_count: str | None = None
     previous_step: dict[str, Any] | None = None  # a span dict
     current_step: dict[str, Any] | None = None  # a span dict
@@ -488,6 +504,7 @@ def build_context(
         ctx.current_message = {"input": cur_user, "output": cur_answer, "role": "assistant"}
     if need("CURRENT_STEPS"):
         ctx.current_steps = _format_steps(step_spans)
+        ctx.current_step_spans = step_spans
     if need("CURRENT_STEPS_COUNT"):
         ctx.current_steps_count = str(len(step_spans))
     if cur_idx > 0:
@@ -521,6 +538,9 @@ def _resolve_variable(name: str, prop: str | None, ctx: EvaluationContext) -> st
     if name == "METRIC_PREVIOUS_RESULT":
         r = ctx.metric_previous_result
         return json.dumps(r, ensure_ascii=False, indent=2) if r else None
+    if name == "CURRENT_STEPS" and prop:
+        wanted = prop.upper()
+        return _format_steps([s for s in ctx.current_step_spans if str(s.get("type") or "").upper() == wanted])
     if name in _STRING_ATTRS:
         return getattr(ctx, _STRING_ATTRS[name])
     if name in _OBJECT_ATTRS:

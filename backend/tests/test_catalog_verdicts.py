@@ -108,3 +108,21 @@ def test_intent_labels_render_in_the_trace_table_cell():
     enum = props["intent"]["enum"]
     assert enum and all(len(v) <= 24 for v in enum), f"too long to headline: {[v for v in enum if len(v) > 24]}"
     assert len(set(enum)) == len(enum)
+
+# ── @VARIABLE templates must declare themselves advanced ─────────────────────────
+# The seeder (`seeding_service` / `auth.provisioning`) inserts a template's config into the DB
+# verbatim — unlike the API, it never runs `_stamp_advanced`. A template whose prompt holds
+# `@VARIABLES` but no `is_advanced` therefore ships as a BASIC column whose rubric is the literal
+# text "@CURRENT_STEPS.tool", and every grade it produces is nonsense.
+
+
+@pytest.mark.parametrize("t", TEMPLATES, ids=lambda t: t["score_name"])
+def test_a_template_with_variables_declares_is_advanced(t):
+    from tracely.domain.evaluation.template_resolver import extract_template_variables
+
+    config = t.get("config") or {}
+    if not extract_template_variables(config.get("prompt") or ""):
+        pytest.skip("no @VARIABLES — a plain rubric")
+    assert config.get("is_advanced") is True, (
+        f"{t['score_name']} uses @VARIABLES but doesn't set is_advanced; the seeder doesn't stamp it"
+    )
