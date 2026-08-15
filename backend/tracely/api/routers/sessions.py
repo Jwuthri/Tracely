@@ -15,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from tracely.api.advisory import advisory_score_names
 from tracely.api.auth import get_project_id
+from tracely.domain.traces.replay import build_replay
 from tracely.domain.evaluation.verdict import rollup_verdict
 from tracely.infrastructure.clickhouse import async_reader, deletes
 from tracely.infrastructure.db import repositories as repo
@@ -52,8 +53,15 @@ async def list_sessions(
     saved link because a column was renamed is worse than showing the default order."""
     advisory = await advisory_score_names(project_id)
     rows = await async_reader.sessions_overview(
-        project_id, limit, offset, from_ts, to_ts, advisory,
-        include_internal=evals, sort=sort, order=order,
+        project_id,
+        limit,
+        offset,
+        from_ts,
+        to_ts,
+        advisory,
+        include_internal=evals,
+        sort=sort,
+        order=order,
     )
     conv_scores = await async_reader.conversation_scores_by_thread(
         project_id, [r["thread"] for r in rows]
@@ -82,30 +90,30 @@ async def _export_thread(project_id: str, thread_id: str, advisory: Sequence[str
     turns = await async_reader.session_turns(project_id, thread_id, advisory)
     spans = await async_reader.thread_spans_full(project_id, thread_id)
     conv_scores = await async_reader.conversation_scores(project_id, thread_id)
-    per_trace = await async_reader.scores_by_trace(
-        project_id, [t["trace_id"] for t in turns]
-    )
+    per_trace = await async_reader.scores_by_trace(project_id, [t["trace_id"] for t in turns])
 
     by_trace: dict[str, list[dict]] = {}
     for s in sorted(spans, key=lambda s: s.get("start_time") or ""):
-        by_trace.setdefault(s.get("trace_id", ""), []).append({
-            "span_id": s.get("span_id"),
-            "parent_span_id": s.get("parent_span_id"),
-            "type": s.get("type"),
-            "name": s.get("name"),
-            "level": s.get("level"),
-            "status_message": s.get("status_message") or None,
-            "agent_id": s.get("agent_id") or None,
-            "model": s.get("model_id") or None,
-            "start_time": _iso(s.get("start_time")),
-            "end_time": _iso(s.get("end_time")),
-            "input": s.get("input"),
-            "output": s.get("output"),
-            # Already in the row we selected — dropping them made a span export useless for the
-            # question people actually ask of one ("what did the agent call, with what?").
-            "tool_calls": s.get("tool_calls") or None,
-            "tool_call_names": list(s.get("tool_call_names") or []),
-        })
+        by_trace.setdefault(s.get("trace_id", ""), []).append(
+            {
+                "span_id": s.get("span_id"),
+                "parent_span_id": s.get("parent_span_id"),
+                "type": s.get("type"),
+                "name": s.get("name"),
+                "level": s.get("level"),
+                "status_message": s.get("status_message") or None,
+                "agent_id": s.get("agent_id") or None,
+                "model": s.get("model_id") or None,
+                "start_time": _iso(s.get("start_time")),
+                "end_time": _iso(s.get("end_time")),
+                "input": s.get("input"),
+                "output": s.get("output"),
+                # Already in the row we selected — dropping them made a span export useless for the
+                # question people actually ask of one ("what did the agent call, with what?").
+                "tool_calls": s.get("tool_calls") or None,
+                "tool_call_names": list(s.get("tool_call_names") or []),
+            }
+        )
 
     return {
         "thread_id": thread_id,
@@ -181,7 +189,12 @@ async def export_workspace(
         offset = seen = 0
         while True:
             page = await async_reader.sessions_overview(
-                project_id, _EXPORT_PAGE, offset, from_ts, to_ts, advisory,
+                project_id,
+                _EXPORT_PAGE,
+                offset,
+                from_ts,
+                to_ts,
+                advisory,
                 include_internal=evals,
             )
             for row in page:
@@ -230,9 +243,7 @@ async def delete_sessions(
 
 
 @router.get("/sessions/{thread_id}")
-async def get_session(
-    thread_id: str, project_id: str = Depends(get_project_id)
-) -> dict:
+async def get_session(thread_id: str, project_id: str = Depends(get_project_id)) -> dict:
     """The turns (traces) inside one thread, oldest-first — a simple conversation replay. Each
     turn carries its auto-eval scores (the same the trace page shows); the thread carries its
     own CONVERSATION-level scores."""
@@ -255,8 +266,14 @@ def _shape_declared_agent(ag: dict, obs_counts: dict[str, int]) -> dict:
     passed through untouched — the catalog is free-form JSON on the way in, so narrowing it here
     would silently drop config the user deliberately sent. Same for per-tool extras."""
     raw = ag.get("tools")
-    entries = raw.items() if isinstance(raw, dict) else (
-        [(t.get("name", ""), t) for t in raw if isinstance(t, dict)] if isinstance(raw, list) else []
+    entries = (
+        raw.items()
+        if isinstance(raw, dict)
+        else (
+            [(t.get("name", ""), t) for t in raw if isinstance(t, dict)]
+            if isinstance(raw, list)
+            else []
+        )
     )
     tools = []
     for key, tdef in entries:
@@ -280,9 +297,7 @@ def _shape_declared_agent(ag: dict, obs_counts: dict[str, int]) -> dict:
 
 
 @router.get("/sessions/{thread_id}/agents")
-async def get_session_agents(
-    thread_id: str, project_id: str = Depends(get_project_id)
-) -> dict:
+async def get_session_agents(thread_id: str, project_id: str = Depends(get_project_id)) -> dict:
     """A conversation's agents — both the user-DECLARED catalog (sent via the SDK, rich: name,
     description, tools with parameters) and the OBSERVED agents derived from the trace spans (with
     tool-execution counts). The panel shows declared first; observed fills in when nothing was
@@ -311,9 +326,31 @@ async def get_session_agents(
     for a in observed:
         for t in a["tools"]:
             obs_counts[t["name"]] = obs_counts.get(t["name"], 0) + t["count"]
-    declared = [_shape_declared_agent(ag, obs_counts) for ag in declared_raw if isinstance(ag, dict)]
+    declared = [
+        _shape_declared_agent(ag, obs_counts) for ag in declared_raw if isinstance(ag, dict)
+    ]
 
     return {"thread_id": thread_id, "declared": declared, "observed": observed}
+
+
+@router.get("/sessions/{thread_id}/replay")
+async def get_session_replay(thread_id: str, project_id: str = Depends(get_project_id)) -> dict:
+    """The conversation as a playable script: who acted, when, under whom (`domain.traces.replay`).
+    Agent names resolve through the registry, same fallback chain as the agents panel."""
+    spans = await async_reader.thread_spans_full(project_id, thread_id)
+    ids = sorted({str(s.get("agent_id")) for s in spans if s.get("agent_id")})
+
+    def names() -> dict[str, str]:
+        out: dict[str, str] = {}
+        with SyncSessionLocal() as s:
+            for aid in ids:
+                row = repo.agent_in_project(s, project_id, aid)
+                if row:
+                    out[aid] = row.display_name or row.slug
+        return out
+
+    name_map = await run_in_threadpool(names)
+    return {"thread_id": thread_id, **build_replay(spans, name_map)}
 
 
 class SessionConfigBody(BaseModel):
@@ -349,9 +386,7 @@ class GenerateSummaryBody(BaseModel):
 
 
 @router.get("/sessions/{thread_id}/chain-progress")
-async def get_chain_progress(
-    thread_id: str, project_id: str = Depends(get_project_id)
-) -> dict:
+async def get_chain_progress(thread_id: str, project_id: str = Depends(get_project_id)) -> dict:
     """Where each sequential column's durable judge conversation stands on this thread: how many
     of the thread's turns are chained (`chained`/`turns`, `up_to_date`), the payload the next turn
     will be seeded with, and when the chain last advanced. One entry per enabled sequential
@@ -377,27 +412,25 @@ async def get_chain_progress(
             continue
         row = progress.get(spec["score_name"]) or {}
         chained = len(row.get("turn_ids") or [])
-        metrics.append({
-            "score_name": spec["score_name"],
-            "level": spec["level"],
-            "chained": chained,
-            "turns": turns,
-            "up_to_date": turns > 0 and chained >= turns,
-            "last_payload": row.get("last_payload"),
-            "updated_at": row.get("updated_at"),
-        })
+        metrics.append(
+            {
+                "score_name": spec["score_name"],
+                "level": spec["level"],
+                "chained": chained,
+                "turns": turns,
+                "up_to_date": turns > 0 and chained >= turns,
+                "last_payload": row.get("last_payload"),
+                "updated_at": row.get("updated_at"),
+            }
+        )
     return {"thread_id": thread_id, "metrics": metrics}
 
 
 @router.get("/sessions/{thread_id}/rolling-summary")
-async def get_rolling_summary(
-    thread_id: str, project_id: str = Depends(get_project_id)
-) -> dict:
+async def get_rolling_summary(thread_id: str, project_id: str = Depends(get_project_id)) -> dict:
     """The stored rolling summary for a conversation (accumulated items + the @HISTORY rendering),
     or an empty shell when none has been generated yet."""
-    return await run_in_threadpool(
-        RollingSummaryService.get_for_thread, project_id, thread_id
-    )
+    return await run_in_threadpool(RollingSummaryService.get_for_thread, project_id, thread_id)
 
 
 @router.get("/sessions/{thread_id}/rolling-summary/by-level")
@@ -408,9 +441,7 @@ async def get_rolling_summary_by_level(
     `traces[trace_id]` (through that turn), and `spans[span_id]` (through that step). Each is the
     accumulated summary AS OF that row, rendered + clipped for display (the cell shows the top
     512 chars)."""
-    return await run_in_threadpool(
-        RollingSummaryService.by_level, project_id, thread_id
-    )
+    return await run_in_threadpool(RollingSummaryService.by_level, project_id, thread_id)
 
 
 @router.post("/sessions/{thread_id}/rolling-summary/generate")

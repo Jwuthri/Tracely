@@ -58,6 +58,11 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
           </div>
           </div>
           <div className="flex items-center gap-3">
+            {turns.length > 0 && (
+              <a href={`/sessions/${encodeURIComponent(threadId)}/replay`} className="btn-ghost">
+                ▶ Replay
+              </a>
+            )}
             {turns.length > 0 && agentRef && (
               <SaveAsScenarioButton
                 threadId={threadId}

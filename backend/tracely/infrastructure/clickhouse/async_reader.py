@@ -33,7 +33,9 @@ _FAILING = (
     "AND name NOT IN {adv:Array(String)}"
 )
 
-_SCORE_COLS = "name, evaluation_level, observation_id, value, string_value, verdict, comment, data_type"
+_SCORE_COLS = (
+    "name, evaluation_level, observation_id, value, string_value, verdict, comment, data_type"
+)
 
 # Recordings of Tracely's own work (an evaluation, a scenario run — see `domain/introspection.py`)
 # live in `events` like any trace, but they are ABOUT the product rather than produced by the
@@ -47,9 +49,7 @@ _REAL = "internal_kind = ''"
 # ── traces ────────────────────────────────────────────────────────────────────
 
 
-async def traces_overview(
-    project_id: str, limit: int, advisory: Sequence[str] = ()
-) -> list[dict]:
+async def traces_overview(project_id: str, limit: int, advisory: Sequence[str] = ()) -> list[dict]:
     """Newest traces with span counts + the per-trace online-eval verdict (advisory FAILs excluded)."""
     client = await get_async_client()
     res = await client.query(
@@ -164,8 +164,11 @@ async def evaluator_cost(project_id: str, days: int = 30) -> dict[str, dict]:
     )
     return {
         r[0]: {
-            "runs": int(r[1]), "input_tokens": int(r[2]), "output_tokens": int(r[3]),
-            "total_tokens": int(r[4]), "model": r[5] or "",
+            "runs": int(r[1]),
+            "input_tokens": int(r[2]),
+            "output_tokens": int(r[3]),
+            "total_tokens": int(r[4]),
+            "model": r[5] or "",
         }
         for r in res.result_rows
     }
@@ -268,7 +271,9 @@ async def trace_failure_samples_in_window(
         + ("WHERE m.root_agent = {ag:String}" if target_agent else "")
     )
     params: dict[str, object] = {
-        "p": project_id, "w": window_minutes, "adv": list(advisory),
+        "p": project_id,
+        "w": window_minutes,
+        "adv": list(advisory),
     }
     if target_agent:
         params["ag"] = target_agent
@@ -313,9 +318,14 @@ async def evaluator_score_queue(
     )
     return [
         {
-            "trace_id": r[0] or "", "observation_id": r[1] or "", "session_id": r[2] or "",
-            "evaluation_level": r[3] or "", "verdict": r[4] or "", "value": r[5],
-            "comment": r[6] or "", "created_at": r[7],
+            "trace_id": r[0] or "",
+            "observation_id": r[1] or "",
+            "session_id": r[2] or "",
+            "evaluation_level": r[3] or "",
+            "verdict": r[4] or "",
+            "value": r[5],
+            "comment": r[6] or "",
+            "created_at": r[7],
         }
         for r in res.result_rows
     ]
@@ -623,9 +633,7 @@ async def conversation_scores(project_id: str, thread_id: str) -> list[dict]:
     return (await conversation_scores_by_thread(project_id, [thread_id])).get(thread_id, [])
 
 
-async def agent_trace_ids(
-    project_id: str, agent_id: str, limit: int = 2000
-) -> list[dict]:
+async def agent_trace_ids(project_id: str, agent_id: str, limit: int = 2000) -> list[dict]:
     """`[{trace_id, thread}]` for an agent's traces (newest first, capped). A trace is attributed
     to the agent of its ROOT span (matching how evaluation/failure-intel attribute runs); a trace
     with a conversation belongs to that thread, otherwise it is its own 1-turn thread. `agent_id`
@@ -652,9 +660,7 @@ async def agent_trace_ids(
     return [{"trace_id": r[0], "thread": r[1]} for r in res.result_rows]
 
 
-async def agent_score_rows(
-    project_id: str, agent_id: str, max_traces: int = 2000
-) -> list[dict]:
+async def agent_score_rows(project_id: str, agent_id: str, max_traces: int = 2000) -> list[dict]:
     """Flat online-eval score rows for an agent, across ALL levels, for meta-analysis. Each row:
     `{conversation_id (thread), trace_id, metric_name, evaluation_level, value, string_value,
     verdict}`. Composes the trace lookup with the existing per-trace + per-thread score readers
@@ -727,7 +733,12 @@ async def search_threads(project_id: str, q: str, limit: int = 8) -> list[dict]:
         parameters={"p": project_id, "q": q, "n": limit},
     )
     return [
-        {"thread": thread, "first_input": first_input, "last_trace": last_trace, "turns": int(turns)}
+        {
+            "thread": thread,
+            "first_input": first_input,
+            "last_trace": last_trace,
+            "turns": int(turns),
+        }
         for thread, first_input, last_trace, turns, _ in res.result_rows
     ]
 
@@ -760,7 +771,12 @@ async def stats_counts(project_id: str, advisory: Sequence[str] = ()) -> dict:
         )
     ).result_rows
     auto_failures = int(af[0][0]) if af else 0
-    return {"traces": traces, "spans": spans, "failing_traces": failing, "auto_failures": auto_failures}
+    return {
+        "traces": traces,
+        "spans": spans,
+        "failing_traces": failing,
+        "auto_failures": auto_failures,
+    }
 
 
 _MS = "dateDiff('millisecond', start_time, coalesce(end_time, start_time))"
@@ -854,16 +870,32 @@ async def ops_metrics(project_id: str, days: int) -> dict:
     ).result_rows
 
     def _lat(r: Sequence) -> dict:
-        return {"traces": int(r[1]), "p50": int(r[2]), "p95": int(r[3]), "p99": int(r[4]),
-                "errors": int(r[5]), "tokens": int(r[6]), "cost": float(r[7])}
+        return {
+            "traces": int(r[1]),
+            "p50": int(r[2]),
+            "p95": int(r[3]),
+            "p99": int(r[4]),
+            "errors": int(r[5]),
+            "tokens": int(r[6]),
+            "cost": float(r[7]),
+        }
 
     total = next((_lat(r) for r in daily_rows if str(r[0]) == "1970-01-01"), _lat([0] * 8))
     daily = [{"date": str(r[0]), **_lat(r)} for r in daily_rows if str(r[0]) != "1970-01-01"]
 
     def _model(r: Sequence) -> dict:
-        return {"model": r[0], "calls": int(r[1]), "p50": int(r[2]), "p95": int(r[3]),
-                "ttft_p50": int(r[4]), "errors": int(r[5]), "tokens": int(r[6]),
-                "input_tokens": int(r[7]), "output_tokens": int(r[8]), "cost": float(r[9])}
+        return {
+            "model": r[0],
+            "calls": int(r[1]),
+            "p50": int(r[2]),
+            "p95": int(r[3]),
+            "ttft_p50": int(r[4]),
+            "errors": int(r[5]),
+            "tokens": int(r[6]),
+            "input_tokens": int(r[7]),
+            "output_tokens": int(r[8]),
+            "cost": float(r[9]),
+        }
 
     models = [_model(r) for r in model_rows if r[0]]
     gen_total = next((_model(r) for r in model_rows if not r[0]), _model([""] + [0] * 9))
@@ -883,8 +915,15 @@ async def ops_metrics(project_id: str, days: int) -> dict:
         "daily": daily,
         "models": models[:8],
         "slowest": [
-            {"name": r[0], "type": r[1], "calls": int(r[2]), "p50": int(r[3]),
-             "p95": int(r[4]), "max": int(r[5]), "errors": int(r[6])}
+            {
+                "name": r[0],
+                "type": r[1],
+                "calls": int(r[2]),
+                "p50": int(r[3]),
+                "p95": int(r[4]),
+                "max": int(r[5]),
+                "errors": int(r[6]),
+            }
             for r in slow_rows
         ],
     }
@@ -912,16 +951,12 @@ async def daily_trace_failures(
     return [{"date": str(d), "traces": int(t), "failures": int(f)} for d, t, f in rows]
 
 
-async def trace_failure_totals(
-    project_id: str, advisory: Sequence[str] = ()
-) -> tuple[int, int]:
+async def trace_failure_totals(project_id: str, advisory: Sequence[str] = ()) -> tuple[int, int]:
     """(total traces, total traces with an online EVAL FAIL on a non-advisory evaluator)."""
     client = await get_async_client()
 
     async def _scalar(sql: str, extra: dict | None = None) -> int:
-        r = (
-            await client.query(sql, parameters={"p": project_id, **(extra or {})})
-        ).result_rows
+        r = (await client.query(sql, parameters={"p": project_id, **(extra or {})})).result_rows
         return int(r[0][0]) if r and r[0][0] is not None else 0
 
     total = await _scalar(

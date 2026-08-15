@@ -134,3 +134,19 @@
     @apply border-b border-line/60 bg-ink-950/70 backdrop-blur-md;
   }
 }
+
+/* ---- fleet office floor ---- */
+@keyframes floor-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2.5px); } }
+.floor-bob { animation: floor-bob 1.1s ease-in-out infinite; }
+@keyframes floor-pop { 0% { opacity: 0; transform: translateY(6px); } 12% { opacity: 1; transform: translateY(0); } 85% { opacity: 1; } 100% { opacity: 0; } }
+.floor-pop { animation: floor-pop 4.5s ease-out forwards; }
+@keyframes floor-row-in { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+.floor-row { animation: floor-row-in 0.35s ease-out; }
+
+/* ---- conversation replay stage ---- */
+@keyframes stage-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+.stage-bob { animation: stage-bob 0.9s ease-in-out infinite; }
+@keyframes stage-pop { from { opacity: 0; transform: translateY(4px) scale(0.97); } to { opacity: 1; transform: none; } }
+.stage-pop { animation: stage-pop 0.22s ease-out; }
+@keyframes stage-dots { 0% { content: "·"; } 33% { content: "··"; } 66% { content: "···"; } }
+.stage-dots::after { content: "···"; animation: stage-dots 0.9s steps(3) infinite; }
