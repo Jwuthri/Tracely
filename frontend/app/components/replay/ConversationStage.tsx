@@ -14,14 +14,6 @@ import {
 
 const SPEEDS = [0.5, 1, 2, 4];
 
-function FleetLink({ threadId }: { threadId: string }) {
-  return (
-    <Link href={`/sessions/${encodeURIComponent(threadId)}/fleet`} className="btn-ghost">
-      ⌂ fleet view
-    </Link>
-  );
-}
-
 export function ConversationStage({ threadId }: { threadId: string }) {
   const [data, setData] = useState<{ actors: ReplayActor[]; events: ReplayEvent[]; durationMs: number } | null>(null);
   const [t, setT] = useState(0);
@@ -134,10 +126,6 @@ export function ConversationStage({ threadId }: { threadId: string }) {
             </button>
           ))}
         </div>
-        <FleetLink threadId={threadId} />
-        <Link href={`/sessions/${encodeURIComponent(threadId)}`} className="btn-ghost">
-          ↩ conversation
-        </Link>
         <span className="ml-auto font-mono text-[11px] text-fg-faint">
           {fmtMs(realMsAt(events, t))} / {fmtMs(durationMs)} · {played.length}/{events.length} steps
         </span>

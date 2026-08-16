@@ -6,11 +6,9 @@ import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
 import { AgentsSidePanel } from "./AgentsSidePanel";
 import { StateIcon, StatePanel } from "./StatePanel";
 import { spanHasState } from "./state-fold";
-import Link from "next/link";
-import { TabButton, TabLink } from "./SingleTraceView";
+import { ConversationTabs, EvalsPill } from "./ConversationChrome";
 import { TraceTable } from "./TraceTable";
 import { Waterfall } from "./Waterfall";
-import { Badge, verdictVariant } from "./ui";
 
 // A whole multi-turn conversation, with the same two lenses a single trace gets:
 //   • Table    — the hierarchical conversation → message → step tree (pre-expanded), with
@@ -22,6 +20,7 @@ export function SessionView({
   turns,
   shared = false,
   views = false,
+  initialTab = "table",
 }: {
   conv: ConvNode;
   turns: FullTurn[];
@@ -29,11 +28,12 @@ export function SessionView({
   // proxy). Everything else here renders from props; the table's optional fetches already
   // degrade to empty on a 401 rather than erroring.
   shared?: boolean;
-  // Show Replay / Fleet as tabs. Off by default: they are routes of a real conversation, which
-  // an eval-level view or a public share page does not have.
+  // Wear the full conversation chrome (Replay / Fleet tabs, evals link). Off by default: they
+  // are routes of a real conversation, which an eval-level view or a share page does not have.
   views?: boolean;
+  initialTab?: "table" | "timeline";
 }) {
-  const [tab, setTab] = useState<"table" | "timeline">("table");
+  const [tab, setTab] = useState<"table" | "timeline">(initialTab);
 
   // Every span across all turns; the Waterfall compresses the idle gaps between turns.
   const allSpans = useMemo(
@@ -53,65 +53,43 @@ export function SessionView({
   const [showState, setShowState] = useState(false);
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-1 border-b border-line">
-        <div className="flex items-center gap-1">
-          <TabButton active={tab === "table"} onClick={() => setTab("table")}>
-            Table
-          </TabButton>
-          <TabButton active={tab === "timeline"} onClick={() => setTab("timeline")}>
-            Timeline <span className="font-mono text-[11px] text-fg-faint">{allSpans.length}</span>
-          </TabButton>
-          {views && (
-            <>
-              <span className="mx-1 h-4 w-px bg-line" />
-              <TabLink href={`/sessions/${encodeURIComponent(conv.thread)}/replay`}>▶ Replay</TabLink>
-              <TabLink href={`/sessions/${encodeURIComponent(conv.thread)}/fleet`}>⌂ Fleet</TabLink>
-            </>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {overallVerdict &&
-            (shared ? (
-              <Badge variant={verdictVariant(overallVerdict)} dot>
-                evals {overallVerdict}
-              </Badge>
-            ) : (
-              <Link href={`/sessions/${encodeURIComponent(conv.thread)}/evals`}
-                title="Open Tracely's evaluation of this conversation"
-                className="transition-opacity hover:opacity-80">
-                <Badge variant={verdictVariant(overallVerdict)} dot>
-                  evals {overallVerdict} →
-                </Badge>
-              </Link>
-            ))}
-          {/* No fetch behind this one (it folds `allSpans`), so it works on the share page too. */}
-          {hasState && (
-            <button
-              onClick={() => setShowState(true)}
-              title="Shared state threaded through this conversation"
-              className="btn-ghost"
-            >
-              <StateIcon />
-              State
-            </button>
-          )}
-          {!shared && (
-          <button
-            onClick={() => setShowAgents(true)}
-            title="Agents & tools in this conversation"
-            className="btn-ghost"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <rect x="4" y="8" width="16" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
-              <path d="M12 4v4M9 13h.01M15 13h.01" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-              <circle cx="12" cy="3.5" r="1.2" fill="currentColor" />
-            </svg>
-            Agents
-          </button>
-          )}
-          <WideToggle wide={wide} onToggle={() => setWide(!wide)} />
-        </div>
-      </div>
+      <ConversationTabs
+        threadId={conv.thread}
+        active={tab}
+        spans={allSpans.length}
+        onSelect={views ? setTab : undefined}
+        right={
+          <>
+            <EvalsPill threadId={conv.thread} verdict={overallVerdict} link={!shared} />
+            {/* No fetch behind this one (it folds `allSpans`), so it works on the share page too. */}
+            {hasState && (
+              <button
+                onClick={() => setShowState(true)}
+                title="Shared state threaded through this conversation"
+                className="btn-ghost"
+              >
+                <StateIcon />
+                State
+              </button>
+            )}
+            {!shared && (
+              <button
+                onClick={() => setShowAgents(true)}
+                title="Agents & tools in this conversation"
+                className="btn-ghost"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <rect x="4" y="8" width="16" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
+                  <path d="M12 4v4M9 13h.01M15 13h.01" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                  <circle cx="12" cy="3.5" r="1.2" fill="currentColor" />
+                </svg>
+                Agents
+              </button>
+            )}
+            <WideToggle wide={wide} onToggle={() => setWide(!wide)} />
+          </>
+        }
+      />
 
       {showAgents && (
         <AgentsSidePanel threadId={conv.thread} onClose={() => setShowAgents(false)} />

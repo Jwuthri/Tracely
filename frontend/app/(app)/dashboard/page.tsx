@@ -1,4 +1,6 @@
-import { getCases, getClusters, getStats, getTraces, getTrends, type FailureCluster } from "@/app/lib/api";
+import { getCases, getClusters, getEvaluators, getGates, getStats, getTraces, getTrends, type FailureCluster } from "@/app/lib/api";
+import { getMe } from "@/app/lib/auth";
+import { Activation } from "@/app/components/Activation";
 import { Badge, StatCard, statusVariant, verdictVariant } from "@/app/components/ui";
 import { IconChevron } from "@/app/components/icons";
 import { OpsStrip } from "@/app/components/OpsPanel";
@@ -60,12 +62,15 @@ export default async function Dashboard() {
   // The dashboard only ever renders the top few of each list, so it asks for exactly that many
   // instead of pulling every case and cluster in the project to slice 6 off the front. The big
   // numbers above come from `getStats()`, which counts server-side.
-  const [stats, traces, casesPage, trends, clustersPage] = await Promise.all([
+  const [stats, traces, casesPage, trends, clustersPage, evaluators, gatesPage, me] = await Promise.all([
     getStats(),
     getTraces(),
     getCases(6),
     getTrends(14),
     getClusters(undefined, 6),
+    getEvaluators(),
+    getGates(1),
+    getMe(),
   ]);
   const cases = casesPage.items;
   const clusters = clustersPage.items;
@@ -87,6 +92,18 @@ export default async function Dashboard() {
           Production traces become regression tests — detect a failure, promote it, gate it forever.
         </p>
       </header>
+
+      {/* Shown until the loop has been closed once; every step reads a real count. */}
+      <Activation
+        traces={stats.traces}
+        evaluators={evaluators.length}
+        failures={stats.auto_failures}
+        clusters={stats.open_clusters}
+        cases={stats.cases}
+        gates={gatesPage.total}
+        ingestKey={me?.ingest_keys?.[0] ?? "<your-ingest-key>"}
+        endpoint={process.env.NEXT_PUBLIC_TRACELY_PUBLIC_API ?? "http://localhost:8000"}
+      />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard

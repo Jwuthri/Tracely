@@ -318,6 +318,12 @@ export async function getStats(): Promise<Stats> {
   return getJson<Stats>(`/api/stats`);
 }
 
+/** Evaluator rows for this project (the traces table's columns). Only the fields the
+ *  activation checklist reads — the editor fetches the full shape client-side. */
+export async function getEvaluators(): Promise<{ id: string; enabled: boolean }[]> {
+  return getJson<{ id: string; enabled: boolean }[]>(`/api/evaluators`);
+}
+
 // Per-evaluator LLM-judge cost over the last `days` — server-component shape (the browser
 // equivalent lives in `lib/evaluators.ts:getEvaluatorCost` for the Columns-menu chip).
 export type EvaluatorCostRow = {

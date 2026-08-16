@@ -122,12 +122,6 @@ export function OfficeStage({ threadId }: { threadId: string }) {
             </button>
           ))}
         </div>
-        <Link href={`/sessions/${encodeURIComponent(threadId)}/replay`} className="btn-ghost">
-          ⧉ timeline view
-        </Link>
-        <Link href={`/sessions/${encodeURIComponent(threadId)}`} className="btn-ghost">
-          ↩ conversation
-        </Link>
         <span className="ml-auto font-mono text-[11px] text-fg-faint"
           title="Real trace time — the play clock squeezes pauses and long calls">
           {fmtMs(realMsAt(events, t))} / {fmtMs(durationMs)}

@@ -58,7 +58,7 @@ All are **Server Components** unless noted; each lists the `lib/api.ts` calls it
 | Route | Fetches | Renders |
 |---|---|---|
 | `/` | — | **Public marketing landing page** (`(marketing)/`) — no auth, no app shell. Client component animated with GSAP; all motion behind `gsap.matchMedia("(prefers-reduced-motion: no-preference)")`. |
-| `/dashboard` | `getStats`, `getTraces`, `getCases` | Dashboard — 4 stat cards + recent traces & cases. |
+| `/dashboard` | `getStats`, `getTraces`, `getCases`, `getEvaluators`, `getGates`, `getMe` | Dashboard — the **Activation** checklist (trace → grade → failure → case → gate; every step derived from real counts, the card disappears once the loop has been closed once), 4 stat cards + recent traces & cases. |
 | `/traces` | `getSessions` | `TracesExplorer` (filter + search + date range) wrapping the hierarchical **TraceTable** in list mode. |
 | `/traces/[traceId]` | `getTrace` | Single trace header (spans/latency/**usage totals**, `PromoteButton` if failing) + `SingleTraceView` (Table / Timeline tabs + an Agents drawer). |
 | `/sessions/[threadId]` | `getSession` + `getTrace` per turn | A conversation, pre-expanded: builds a `ConvNode` with all turns + spans and renders **TraceTable** in detail mode. Header shows conversation usage totals and the two actions (save as scenario, share); the other lenses — Timeline, Replay, Fleet — are tabs in `SessionView`, and the evals verdict pill links to `/evals`. |
