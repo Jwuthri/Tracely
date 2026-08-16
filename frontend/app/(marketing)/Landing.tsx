@@ -935,7 +935,7 @@ export default function Landing() {
 
         {/* ================================ sdk ================================ */}
         <section id="sdk" className="scroll-mt-24 px-6 py-28">
-          <div className="mx-auto grid max-w-[1200px] items-center gap-12 lg:grid-cols-2">
+          <div className="mx-auto grid max-w-[1200px] items-start gap-12 lg:grid-cols-2">
             <div>
               <div className="sec-reveal flex items-center gap-4">
                 <span className="eyebrow whitespace-nowrap">Instrument</span>
@@ -986,7 +986,7 @@ export default function Landing() {
 
         {/* =================================== mcp =================================== */}
         <section id="mcp" className="scroll-mt-24 px-6 py-28">
-          <div className="mx-auto grid max-w-[1200px] items-center gap-12 lg:grid-cols-2">
+          <div className="mx-auto grid max-w-[1200px] items-start gap-12 lg:grid-cols-2">
             <div>
               <div className="sec-reveal flex items-center gap-4">
                 <span className="eyebrow whitespace-nowrap">MCP</span>
@@ -1034,24 +1034,27 @@ export default function Landing() {
             </div>
           </div>
 
-          {/* the know-how half — same section, because it's the same job from the other side */}
-          <div className="sec-reveal mx-auto mt-12 grid max-w-[1200px] items-center gap-10 lg:grid-cols-2">
+        </section>
+
+        {/* the know-how half — MCP hands the agent your data, the skill hands it the know-how */}
+        <section className="px-6 py-28">
+          <div className="sec-reveal mx-auto grid max-w-[1200px] items-start gap-12 lg:grid-cols-2">
             <div>
               <div className="flex items-center gap-4">
                 <span className="eyebrow whitespace-nowrap">Skill</span>
                 <div className="hairline-x flex-1" />
               </div>
-              <h3 className="mt-5 font-display text-2xl font-bold tracking-tight sm:text-3xl">
+              <h3 className="mt-6 font-display text-2xl font-bold tracking-tight sm:text-3xl">
                 MCP gives it your data.
                 <br />
                 The skill gives it the know-how.
               </h3>
-              <p className="mt-4 max-w-xl leading-relaxed text-fg-muted">
+              <p className="mt-5 max-w-xl leading-relaxed text-fg-muted">
                 One command and your coding agent knows how Tracely actually works — zero-span-code
                 instrumentation, the manual span API, evaluator design, the PR gate, and the handful
                 of conventions that fail <em>silently</em> when you get them wrong.
               </p>
-              <div className="mt-7">
+              <div className="mt-9">
                 <a className={btnGhost} href="/agent-skill">
                   What&apos;s in the skill <IconArrow className="h-3.5 w-3.5" />
                 </a>
