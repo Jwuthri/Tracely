@@ -41,6 +41,13 @@ describe("TraceTable (render safety net)", () => {
     expect(screen.getByText(/Where is my order ORD-4471/)).toBeInTheDocument();
   });
 
+  // A 1-turn conversation used to link straight to /traces/<id>, dropping Replay/Share/scenario.
+  it("links a conversation row to its session even at one turn", async () => {
+    render(<TraceTable conversations={[conv({ turns: 1 })]} />);
+    const link = (await screen.findByText(/Where is my order ORD-4471/)).closest("a");
+    expect(link).toHaveAttribute("href", "/sessions/thread-1");
+  });
+
   it("shows an empty state when there are no conversations", async () => {
     render(<TraceTable conversations={[]} />);
     expect(await screen.findByText(/No conversations/i)).toBeInTheDocument();
