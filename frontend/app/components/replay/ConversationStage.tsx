@@ -16,6 +16,7 @@ const SPEEDS = [0.5, 1, 2, 4];
 
 export function ConversationStage({ threadId }: { threadId: string }) {
   const [data, setData] = useState<{ actors: ReplayActor[]; events: ReplayEvent[]; durationMs: number } | null>(null);
+  const [failed, setFailed] = useState(false);
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
@@ -25,9 +26,19 @@ export function ConversationStage({ threadId }: { threadId: string }) {
   useEffect(() => {
     let alive = true;
     fetch(`/api/session-replay?thread=${encodeURIComponent(threadId)}`, { cache: "no-store" })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json();
+      })
       .then((d) => alive && setData({ actors: d.actors ?? [], events: d.events ?? [], durationMs: d.duration_ms ?? 0 }))
-      .catch(() => alive && setData({ actors: [], events: [], durationMs: 0 }));
+      .catch(() => {
+        // a backend failure is NOT an empty conversation — saying "nothing to replay" when the
+        // endpoint 500s sends people looking for a bug in their instrumentation
+        if (alive) {
+          setFailed(true);
+          setData({ actors: [], events: [], durationMs: 0 });
+        }
+      });
     return () => { alive = false; };
   }, [threadId]);
 
@@ -100,8 +111,14 @@ export function ConversationStage({ threadId }: { threadId: string }) {
     return (
       <div className="card grid h-[320px] place-items-center text-center">
         <div>
-          <p className="text-[15px] font-semibold">Nothing to replay</p>
-          <p className="mt-1 text-[13px] text-fg-muted">This conversation has no spans yet.</p>
+          <p className="text-[15px] font-semibold">
+            {failed ? "Couldn't load the conversation" : "Nothing to replay"}
+          </p>
+          <p className="mt-1 text-[13px] text-fg-muted">
+            {failed
+              ? "The replay endpoint answered with an error — try reloading."
+              : "This conversation has no spans yet."}
+          </p>
         </div>
       </div>
     );
@@ -126,7 +143,8 @@ export function ConversationStage({ threadId }: { threadId: string }) {
             </button>
           ))}
         </div>
-        <span className="ml-auto font-mono text-[11px] text-fg-faint">
+        <span className="ml-auto font-mono text-[11px] text-fg-faint"
+          title="Real trace time — the play clock squeezes pauses and long calls">
           {fmtMs(realMsAt(events, t))} / {fmtMs(durationMs)} · {played.length}/{events.length} steps
         </span>
       </div>

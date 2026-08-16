@@ -86,6 +86,9 @@ export function SessionView({
                 Agents
               </button>
             )}
+            {/* State/Agents open drawers; the density toggle is a different kind of thing —
+                identical chrome made all three read as one undifferentiated row. */}
+            <span className="mx-0.5 h-4 w-px bg-line" />
             <WideToggle wide={wide} onToggle={() => setWide(!wide)} />
           </>
         }
