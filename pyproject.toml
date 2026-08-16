@@ -32,5 +32,9 @@ target-version = "py312"
 # Vendored agent-skill packs — third-party code we don't own and don't ship.
 extend-exclude = [".agents", ".claude"]
 
+[tool.ruff.lint.per-file-ignores]
+# tracely.init() must run before importing the frameworks it instruments.
+"demo/*.py" = ["E402"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
