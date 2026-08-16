@@ -305,3 +305,21 @@ def test_agent_envelope_never_swallows_the_team():
     assert deleg["container"] is True                   # DELEGATE brackets the callee's work
     # the supervisor's llm requesting "balance" is the SAME handoff — no second walk
     assert by["gpt"]["delegate_to"] == ""
+
+
+def test_bubbles_decode_json_encoded_scalars():
+    """`set_io` strings arrive JSON-encoded, so a plain sentence reaches us as
+    '"Delegating the FAQ \\u2014 one specialist…"'. A bubble must show the sentence, not the
+    quotes and escapes."""
+    encoded = '"Delegating the FAQ \\u2014 one specialist should own it."'
+    spans = [
+        span("a", "", "AGENT", "turn", 0, 900, agent="team"),
+        dict(span("t", "a", "THINKING", "thinking", 10, 200, agent="sup"), output=encoded),
+        dict(span("d", "a", "DELEGATE", "faq", 300, 400, agent="sup"),
+             input='"Return policy \\u2014 window and condition?"'),
+        span("f", "d", "GENERATION", "gpt", 320, 100, agent="faq"),
+    ]
+    r = build_replay(spans, aliases={"faq": "faq"})
+    by = {e["name"]: e for e in r["events"]}
+    assert by["thinking"]["detail"] == "Delegating the FAQ — one specialist should own it."
+    assert by["faq"]["say"] == "Return policy — window and condition?"

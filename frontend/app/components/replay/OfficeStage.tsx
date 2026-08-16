@@ -226,7 +226,7 @@ function Walker({ actor, pose, slot, selected, onClick }: {
       style={{ left: `${pose.x}%`, top: `${pose.y}%`, zIndex: Math.round(pose.y) + 10 }}
       title={actor.name}
     >
-      {pose.bubble && <BubbleView bubble={pose.bubble} />}
+      {pose.bubble && <BubbleView bubble={pose.bubble} x={pose.x} y={pose.y} />}
       <div className={clsx(selected && "rounded-lg ring-2 ring-signal/70")}> 
         <PixelPerson hue={hue} size={size} walking={walking} working={pose.working && !walking} facing={pose.facing} />
       </div>
@@ -239,25 +239,38 @@ function Walker({ actor, pose, slot, selected, onClick }: {
   );
 }
 
-function BubbleView({ bubble }: { bubble: NonNullable<Pose["bubble"]> }) {
+function BubbleView({ bubble, x, y }: { bubble: NonNullable<Pose["bubble"]>; x: number; y: number }) {
+  // Keep the bubble inside the office on BOTH axes: right-aligned near the right wall (left
+  // near the left), and dropped BELOW the character when they stand near the top — otherwise
+  // a long line spills over the roster or is clipped by the stage's top edge.
+  const side = x >= 64 ? "right" : x <= 36 ? "left" : "center";
+  const below = y <= 46;
+  const anchor = clsx(
+    side === "right" ? "right-0" : side === "left" ? "left-0" : "left-1/2 -translate-x-1/2",
+    below ? "top-full mt-1" : "bottom-full mb-2",
+  );
+  const tail = side === "right" ? "ml-auto mr-5" : "ml-5";
+  const tailDots = side === "right" ? "ml-auto mr-6" : "ml-6";
+  const tailDots2 = side === "right" ? "ml-auto mr-4" : "ml-4";
+
   if (bubble.type === "thought") {
     return (
-      <div className="fleet-pop pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-max max-w-[190px] -translate-x-1/2">
+      <div className={clsx("fleet-pop pointer-events-none absolute z-50 w-max max-w-[190px]", anchor)}>
         <div className="rounded-[14px] border border-t_think/40 bg-ink-800/95 px-2.5 py-1.5 text-left font-mono text-[10px] leading-snug text-t_think">
           {bubble.text}
         </div>
-        <div className="ml-6 mt-0.5 h-2 w-2 rounded-full border border-t_think/40 bg-ink-800/95" />
-        <div className="ml-4 h-1.5 w-1.5 rounded-full border border-t_think/40 bg-ink-800/95" />
+        <div className={clsx("mt-0.5 h-2 w-2 rounded-full border border-t_think/40 bg-ink-800/95", tailDots)} />
+        <div className={clsx("h-1.5 w-1.5 rounded-full border border-t_think/40 bg-ink-800/95", tailDots2)} />
       </div>
     );
   }
   if (bubble.type === "speech") {
     return (
-      <div className="fleet-pop pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-max max-w-[210px] -translate-x-1/2">
+      <div className={clsx("fleet-pop pointer-events-none absolute z-50 w-max max-w-[210px]", anchor)}>
         <div className="rounded-lg border border-line-bright bg-[#f4f6fb] px-2.5 py-1.5 text-left text-[10.5px] font-medium leading-snug text-ink-900">
           {bubble.text}
         </div>
-        <div className="ml-5 h-2 w-2 -translate-y-1 rotate-45 border-b border-r border-line-bright bg-[#f4f6fb]" />
+        <div className={clsx("h-2 w-2 -translate-y-1 rotate-45 border-b border-r border-line-bright bg-[#f4f6fb]", tail)} />
       </div>
     );
   }
@@ -269,7 +282,7 @@ function BubbleView({ bubble }: { bubble: NonNullable<Pose["bubble"]> }) {
     );
   }
   return (
-    <div className="fleet-pop pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 w-max -translate-x-1/2">
+    <div className={clsx("fleet-pop pointer-events-none absolute z-50 w-max", anchor)}>
       <span className={clsx("rounded-md border px-2 py-0.5 font-mono text-[10px]",
         bubble.icon === "skill" ? "border-t_retriever/50 bg-t_retriever/15 text-t_retriever" : "border-t_tool/50 bg-t_tool/15 text-t_tool")}>
         {bubble.icon === "skill" ? "◈" : "⚙"} {bubble.text}

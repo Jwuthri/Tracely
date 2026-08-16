@@ -69,11 +69,15 @@ def _text_of(value: Any, limit: int = 120) -> str:
     """Human text from a span output. Outputs are often a JSON message list
     (`[{"role": "assistant", "content": ...}]`) — a speech bubble must show the words,
     never the envelope. Falls back to the raw preview."""
-    if isinstance(value, str) and value.lstrip().startswith(("[", "{")):
+    if isinstance(value, str) and value.lstrip().startswith(("[", "{", '"')):
         try:
             parsed = json.loads(value)
         except (ValueError, TypeError):
             return _preview(value, limit)
+        # ingest stores a `set_io` string JSON-encoded, so a plain sentence arrives as
+        # '"Delegating the FAQ \u2014 …"'. Decode it, or the bubble shows quotes and escapes.
+        if isinstance(parsed, str):
+            return _preview(parsed, limit)
         msgs = parsed if isinstance(parsed, list) else [parsed]
         for m in reversed(msgs):
             if isinstance(m, dict):
@@ -91,12 +95,7 @@ def _delegation_say(span: dict, callee_alias: str) -> str:
     strings."""
     direct = span.get("input")
     if isinstance(direct, str) and direct.strip() and not direct.lstrip().startswith(("[", "{")):
-        if direct.lstrip().startswith('"'):  # ingest stores set_io strings JSON-encoded
-            try:
-                direct = json.loads(direct)
-            except (ValueError, TypeError):
-                pass
-        return _preview(direct)
+        return _text_of(direct)  # decodes a JSON-encoded scalar; plain strings pass through
     raw = span.get("output")
     if isinstance(raw, str) and raw.lstrip().startswith(("[", "{")):
         try:
