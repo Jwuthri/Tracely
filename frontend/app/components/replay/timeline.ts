@@ -12,6 +12,12 @@ export type ReplayEvent = {
   /** True for spans that BRACKET other work (a turn wrapper, a sub-agent envelope) rather
    *  than being work themselves — they must never make an agent look "working". */
   container?: boolean;
+  /** Where the actor performs this event: desk | computer | library | peer. */
+  station?: string;
+  /** Actor key of the callee when this event is a handoff. */
+  delegate_to?: string;
+  /** The handoff text (a DELEGATE span's input, or the tool-call arguments). */
+  say?: string;
 };
 
 /** An event placed on the PLAY clock (gaps squeezed), keeping its real timestamp. */
@@ -22,6 +28,7 @@ export const KIND_STYLE: Record<string, { label: string; color: string; icon: st
   spawn: { label: "sub-agent", color: "#c084fc", icon: "✦" },
   delegate: { label: "delegate", color: "#38bdf8", icon: "⇄" },
   llm: { label: "llm", color: "#34d399", icon: "✎" },
+  think: { label: "thinking", color: "#c4b5fd", icon: "…" },
   tool: { label: "tool", color: "#fb923c", icon: "⚙" },
   skill: { label: "skill", color: "#f472b6", icon: "◆" },
   guard: { label: "guard", color: "#fbbf24", icon: "⛨" },
@@ -37,22 +44,32 @@ export const isContainer = (e: { kind: string; container?: boolean }) =>
 const MAX_GAP_MS = 400;  // dead air between turns is squeezed to this
 const MIN_DUR_MS = 140;  // a 3ms tool call still needs to be seeable
 
+/** The office view walks characters between stations — a beat has to outlast the ~700ms walk
+ *  or every scene is a teleport. The timeline view keeps the tighter defaults. */
+export const OFFICE_PACING = { maxGapMs: 900, minDurMs: 900 };
+
 /**
- * Lay events on a play clock: real gaps longer than MAX_GAP_MS collapse (a conversation with a
+ * Lay events on a play clock: real gaps longer than maxGapMs collapse (a conversation with a
  * 20s pause between turns would otherwise be 20s of an empty stage), every event gets a floor
  * duration so instant spans are still visible, and ordering is preserved.
  */
-export function toPlayEvents(events: ReplayEvent[]): { events: PlayEvent[]; total: number } {
+export function toPlayEvents(
+  events: ReplayEvent[],
+  { maxGapMs = MAX_GAP_MS, minDurMs = MIN_DUR_MS }: { maxGapMs?: number; minDurMs?: number } = {},
+): { events: PlayEvent[]; total: number } {
   const sorted = [...events].sort((a, b) => a.t_ms - b.t_ms);
   const out: PlayEvent[] = [];
   let clock = 0;
   let prevReal = sorted.length ? sorted[0].t_ms : 0;
   sorted.forEach((e, index) => {
-    clock += Math.min(Math.max(0, e.t_ms - prevReal), MAX_GAP_MS);
+    clock += Math.min(Math.max(0, e.t_ms - prevReal), maxGapMs);
     prevReal = e.t_ms;
-    out.push({ ...e, index, pt: clock, pdur: Math.max(e.dur_ms, MIN_DUR_MS) });
+    out.push({ ...e, index, pt: clock, pdur: Math.max(e.dur_ms, minDurMs) });
   });
-  const total = out.reduce((m, e) => Math.max(m, e.pt + e.pdur), 0);
+  // The clock ends when the WORK ends: containers (turn envelopes) span their whole turn's
+  // real duration, and counting them left a long dead tail after the last visible beat.
+  const work = out.filter((e) => !isContainer(e));
+  const total = (work.length ? work : out).reduce((m, e) => Math.max(m, e.pt + e.pdur), 0);
   return { events: out, total };
 }
 

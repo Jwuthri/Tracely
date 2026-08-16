@@ -14,6 +14,14 @@ import {
 
 const SPEEDS = [0.5, 1, 2, 4];
 
+function FleetLink({ threadId }: { threadId: string }) {
+  return (
+    <Link href={`/sessions/${encodeURIComponent(threadId)}/fleet`} className="btn-ghost">
+      ⌂ fleet view
+    </Link>
+  );
+}
+
 export function ConversationStage({ threadId }: { threadId: string }) {
   const [data, setData] = useState<{ actors: ReplayActor[]; events: ReplayEvent[] } | null>(null);
   const [t, setT] = useState(0);
@@ -125,6 +133,7 @@ export function ConversationStage({ threadId }: { threadId: string }) {
             </button>
           ))}
         </div>
+        <FleetLink threadId={threadId} />
         <span className="ml-auto font-mono text-[11px] text-fg-faint">
           {fmtMs(t)} / {fmtMs(total)} · {played.length}/{events.length} steps
         </span>
@@ -261,7 +270,7 @@ function Lanes({ actors, events, total, t, onSeek, onPick, selected }: {
                 const st = kindStyle(e.kind);
                 const wrap = isContainer(e);
                 return (
-                  <span key={e.span_id}
+                  <span key={`${e.trace_id}:${e.span_id}`}
                     onClick={() => onSeek(e.pt)}
                     title={wrap ? `${e.name} · wraps ${fmtMs(e.dur_ms)} of the turn` : `${e.name} · ${fmtMs(e.dur_ms)}`}
                     className={clsx("absolute cursor-pointer transition-opacity hover:opacity-100",

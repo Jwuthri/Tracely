@@ -131,3 +131,143 @@ def test_tool_call_edges_cannot_build_a_cycle():
     r = build_replay(spans, {"one": "one", "two": "two"})
     depths = {a["id"]: a["depth"] for a in r["actors"]}
     assert max(depths.values()) <= 1        # terminates, no runaway walk
+
+
+# ── fleet enrichment: stations, delegation targets, speech ────────────────────
+
+
+def test_stations_route_events_to_the_right_furniture():
+    spans = [
+        span("a", "", "AGENT", "run", 0, 2000, agent="a1"),
+        span("b", "a", "GENERATION", "chat", 10, 100, agent="a1"),
+        span("c", "a", "THINKING", "thinking", 120, 50, agent="a1"),
+        span("d", "a", "TOOL", "charge_card", 200, 100, agent="a1"),
+        span("e", "a", "TOOL", "lookup_faq", 320, 100, agent="a1"),
+        span("f", "a", "RETRIEVER", "vector_fetch", 440, 100, agent="a1"),
+        span("g", "a", "SKILL", "refund-flow", 560, 300, agent="a1"),
+    ]
+    r = build_replay(spans)
+    st = {e["name"]: e["station"] for e in r["events"]}
+    assert st["chat"] == "desk"
+    assert st["thinking"] == "desk"
+    assert st["charge_card"] == "computer"  # TOOL -> the computer, whatever its name
+    assert st["lookup_faq"] == "computer"   # a TOOL named lookup is still a tool — the span
+    assert st["vector_fetch"] == "library"  # TYPE decides: RETRIEVER -> the bookshelf
+    assert st["refund-flow"] == "library"   # SKILL -> the bookshelf
+    kinds = {e["name"]: e["kind"] for e in r["events"]}
+    assert kinds["thinking"] == "think"
+    assert kinds["refund-flow"] == "skill"
+
+
+def test_delegate_span_resolves_callee_via_alias_and_carries_the_task():
+    spans = [
+        span("a", "", "AGENT", "sup.run", 0, 3000, agent="sup-uuid"),
+        dict(span("b", "a", "DELEGATE", "delegate:billing", 100, 2000, agent="sup-uuid"),
+             callee_agent_id="billing", input="refund order 4471, card ending 1234"),
+        span("c", "b", "AGENT", "billing.run", 200, 1500, agent="billing-uuid"),
+    ]
+    r = build_replay(spans, aliases={"billing": "billing-uuid"})
+    d = next(e for e in r["events"] if e["kind"] == "delegate")
+    assert d["container"] is True
+    assert d["delegate_to"] == "billing-uuid"
+    assert d["say"] == "refund order 4471, card ending 1234"
+    actors = {a["id"]: a for a in r["actors"]}
+    assert actors["billing-uuid"]["parent"] == "sup-uuid"
+
+
+def test_tool_call_handoff_gets_delegate_to_and_the_arguments_as_speech():
+    import json as _json
+    out = _json.dumps([{"role": "assistant", "content": "", "tool_calls": [
+        {"id": "c1", "type": "function",
+         "function": {"name": "agent_faq", "arguments": _json.dumps({"query": "find the remote"})}}]}])
+    spans = [
+        dict(span("s", "", "GENERATION", "chat", 0, 400, agent="sup"),
+             tool_call_names=["agent_faq"], output=out),
+        span("f", "", "GENERATION", "chat", 500, 300, agent="faq"),
+    ]
+    r = build_replay(spans, {"faq": "agent_faq"})
+    ev = r["events"][0]
+    assert ev["delegate_to"] == "faq"
+    assert ev["station"] == "peer"
+    assert ev["say"] == "find the remote"
+
+
+def test_plain_tools_never_become_delegations():
+    spans = [
+        dict(span("s", "", "GENERATION", "chat", 0, 300, agent="a1"), tool_call_names=["lookup_faq"]),
+        span("t", "", "TOOL", "lookup_faq", 350, 200, agent="a1"),
+    ]
+    r = build_replay(spans)
+    assert all(e["delegate_to"] == "" for e in r["events"])
+
+
+def test_detail_shows_the_words_not_the_json_envelope():
+    out = '[{"role": "assistant", "content": "Done — refund issued."}]'
+    r = build_replay([dict(span("a", "", "GENERATION", "chat", 0, 100, agent="x"), output=out)])
+    assert r["events"][0]["detail"] == "Done — refund issued."
+
+
+# ── review-pass regressions ───────────────────────────────────────────────────
+
+
+def test_say_never_shows_the_prompt_envelope():
+    """A GENERATION span's input is the prompt as JSON — the bubble must dig the ARGUMENTS out
+    of the output instead of parroting the envelope (system prompt included)."""
+    import json as _json
+    prompt = _json.dumps([{"role": "system", "content": "You are the supervisor..."}])
+    out = _json.dumps([{"role": "assistant", "content": "", "tool_calls": [
+        {"id": "c", "type": "function",
+         "function": {"name": "agent_faq", "arguments": _json.dumps({"query": "find the remote"})}}]}])
+    spans = [
+        dict(span("s", "", "GENERATION", "chat", 0, 300, agent="sup"),
+             tool_call_names=["agent_faq"], input=prompt, output=out),
+        span("f", "", "GENERATION", "chat", 400, 100, agent="faq"),
+    ]
+    r = build_replay(spans, {"faq": "agent_faq"})
+    assert r["events"][0]["say"] == "find the remote"
+
+
+def test_malformed_tool_calls_never_crash_say():
+    out = '[{"role": "assistant", "tool_calls": [{"id": "x", "function": "agent_faq"}]}]'
+    spans = [
+        dict(span("d", "", "DELEGATE", "delegate:faq", 0, 300, agent="sup"),
+             callee_agent_id="faq", output=out),
+        span("f", "d", "AGENT", "faq.run", 50, 200, agent="faq-uuid"),
+    ]
+    r = build_replay(spans, aliases={"faq": "faq-uuid"})  # must not raise
+    assert r["events"][0]["say"] == ""
+
+
+def test_tool_sharing_an_agent_slug_stays_a_plain_tool():
+    """Agent slugs and tool names share a namespace — a TOOL named "search" next to an agent
+    whose slug is "search" must not become a walk-over delegation."""
+    spans = [
+        span("t", "", "TOOL", "search", 0, 100, agent="concierge-uuid"),
+        span("g", "", "GENERATION", "chat", 200, 100, agent="search-uuid"),
+    ]
+    r = build_replay(spans, aliases={"search": "search-uuid"})
+    tool_ev = r["events"][0]
+    assert tool_ev["delegate_to"] == ""
+    assert tool_ev["station"] == "computer"
+
+
+def test_containers_never_get_inferred_delegations():
+    """A turn envelope listing an agent-named tool call must not walk its agent for the turn."""
+    spans = [
+        dict(span("w", "", "CHAIN", "agent_teams.turn", 0, 5000, agent="team"),
+             tool_call_names=["agent_faq"]),
+        span("f", "", "GENERATION", "chat", 100, 300, agent="faq"),
+    ]
+    r = build_replay(spans, {"faq": "agent_faq"})
+    wrapper = next(e for e in r["events"] if e["name"] == "agent_teams.turn")
+    assert wrapper["delegate_to"] == ""
+
+
+def test_declared_tool_names_tolerates_junk():
+    from tracely.api.routers.sessions import _declared_tool_names
+
+    assert _declared_tool_names({"tools": 42}) == []
+    assert _declared_tool_names({"tools": "lookup"}) == []
+    assert _declared_tool_names({"tools": True}) == []
+    assert _declared_tool_names({"tools": {"a": {}, "b": {}}}) == ["a", "b"]
+    assert _declared_tool_names({"tools": [{"name": "x"}, "y"]}) == ["x", "y"]

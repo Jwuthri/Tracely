@@ -63,6 +63,11 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
                 ▶ Replay
               </a>
             )}
+            {turns.length > 0 && (
+              <a href={`/sessions/${encodeURIComponent(threadId)}/fleet`} className="btn-ghost">
+                ⌂ Fleet
+              </a>
+            )}
             {turns.length > 0 && agentRef && (
               <SaveAsScenarioButton
                 threadId={threadId}

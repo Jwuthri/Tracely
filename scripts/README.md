@@ -29,6 +29,18 @@ make demo-failures        # loops send_test_trace.py with RANDOM/SILENT/HALLUCIN
 
 For richer, agent-shaped demo data (multi-turn, multi-agent, thinking, multimodal, structured output) use the SDK seeder instead: [`sdk/examples/seed_conversations.py`](../sdk/examples/seed_conversations.py).
 
+## `demo_fleet.py` — one cinematic conversation for the Fleet view
+
+Sends a 2-turn, 3-agent conversation **through the SDK** (not raw OTLP) using every span type
+the `/fleet` office renders: `thinking` (thought cloud), `skill` (read at the library),
+`delegate` (walk to the callee's desk + speech bubble), action tools at the tool wall, a
+knowledge tool at the library, and one failing tool (the red `!`). Prints the thread id — open
+`/sessions/<thread>/fleet`.
+
+```bash
+uv run python scripts/demo_fleet.py
+```
+
 ## `seed_demo.py` — the whole-product seeder (one command)
 
 Populates **every** surface a visitor sees, in dependency order, so the differentiated Test/Ship half is never left empty:

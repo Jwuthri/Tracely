@@ -1,7 +1,10 @@
 """Conversation replay: turn a thread's spans into a time-ordered SCRIPT the UI can act out.
 
-Pure — no I/O. The caller supplies the spans (`async_reader.thread_spans_full`) and a
-`agent_id -> display name` map; this module derives WHO acted, WHEN, and UNDER WHOM.
+Pure — no I/O. The caller supplies the spans (`async_reader.thread_spans_full`), a
+`agent_id -> display name` map, and an alias map (slug/name -> agent_id); this module derives
+WHO acted, WHEN, UNDER WHOM — and, for the fleet office view, WHERE: every event carries a
+`station` (desk / computer / library / peer) and delegations carry the callee, so the UI can
+walk a character over and put the handoff text in a speech bubble.
 
 The nesting is the point: a span's actor is the nearest AGENT/SUBAGENT ancestor, so an
 `llm`/`tool` event is attributed to the agent that actually ran it, and an agent span nested
@@ -10,6 +13,7 @@ under another agent is a SUB-agent (rendered as a helper pulled in for one job, 
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
@@ -20,6 +24,7 @@ _KIND = {
     "SUBAGENT": "spawn",
     "GENERATION": "llm",
     "EMBEDDING": "llm",
+    "THINKING": "think",
     "TOOL": "tool",
     "RETRIEVER": "tool",
     "GUARDRAIL": "guard",
@@ -27,6 +32,22 @@ _KIND = {
     "SKILL": "skill",
 }
 _ACTOR_TYPES = {"AGENT", "SUBAGENT"}
+
+# event kind -> where the actor performs it. The span TYPE is authoritative: SKILL and
+# RETRIEVER are knowledge access (the library), TOOL is an action (the computer) — instrument
+# with the right span type rather than relying on tool naming. DELEGATE resolves to the
+# callee's desk.
+_STATION = {
+    "turn": "desk",
+    "spawn": "desk",
+    "llm": "desk",
+    "think": "desk",
+    "guard": "desk",
+    "step": "desk",
+    "tool": "computer",
+    "skill": "library",
+    "delegate": "peer",
+}
 
 
 def _ms(a: datetime | None, b: datetime | None) -> int:
@@ -44,14 +65,74 @@ def _preview(value: Any, limit: int = 120) -> str:
     return text[: limit - 1] + "…" if len(text) > limit else text
 
 
-def build_replay(spans: list[dict], names: dict[str, str] | None = None) -> dict:
+def _text_of(value: Any, limit: int = 120) -> str:
+    """Human text from a span output. Outputs are often a JSON message list
+    (`[{"role": "assistant", "content": ...}]`) — a speech bubble must show the words,
+    never the envelope. Falls back to the raw preview."""
+    if isinstance(value, str) and value.lstrip().startswith(("[", "{")):
+        try:
+            parsed = json.loads(value)
+        except (ValueError, TypeError):
+            return _preview(value, limit)
+        msgs = parsed if isinstance(parsed, list) else [parsed]
+        for m in reversed(msgs):
+            if isinstance(m, dict):
+                content = m.get("content")
+                if isinstance(content, str) and content.strip():
+                    return _preview(content, limit)
+    return _preview(value, limit)
+
+
+def _delegation_say(span: dict, callee_alias: str) -> str:
+    """The handoff text for a speech bubble. A DELEGATE span carries it as its input (`set_io`,
+    a plain string); a tool-call-style handoff buries it in the function arguments of the
+    assistant message. A GENERATION span's `input` is the prompt as a JSON message list — a
+    bubble must NEVER show that envelope, so the direct-input shortcut only applies to plain
+    strings."""
+    direct = span.get("input")
+    if isinstance(direct, str) and direct.strip() and not direct.lstrip().startswith(("[", "{")):
+        return _preview(direct)
+    raw = span.get("output")
+    if isinstance(raw, str) and raw.lstrip().startswith(("[", "{")):
+        try:
+            msgs = json.loads(raw)
+        except (ValueError, TypeError):
+            return ""
+        for m in msgs if isinstance(msgs, list) else [msgs]:
+            for call in (m.get("tool_calls") or []) if isinstance(m, dict) else []:
+                fn = call.get("function") if isinstance(call, dict) else None
+                if not isinstance(fn, dict):
+                    continue  # free-form envelopes carry bare strings here — never crash on them
+                if str(fn.get("name") or "").lower() != callee_alias.lower():
+                    continue
+                try:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except (ValueError, TypeError):
+                    return _preview(fn.get("arguments"))
+                if isinstance(args, dict):
+                    return _preview(" ".join(str(v) for v in args.values() if v))
+                return _preview(args)
+    return ""
+
+
+def build_replay(
+    spans: list[dict],
+    names: dict[str, str] | None = None,
+    aliases: dict[str, str] | None = None,
+) -> dict:
     """`{duration_ms, actors[], events[]}` — the conversation as a playable script.
 
     `actors` are ordered by first appearance (stable seating). Each carries `parent` (the actor
     that spawned it, empty for top-level) and `depth`. `events` are ordered by start time with
-    `t_ms` relative to the conversation's first span, so the UI plays one clock.
+    `t_ms` relative to the conversation's first span, so the UI plays one clock. Each event also
+    carries `station` (desk/computer/library/peer) and, for handoffs, `delegate_to` + `say`.
+
+    `aliases` maps lowercase slugs/display names -> agent_id, so a DELEGATE span's
+    `callee_agent_id` (the raw slug the SDK recorded) and tool calls named after agents resolve
+    to the same actor the spans use.
     """
     names = names or {}
+    aliases = {k.lower(): v for k, v in (aliases or {}).items()}
     rows = [s for s in spans if s.get("start_time")]
     if not rows:
         return {"duration_ms": 0, "actors": [], "events": []}
@@ -67,7 +148,7 @@ def build_replay(spans: list[dict], names: dict[str, str] | None = None) -> dict
     by_id = {ref(s, s.get("span_id")): s for s in rows if s.get("span_id")}
 
     # ── resolve each span's owning actor by walking up to the nearest AGENT/SUBAGENT ──
-    actor_of: dict[str, str] = {}  # span_id -> actor key
+    actor_of: dict[tuple[str, str], str] = {}  # (trace, span) -> actor key
     parent_of: dict[str, str] = {}  # actor key -> parent actor key
 
     def actor_key(span: dict) -> str:
@@ -119,17 +200,36 @@ def build_replay(spans: list[dict], names: dict[str, str] | None = None) -> dict
             }
         seen[key]["last_ms"] = max(seen[key]["last_ms"], _ms(t0, end))
 
-    # Multi-agent harnesses call a sub-agent as a TOOL, and often emit spans whose real parent
-    # span was never exported — so nesting alone loses the hierarchy. A tool call NAMED after
-    # another actor is an explicit, non-heuristic edge: the caller owns the callee.
+    # Aliases every actor answers to: registry slug/display (from `aliases`), replay display
+    # name, and the raw key. Used for both hierarchy edges and per-event delegation targets.
     by_name: dict[str, str] = {}
+    for alias, aid in aliases.items():
+        if aid in seen:
+            by_name[alias] = aid
     for key, actor in seen.items():
-        by_name[str(actor["name"]).lower()] = key
-        by_name[key.lower()] = key
+        by_name.setdefault(str(actor["name"]).lower(), key)
+        by_name.setdefault(key.lower(), key)
+
+    def resolve_actor(alias: str) -> str:
+        return by_name.get(alias.lower(), "")
+
+    # ── hierarchy edges beyond nesting ──
+    # 1) A DELEGATE span is an EXPLICIT edge: its actor is the caller, `callee_agent_id` the
+    #    callee. Recorded first so it wins over the tool-name heuristic below.
+    for span in rows:
+        if str(span.get("type") or "").upper() != "DELEGATE":
+            continue
+        caller = actor_of[ref(span, span.get("span_id"))]
+        callee = resolve_actor(str(span.get("callee_agent_id") or ""))
+        if callee and callee != caller and callee not in parent_of:
+            parent_of[callee] = caller
+    # 2) Multi-agent harnesses call a sub-agent as a TOOL, and often emit spans whose real parent
+    #    span was never exported — so nesting alone loses the hierarchy. A tool call NAMED after
+    #    another actor is an explicit, non-heuristic edge: the caller owns the callee.
     for span in rows:
         caller = actor_of[ref(span, span.get("span_id"))]
         for tool in span.get("tool_call_names") or []:
-            callee = by_name.get(str(tool).lower())
+            callee = resolve_actor(str(tool))
             if callee and callee != caller and not parent_of.get(callee):
                 parent_of[callee] = caller
 
@@ -163,19 +263,45 @@ def build_replay(spans: list[dict], names: dict[str, str] | None = None) -> dict
         seen[key]["events"] += 1
         if error:
             seen[key]["errors"] += 1
+
+        name = str(span.get("name") or kind)
+        station = "library" if stype == "RETRIEVER" else _STATION.get(kind, "desk")
+
+        # Delegation target: explicit on a DELEGATE span; inferred on a WORK event (never a
+        # turn/spawn container — one inferred edge would walk the agent for the whole turn)
+        # whose REQUESTED tool is another actor. A TOOL span's own name deliberately does not
+        # count: agent slugs and tool names share a namespace ("search", "billing"), and a
+        # colliding plain tool must stay a tool. The residual risk — an llm requesting a tool
+        # that happens to share an agent's slug — is accepted; it's the same signal the agents
+        # panel uses for hierarchy.
+        delegate_to, say = "", ""
+        if stype == "DELEGATE":
+            delegate_to = resolve_actor(str(span.get("callee_agent_id") or ""))
+            say = _delegation_say(span, str(span.get("callee_agent_id") or ""))
+        elif kind not in ("turn", "spawn"):
+            for alias in span.get("tool_call_names") or []:
+                target = resolve_actor(str(alias))
+                if target and target != key:
+                    delegate_to, station = target, "peer"
+                    say = _delegation_say(span, str(alias))
+                    break
+
         events.append(
             {
                 "t_ms": _ms(t0, span["start_time"]),
                 "dur_ms": _ms(span["start_time"], span.get("end_time")),
                 "actor": key,
                 "kind": kind,
-                "name": str(span.get("name") or kind),
+                "name": name,
                 "status": "error" if error else "ok",
                 # Containers bracket other spans rather than doing work — the UI shows them as the
                 # turn's envelope, and never as the agent "working".
                 "container": kind in ("turn", "spawn", "delegate"),
+                "station": station,
+                "delegate_to": delegate_to,
+                "say": say,
                 "model": str(span.get("model_id") or ""),
-                "detail": _preview(span.get("status_message") or span.get("output")),
+                "detail": _preview(span.get("status_message")) or _text_of(span.get("output")),
                 "span_id": sid,
                 "trace_id": str(span.get("trace_id") or ""),
                 "turn_id": str(span.get("turn_id") or ""),

@@ -333,24 +333,58 @@ async def get_session_agents(thread_id: str, project_id: str = Depends(get_proje
     return {"thread_id": thread_id, "declared": declared, "observed": observed}
 
 
+def _declared_tool_names(agent: dict) -> list[str]:
+    """Tool NAMES from a free-form declared agent. `tools` may be a dict-of-tools (the
+    documented shape), a list, or any junk the config POST accepted — the catalog is
+    deliberately unvalidated, so a non-iterable here must degrade to [], never 500."""
+    raw = agent.get("tools")
+    if isinstance(raw, dict):
+        return [str(k) for k in raw]
+    if isinstance(raw, list):
+        return [str(t.get("name", "") if isinstance(t, dict) else t) for t in raw]
+    return []
+
+
 @router.get("/sessions/{thread_id}/replay")
 async def get_session_replay(thread_id: str, project_id: str = Depends(get_project_id)) -> dict:
-    """The conversation as a playable script: who acted, when, under whom (`domain.traces.replay`).
-    Agent names resolve through the registry, same fallback chain as the agents panel."""
+    """The conversation as a playable script: who acted, when, under whom, and at which station
+    (`domain.traces.replay` — the Replay and Fleet views share this one read). Registry
+    slugs/display names double as the alias map, so DELEGATE callees and agent-named tool calls
+    land on the right actor. `declared` is the user-sent agent-definition catalog for this
+    conversation (name/description/tools) when one exists — the Fleet view's inspect card."""
     spans = await async_reader.thread_spans_full(project_id, thread_id)
     ids = sorted({str(s.get("agent_id")) for s in spans if s.get("agent_id")})
 
-    def names() -> dict[str, str]:
-        out: dict[str, str] = {}
+    def registry() -> tuple[dict[str, str], dict[str, str], list[dict]]:
+        names: dict[str, str] = {}
+        aliases: dict[str, str] = {}
         with SyncSessionLocal() as s:
             for aid in ids:
                 row = repo.agent_in_project(s, project_id, aid)
                 if row:
-                    out[aid] = row.display_name or row.slug
-        return out
+                    names[aid] = row.display_name or row.slug
+                    aliases[row.slug] = aid
+                    if row.display_name:
+                        aliases[row.display_name] = aid
+            cfg = repo.conversation_agents_get(s, project_id, thread_id)
+            declared_raw = list(cfg.agents) if cfg and cfg.agents else []
+        declared = [
+            {
+                "name": str(a.get("name") or ""),
+                "description": str(a.get("description") or ""),
+                "tools": _declared_tool_names(a),
+            }
+            for a in declared_raw
+            if isinstance(a, dict)
+        ]
+        return names, aliases, declared
 
-    name_map = await run_in_threadpool(names)
-    return {"thread_id": thread_id, **build_replay(spans, name_map)}
+    name_map, aliases, declared = await run_in_threadpool(registry)
+    return {
+        "thread_id": thread_id,
+        "declared": declared,
+        **build_replay(spans, name_map, aliases),
+    }
 
 
 class SessionConfigBody(BaseModel):

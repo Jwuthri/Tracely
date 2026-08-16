@@ -23,6 +23,9 @@ _SPAN_COLS = [
     "start_time", "end_time", "agent_id", "agent_version_id", "agent_run_id",
     "turn_id", "step_id", "model_id", "input", "output", "tool_call_names", "tool_calls",
     "trace_id", "is_app_root", "conversation_id", "env",
+    # handoff edge (DELEGATE spans): raw slugs as the SDK recorded them — the replay resolves
+    # them to registry agents through its alias map.
+    "caller_agent_id", "callee_agent_id",
 ]
 
 

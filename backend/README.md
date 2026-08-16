@@ -256,6 +256,7 @@ Three Celery tasks, each a thin dispatch into a service class: `ingest_otlp_blob
 | `GET /api/sessions?evals=true` | `sessions.py` | the thread list, **plus** Tracely's own runs as rows (`internal_kind`, `subject_id`). The one list reader that opts out of the `_REAL` filter. |
 | `GET /api/sessions`, `/api/sessions/{thread}` | `sessions.py` | conversations (grouped by `conversation_id`) + per-turn rollups (tokens, input/output split, model, cost, verdict). |
 | `GET /api/sessions/{thread}/agents` | `sessions.py` | the conversation's agents — declared (SDK catalog) or derived from spans. |
+| `GET /api/sessions/{thread}/replay` | `sessions.py` | the conversation as a playable script (`domain/traces/replay.py`): actors with hierarchy (nesting + DELEGATE edges + agent-named tool calls), events on one relative clock, each with a `station` (desk/computer/library/peer) and — for handoffs — `delegate_to` + `say`. Ships `declared` (the SDK agent-definition catalog). Feeds both the `/replay` timeline and the `/fleet` office views. |
 | `GET /api/sessions/{thread}/export` · `GET /api/export` | `sessions.py` | one conversation as JSON (the table's copy button); the whole workspace as streamed NDJSON — one line per thread, same shape, paged 200 threads at a time (`limit`, `from_ts`, `to_ts`, `evals`). |
 | `GET …/{thread}/rolling-summary` · `…/by-level` · `POST …/generate` | `sessions.py` | the accumulated conversation summary (whole / per-level) + on-demand rebuild. |
 | `GET /api/search` | `search.py` | ⌘K search over conversations/issues/cases/gates. |
