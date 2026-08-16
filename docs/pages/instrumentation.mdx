@@ -67,6 +67,38 @@ with tracely.tool("get_charges", agent="billing-agent") as t:
 A model that **requests** a tool that never runs is a *silent failure* — record the request with
 `llm(tool_calls=[...])` and simply don't emit the `tool(...)` span.
 
+## Skills — `skill(...)`
+
+A named capability between a tool and an agent — a refund flow, an escalation playbook, a loaded
+agent-skill file — with its own tools and generations nested inside:
+
+```python
+with tracely.skill("refund-flow", agent="billing-agent", version="v2") as sk:
+    tracely.set_io(sk, input={"order_id": "ORD-4471"}, output={"refunded": True})
+    with tracely.tool("issue_refund", agent="billing-agent"):
+        ...
+```
+
+`version` is recorded as `tracely.metadata.skill_version` — when the same skill starts failing, it's
+the field that tells you which revision changed.
+
+## Handovers — `delegate(...)`
+
+The *act* of routing work to another agent. Open the callee's `agent(...)` inside it and the span
+brackets everything that agent did for this one job:
+
+```python
+with tracely.delegate("billing-agent", agent="router", task="issue refund") as d:
+    tracely.set_io(d, input={"reason": "user asked for a refund"}, output=result)
+    with tracely.agent("billing-agent", role="specialist", conversation="conv-1"):
+        ...
+```
+
+It records the same handoff edge as `agent(handoff_from=...)`, so the multi-agent graph is drawn
+either way. What it adds is a gradeable span for the *routing decision* — "was billing the right
+agent for this?" is a different question from "did billing do it well?", and a step-level judge can
+now answer them separately.
+
 ## Reasoning — `thinking(...)`
 
 Chain-of-thought as its own span, with reasoning-token usage:

@@ -64,8 +64,10 @@ export const PREFS_KEY = "tracely.traceTable.prefs";
 export const KNOWN_SPAN_TYPES = [
   "AGENT",
   "SUBAGENT",
+  "DELEGATE",
   "GENERATION",
   "TOOL",
+  "SKILL",
   "THINKING",
   "CHAIN",
   "RETRIEVER",

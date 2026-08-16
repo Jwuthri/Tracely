@@ -97,8 +97,9 @@ def get_weather(city: str) -> dict:
     return {"city": city, "tempF": 64}
 ```
 
-`as_type` ∈ `agent` · `generation` · `tool` · `chain` · `retriever` · `thinking` · `embedding` ·
-`guardrail` · `span`. Decorating tools also makes them **hermetically replayable** in CI for free.
+`as_type` ∈ `agent` · `delegate` · `generation` · `tool` · `skill` · `chain` · `retriever` ·
+`thinking` · `embedding` · `guardrail` · `span`. Decorating tools also makes them **hermetically
+replayable** in CI for free.
 
 ## Manual spans
 
@@ -113,6 +114,15 @@ with tracely.agent("support-agent", version="v4", conversation="conv-1", turn=0)
         except Exception as e:
             tracely.error(t, str(e))
 ```
+
+Two types are worth naming even on an otherwise-automatic agent, because they're the shape a
+multi-agent system fails in:
+
+- `skill(name, version=…)` → **SKILL**, a named capability the agent chose to run (a refund flow, an
+  escalation playbook, a loaded agent-skill file). Makes "which skill did this?" a filter and a
+  failure cluster instead of a tree shape you have to infer.
+- `delegate(to, agent=…, task=…)` → **DELEGATE**, the handover itself. Open the callee's `agent(...)`
+  inside it and a judge can grade *the routing decision* separately from *the work*.
 
 Full cookbook — every span type, `set_io` / `set_usage` / `set_metadata` / `set_state` /
 `set_agents`, RAG pipelines, multi-agent handoffs, multimodal content, structured I/O rendering:

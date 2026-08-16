@@ -20,6 +20,8 @@ RETRIEVER = "RETRIEVER"
 EMBEDDING = "EMBEDDING"
 GUARDRAIL = "GUARDRAIL"
 THINKING = "THINKING"
+DELEGATE = "DELEGATE"
+SKILL = "SKILL"
 SPAN = "SPAN"
 
 _KNOWN_TYPES = {
@@ -31,14 +33,17 @@ _KNOWN_TYPES = {
     EMBEDDING,
     GUARDRAIL,
     THINKING,
+    DELEGATE,
+    SKILL,
     SPAN,
     "EVENT",
     "EVALUATOR",
 }
 
 # Synonyms collapsed to a canonical type at ingestion. Keeps the menu/filter surface minimal —
-# e.g. OpenAI Agents' "reasoning" and Anthropic's "thinking" are the same notion.
-_TYPE_ALIASES = {"REASONING": THINKING}
+# e.g. OpenAI Agents' "reasoning" and Anthropic's "thinking" are the same notion, and every
+# harness that models agent-to-agent routing calls it a handoff.
+_TYPE_ALIASES = {"REASONING": THINKING, "HANDOFF": DELEGATE}
 
 _GENAI_GEN_OPS = {"chat", "completion", "text_completion", "generate_content", "generate"}
 

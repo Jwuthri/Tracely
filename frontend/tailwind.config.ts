@@ -31,6 +31,8 @@ const config: Config = {
         t_tool: "#fb923c",
         t_retriever: "#c084fc",
         t_think: "#c4b5fd",
+        t_delegate: "#38bdf8",
+        t_skill: "#f472b6",
         t_step: "#8b94a7",
       },
       boxShadow: {

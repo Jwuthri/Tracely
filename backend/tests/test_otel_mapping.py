@@ -66,6 +66,17 @@ def test_type_classification() -> None:
     assert map_observation_type({"foo": "bar"}) == "SPAN"
 
 
+def test_delegate_and_skill_are_first_class_types() -> None:
+    # Both are explicit-only: no gen_ai / OpenInference kind means them, so an unknown type
+    # falling back to SPAN (instead of being dropped) is what keeps them safe to emit.
+    assert map_observation_type({"tracely.observation.type": "DELEGATE"}) == "DELEGATE"
+    assert map_observation_type({"tracely.observation.type": "skill"}) == "SKILL"
+    # Harnesses that model agent-to-agent routing call it a handoff; same notion.
+    assert map_observation_type({"tracely.observation.type": "HANDOFF"}) == "DELEGATE"
+    # A model call inside a skill span is still a GENERATION — the type is per span, not per subtree.
+    assert map_observation_type({"gen_ai.request.model": "gpt-4o"}) == "GENERATION"
+
+
 def test_to_rows_shape() -> None:
     rows = to_rows(events_from_request(_request(), "p"))
     assert len(rows) == 1

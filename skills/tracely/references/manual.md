@@ -15,8 +15,10 @@ tracely.init(endpoint=..., api_key=..., service_name="support-agent", env="prod"
 | Call | Type | Represents |
 |---|---|---|
 | `agent(slug, *, version, run_id, role, conversation, turn, user, trace_name, handoff_from, edge="delegate")` | `AGENT` | The run root — one turn. |
+| `delegate(to, *, agent, task, edge="delegate")` | `DELEGATE` | A handover to another agent — the routing act itself. |
 | `llm(model, *, agent, temperature, top_p, max_tokens, frequency_penalty, presence_penalty, seed, tool_calls, metadata)` | `GENERATION` | A model call. |
 | `tool(name, *, agent)` | `TOOL` | A tool / function execution. |
+| `skill(name, *, agent, version)` | `SKILL` | A named capability / playbook the agent chose to run. |
 | `thinking(name="thinking", *, agent, model)` | `THINKING` | Reasoning, as its own span with its own token usage. |
 | `retriever(name="retrieve", *, agent)` | `RETRIEVER` | A retrieval step (vector / keyword / web). |
 | `embedding(model, *, agent)` | `EMBEDDING` | An embedding call. |
@@ -112,6 +114,22 @@ with tracely.chain("rag_pipeline", agent="support-agent"):
 A blocked guardrail records `{"action": "block", "flags": [...]}` and the agent returns a safe
 refusal.
 
+## Skills — a named capability
+
+Between a tool and an agent: a procedure the agent *chose* to run — a refund flow, an escalation
+playbook, a loaded agent-skill file — with its own tools and generations nested inside.
+
+```python
+with tracely.skill("refund-flow", agent="billing-agent", version="v2") as sk:
+    tracely.set_io(sk, input={"order_id": oid}, output={"refunded": True})
+    with tracely.tool("issue_refund", agent="billing-agent"):
+        ...
+```
+
+Naming it turns "which skill did this?" into a filter, a failure cluster and a gate assertion rather
+than a shape you infer from the tree. `version` (→ `tracely.metadata.skill_version`) is what tells
+you which revision changed when the skill starts failing.
+
 ## Multi-agent handoffs
 
 Open the specialist's `agent(...)` **inside** the orchestrator's span and record the edge:
@@ -125,6 +143,20 @@ with tracely.agent("router", role="orchestrator", conversation="c1") as root:
 
 `handoff_from` records `router → billing-agent` (`edge` defaults to `"delegate"`), which powers the
 multi-agent graph view.
+
+To grade the **routing decision** on its own, wrap the callee in a `delegate(...)` span instead:
+
+```python
+with tracely.agent("router", role="orchestrator", conversation="c1"):
+    with tracely.delegate("billing-agent", agent="router", task="issue refund") as d:
+        tracely.set_io(d, input={"reason": "user asked for a refund"}, output=result)
+        with tracely.agent("billing-agent", role="specialist", conversation="c1"):
+            ...
+```
+
+Same edge, plus a span a step-level judge can read. "Was billing the right agent for this?" and "did
+billing do it well?" are different failures with different fixes, and only the delegate span
+separates them.
 
 ## Structured I/O — how content renders
 

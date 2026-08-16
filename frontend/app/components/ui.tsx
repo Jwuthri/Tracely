@@ -69,6 +69,8 @@ const TYPE: Record<string, string> = {
   TOOL: "text-t_tool",
   RETRIEVER: "text-t_retriever",
   THINKING: "text-t_think",
+  DELEGATE: "text-t_delegate",
+  SKILL: "text-t_skill",
 };
 const TYPE_DOT: Record<string, string> = {
   AGENT: "bg-t_agent",
@@ -78,6 +80,8 @@ const TYPE_DOT: Record<string, string> = {
   TOOL: "bg-t_tool",
   RETRIEVER: "bg-t_retriever",
   THINKING: "bg-t_think",
+  DELEGATE: "bg-t_delegate",
+  SKILL: "bg-t_skill",
 };
 
 // Canonicalize synonym types for display + filtering. Mirrors backend/tracely/otel/mapping.py:

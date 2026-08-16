@@ -20,8 +20,10 @@ export type PlayEvent = ReplayEvent & { pt: number; pdur: number; index: number 
 export const KIND_STYLE: Record<string, { label: string; color: string; icon: string }> = {
   turn: { label: "turn", color: "#7aa2ff", icon: "▶" },
   spawn: { label: "sub-agent", color: "#c084fc", icon: "✦" },
+  delegate: { label: "delegate", color: "#38bdf8", icon: "⇄" },
   llm: { label: "llm", color: "#34d399", icon: "✎" },
   tool: { label: "tool", color: "#fb923c", icon: "⚙" },
+  skill: { label: "skill", color: "#f472b6", icon: "◆" },
   guard: { label: "guard", color: "#fbbf24", icon: "⛨" },
   step: { label: "step", color: "#8b94a7", icon: "·" },
 };
@@ -30,7 +32,7 @@ export const kindStyle = (k: string) => KIND_STYLE[k] ?? KIND_STYLE.step;
 
 /** A container span envelopes other spans; its duration is the sum of everyone's work. */
 export const isContainer = (e: { kind: string; container?: boolean }) =>
-  e.container ?? (e.kind === "turn" || e.kind === "spawn");
+  e.container ?? (e.kind === "turn" || e.kind === "spawn" || e.kind === "delegate");
 
 const MAX_GAP_MS = 400;  // dead air between turns is squeezed to this
 const MIN_DUR_MS = 140;  // a 3ms tool call still needs to be seeable

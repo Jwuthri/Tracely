@@ -18,6 +18,8 @@ const BAR: Record<string, string> = {
   EMBEDDING: "bg-t_llm",
   TOOL: "bg-t_tool",
   RETRIEVER: "bg-t_retriever",
+  DELEGATE: "bg-t_delegate",
+  SKILL: "bg-t_skill",
 };
 
 // Layout constants for the two-pane (fixed labels | scrollable track) timeline.

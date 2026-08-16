@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.jwuthri/tracely",
+  "title": "Tracely",
+  "description": "Query AI agent traces, failure clusters, evaluators and trends from your Tracely workspace.",
+  "version": "0.3.2",
+  "repository": {
+    "url": "https://github.com/Jwuthri/Tracely",
+    "source": "github"
+  },
+  "websiteUrl": "https://tracely-studio.xyz",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.tracely-studio.xyz/mcp"
+    }
+  ]
+}

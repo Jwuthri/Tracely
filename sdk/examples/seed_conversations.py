@@ -8,9 +8,10 @@ question, and the three failure fixtures stay minimal so the shape under test is
 
 Use cases covered:
   • single-turn AND multi-turn conversations (conversation_id groups turns; each turn is a trace)
-  • multi-agent runs with explicit handoffs (router → specialists; agent(handoff_from=...))
-  • every observation type via its SDK helper: agent · llm · tool · thinking · retriever ·
-    embedding · guardrail · chain
+  • multi-agent runs with explicit handoffs (router → specialists; agent(handoff_from=...)) and
+    delegate(...) spans around them, so the routing decision is its own gradeable step
+  • every observation type via its SDK helper: agent · delegate · llm · tool · skill · thinking ·
+    retriever · embedding · guardrail · chain
   • a full RAG pipeline (guardrail → embed → retrieve → grounded generation)
   • multimodal user messages (text + image + file content blocks)
   • structured / output-schema JSON generations, multiple models (gpt-4o, gpt-5.4-mini, sonnet)
@@ -437,37 +438,57 @@ def seed_order_issue():
             110,
         )
 
-        with tracely.agent(
-            "shipping-agent", role="specialist", conversation=conv, handoff_from="router"
-        ):
-            use_tool(
-                "track_shipment",
-                "shipping-agent",
-                {"order_id": "ORD-4471"},
-                {
-                    "status": "in_transit",
-                    "carrier": "UPS",
-                    "eta": "2026-06-08",
-                    "last_scan": "Memphis, TN",
-                },
-            )
-            gen(
-                "shipping-agent",
-                sys_user("Summarise the shipment for the customer.", u0),
-                "Order ORD-4471 is in transit with UPS, ETA Jun 8 (last scan Memphis, TN).",
-                220,
-                48,
-            )
+        # DELEGATE spans record the routing decision itself, so "was this the right agent?" is
+        # gradeable separately from "did that agent do the job?".
+        with tracely.delegate(
+            "shipping-agent", agent="router", task="shipment status"
+        ) as d_ship:
+            tracely.set_io(d_ship, input={"intent": "where is my order", "order_id": "ORD-4471"})
+            with tracely.agent(
+                "shipping-agent", role="specialist", conversation=conv, handoff_from="router"
+            ):
+                # A SKILL span names the capability the specialist ran, rather than leaving it as
+                # an unnamed tool+generation shape.
+                with tracely.skill(
+                    "track-and-summarise", agent="shipping-agent", version="v3"
+                ) as sk:
+                    use_tool(
+                        "track_shipment",
+                        "shipping-agent",
+                        {"order_id": "ORD-4471"},
+                        {
+                            "status": "in_transit",
+                            "carrier": "UPS",
+                            "eta": "2026-06-08",
+                            "last_scan": "Memphis, TN",
+                        },
+                    )
+                    summary = (
+                        "Order ORD-4471 is in transit with UPS, ETA Jun 8 (last scan Memphis, TN)."
+                    )
+                    gen(
+                        "shipping-agent",
+                        sys_user("Summarise the shipment for the customer.", u0),
+                        summary,
+                        220,
+                        48,
+                    )
+                    tracely.set_io(sk, input={"order_id": "ORD-4471"}, output=summary)
+            tracely.set_io(d_ship, output=summary)
 
-        with tracely.agent(
-            "billing-agent", role="specialist", conversation=conv, handoff_from="router"
-        ):
-            use_tool(
-                "get_charges",
-                "billing-agent",
-                {"order_id": "ORD-4471"},
-                error="billing upstream timeout (504) after 3 retries",
-            )
+        with tracely.delegate(
+            "billing-agent", agent="router", task="verify duplicate charge"
+        ) as d_bill:
+            tracely.set_io(d_bill, input={"intent": "charged twice", "order_id": "ORD-4471"})
+            with tracely.agent(
+                "billing-agent", role="specialist", conversation=conv, handoff_from="router"
+            ):
+                use_tool(
+                    "get_charges",
+                    "billing-agent",
+                    {"order_id": "ORD-4471"},
+                    error="billing upstream timeout (504) after 3 retries",
+                )
 
         gen(
             "router",

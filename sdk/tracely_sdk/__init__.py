@@ -63,6 +63,8 @@ __all__ = [
     "embedding",
     "guardrail",
     "chain",
+    "delegate",
+    "skill",
     "set_io",
     "set_usage",
     "set_metadata",
@@ -739,7 +741,8 @@ def observe(
     """Wrap any sync/async function as a span (R8): args→input, return→output, latency, and
     exceptions (→ level=ERROR) captured automatically; auto-nests via OTel context — no manual
     parent wiring. `as_type` (span | generation | agent | tool | chain | retriever | thinking | embedding |
-    guardrail | …) becomes `tracely.observation.type`. Usable as `@observe` or `@observe(...)`."""
+    guardrail | delegate | skill | …) becomes `tracely.observation.type`. Usable as `@observe` or
+    `@observe(...)`."""
 
     def decorate(func: Callable) -> Callable:
         span_name = name or getattr(func, "__name__", "observed")
@@ -985,6 +988,54 @@ def chain(name: str, *, agent: str | None = None) -> Iterator[Span]:
         span.set_attribute("tracely.observation.type", "CHAIN")
         if agent:
             span.set_attribute("tracely.agent.id", agent)
+        yield span
+
+
+@contextmanager
+def delegate(
+    to: str, *, agent: str | None = None, task: str | None = None, edge: str = "delegate"
+) -> Iterator[Span]:
+    """A handover: `agent` (the caller) hands work to `to` (the callee). Type DELEGATE.
+
+    This is the *act* of delegating — open the callee's `agent(...)` inside it, and the span
+    brackets everything the callee did for this one job. It records the same handoff edge as
+    `agent(handoff_from=...)`, so the multi-agent graph is drawn either way; the difference is
+    that a delegate span also carries the routing decision itself — put the reason the caller
+    picked this agent in `set_io(span, input=...)` and what came back in `output=`, and a
+    step-level judge can grade the routing separately from the work.
+    """
+    with _t().start_as_current_span(f"delegate:{to}") as span:
+        span.set_attribute("tracely.observation.type", "DELEGATE")
+        span.set_attribute("tracely.handoff.callee_agent_id", to)
+        span.set_attribute("tracely.edge.type", edge)
+        if agent:
+            span.set_attribute("tracely.agent.id", agent)
+            span.set_attribute("tracely.handoff.caller_agent_id", agent)
+        if task:
+            span.set_attribute("tracely.metadata.task", task)
+        yield span
+
+
+@contextmanager
+def skill(
+    name: str, *, agent: str | None = None, version: str | None = None
+) -> Iterator[Span]:
+    """A named skill / capability / playbook the agent invoked. Type SKILL.
+
+    A skill is bigger than a tool and smaller than an agent: a named procedure the agent chose to
+    run ("refund-flow", "escalate-to-human", a loaded agent-skill file), usually with its own
+    tool calls and generations nested inside. Naming it makes "which skill did this?" a filter and
+    a per-skill failure cluster instead of a shape you have to infer from the span tree.
+    `version` pins which revision of the skill ran — the thing you actually changed when a
+    regression appears.
+    """
+    with _t().start_as_current_span(name) as span:
+        span.set_attribute("tracely.observation.type", "SKILL")
+        span.set_attribute("tracely.step.name", name)
+        if agent:
+            span.set_attribute("tracely.agent.id", agent)
+        if version:
+            span.set_attribute("tracely.metadata.skill_version", version)
         yield span
 
 

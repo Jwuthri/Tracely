@@ -23,6 +23,8 @@ _KIND = {
     "TOOL": "tool",
     "RETRIEVER": "tool",
     "GUARDRAIL": "guard",
+    "DELEGATE": "delegate",  # a container: the handover brackets the work the callee then does
+    "SKILL": "skill",
 }
 _ACTOR_TYPES = {"AGENT", "SUBAGENT"}
 
@@ -171,7 +173,7 @@ def build_replay(spans: list[dict], names: dict[str, str] | None = None) -> dict
                 "status": "error" if error else "ok",
                 # Containers bracket other spans rather than doing work — the UI shows them as the
                 # turn's envelope, and never as the agent "working".
-                "container": kind in ("turn", "spawn"),
+                "container": kind in ("turn", "spawn", "delegate"),
                 "model": str(span.get("model_id") or ""),
                 "detail": _preview(span.get("status_message") or span.get("output")),
                 "span_id": sid,

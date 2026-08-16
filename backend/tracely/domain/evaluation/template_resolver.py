@@ -98,6 +98,8 @@ _STEP_TYPE_PROPS = (
     ("generation", "Only the GENERATION steps — the model calls"),
     ("thinking", "Only the THINKING steps — the agent's reasoning"),
     ("chain", "Only the CHAIN steps"),
+    ("skill", "Only the SKILL steps — the named capabilities the agent ran"),
+    ("delegate", "Only the DELEGATE steps — handovers to another agent"),
 )
 _STEP_PROPS = (
     ("tool_call", "The tool invocation (name + arguments) at this step"),

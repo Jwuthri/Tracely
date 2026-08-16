@@ -29,6 +29,8 @@ const STEP_TYPE_PROPS: TemplateVarProp[] = [
   { name: "generation", description: "Only the GENERATION steps — the model calls" },
   { name: "thinking", description: "Only the THINKING steps — the agent's reasoning" },
   { name: "chain", description: "Only the CHAIN steps" },
+  { name: "skill", description: "Only the SKILL steps — the named capabilities the agent ran" },
+  { name: "delegate", description: "Only the DELEGATE steps — handovers to another agent" },
 ];
 
 const STEP_PROPS: TemplateVarProp[] = [

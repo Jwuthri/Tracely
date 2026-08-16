@@ -15,8 +15,10 @@ dedicated SDK helper:
 | Helper | Type | What it represents |
 |---|---|---|
 | `agent(...)` | `AGENT` | An agent run — the root of a turn. |
+| `delegate(to, …)` | `DELEGATE` | A handover: this agent hands work to another one. |
 | `llm(model, …)` | `GENERATION` | A model call (chat/completion). |
 | `tool(name, …)` | `TOOL` | A tool / function execution. |
+| `skill(name, …)` | `SKILL` | A named capability / playbook the agent chose to run. |
 | `thinking(…)` | `THINKING` | Reasoning / chain-of-thought, as its own span. |
 | `retriever(name, …)` | `RETRIEVER` | A retrieval step (vector / keyword / web search). |
 | `embedding(model, …)` | `EMBEDDING` | An embedding call. |
@@ -61,6 +63,33 @@ with tracely.agent("router", role="orchestrator", conversation="c1") as root:
 
 `handoff_from` records `router → billing-agent` (with an `edge` relationship, default `"delegate"`),
 which powers the multi-agent graph view.
+
+Want the routing decision itself on the trace — not just its consequence? Open a `delegate(...)`
+span around the callee. It records the same edge, and adds a span you can grade: *was handing this
+to billing the right call?* is a different question from *did billing do it well?*
+
+```python
+with tracely.agent("router", role="orchestrator", conversation="c1"):
+    with tracely.delegate("billing-agent", agent="router", task="issue refund") as d:
+        tracely.set_io(d, input={"reason": "user asked for a refund"})
+        with tracely.agent("billing-agent", role="specialist", conversation="c1"):
+            ...
+```
+
+## Skills
+
+A **skill** sits between a tool and an agent: a named procedure the agent chose to run — a refund
+flow, an escalation playbook, a loaded agent-skill file — usually with its own tool calls and
+generations nested inside it.
+
+```python
+with tracely.skill("refund-flow", agent="billing-agent", version="v2"):
+    ...   # the tools and generations that make up the skill
+```
+
+Naming it turns *"which skill did this?"* into a filter, a failure cluster and a gate assertion,
+instead of a shape you have to infer from the span tree. `version` pins which revision ran — the
+thing that actually changed when a regression appears.
 
 ## Input / output is structured
 

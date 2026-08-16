@@ -75,8 +75,8 @@ async def plan(goal: str) -> str: ...
 
 Args → input, return → output, latency and exceptions (→ `level=ERROR`) captured; auto-nested by
 OTel context with no manual parent wiring. `capture_input` / `capture_output` default `True` — turn
-them off for large or sensitive payloads. `as_type` ∈ `span` · `generation` · `agent` · `tool` ·
-`chain` · `retriever` · `thinking` · `embedding` · `guardrail`.
+them off for large or sensitive payloads. `as_type` ∈ `span` · `generation` · `agent` · `delegate` ·
+`tool` · `skill` · `chain` · `retriever` · `thinking` · `embedding` · `guardrail`.
 
 Bonus: `@observe(as_type="tool")` functions are **transparently hermetic** under replay — they serve
 recorded outputs instead of running, and re-raise recorded failures as `tracely.ToolError`.

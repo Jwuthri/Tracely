@@ -341,6 +341,16 @@ const MCP_LINES: ReactNode[] = [
   <span key="8"><span className={c.kw}>✓</span><span className={c.p}> get_trace, list_clusters, create_evaluator …</span></span>,
 ];
 
+// The other half of the MCP story: MCP hands the agent your data, the skill hands it the know-how.
+// Command must stay identical to README.md, docs/pages/skill.mdx and /agent-skill.
+const SKILL_LINES: ReactNode[] = [
+  <span key="0" className={c.cm}># plain Markdown — Claude Code, Cursor, Copilot …</span>,
+  <span key="1"><span className={c.fn}>npx</span><span className={c.p}> skills add </span><span className={c.s}>{GITHUB}</span> <span className={c.p}>{"\\"}</span></span>,
+  <span key="2" className={c.p}>{"  "}--skill <span className={c.s}>tracely</span></span>,
+  <span key="3">{" "}</span>,
+  <span key="4"><span className={c.kw}>✓</span><span className={c.p}> auto + manual tracing · evaluators · CI gate</span></span>,
+];
+
 /* ---------------------------------- page ---------------------------------- */
 
 export default function Landing() {
@@ -1016,6 +1026,47 @@ export default function Landing() {
               </div>
               <pre className="overflow-x-auto p-5 font-mono text-[12.5px] leading-[1.8]">
                 {MCP_LINES.map((l, i) => (
+                  <span key={i} className="block">
+                    {l}
+                  </span>
+                ))}
+              </pre>
+            </div>
+          </div>
+
+          {/* the know-how half — same section, because it's the same job from the other side */}
+          <div className="sec-reveal mx-auto mt-12 grid max-w-[1200px] items-center gap-10 lg:grid-cols-2">
+            <div>
+              <div className="flex items-center gap-4">
+                <span className="eyebrow whitespace-nowrap">Skill</span>
+                <div className="hairline-x flex-1" />
+              </div>
+              <h3 className="mt-5 font-display text-2xl font-bold tracking-tight sm:text-3xl">
+                MCP gives it your data.
+                <br />
+                The skill gives it the know-how.
+              </h3>
+              <p className="mt-4 max-w-xl leading-relaxed text-fg-muted">
+                One command and your coding agent knows how Tracely actually works — zero-span-code
+                instrumentation, the manual span API, evaluator design, the PR gate, and the handful
+                of conventions that fail <em>silently</em> when you get them wrong.
+              </p>
+              <div className="mt-7">
+                <a className={btnGhost} href="/agent-skill">
+                  What&apos;s in the skill <IconArrow className="h-3.5 w-3.5" />
+                </a>
+              </div>
+            </div>
+
+            <div className="overflow-hidden glass">
+              <div className="flex items-center justify-between border-b border-line/70 px-5 py-3">
+                <span className="font-mono text-[11px] text-fg-faint">terminal</span>
+                <span className="rounded border border-line bg-ink-900 px-2 py-0.5 font-mono text-[10px] text-fg-faint">
+                  6 files · loaded on demand
+                </span>
+              </div>
+              <pre className="overflow-x-auto p-5 font-mono text-[12.5px] leading-[1.8]">
+                {SKILL_LINES.map((l, i) => (
                   <span key={i} className="block">
                     {l}
                   </span>

@@ -34,6 +34,10 @@ observation id has nowhere to render.
 | `AGENT_RUN` (message) | turn | that turn's user request and agent answer |
 | `SPAN` / `TOOL` / `GENERATION` / `CHAIN` (step) | span | that step's input and output |
 
+A `TOOL` / `GENERATION` / `CHAIN` column grades exactly that span type. A `SPAN` column grades every
+step in the turn, narrowed by `config.span_types` — which is how you grade the newer types:
+`span_types: ["SKILL"]` grades each named capability, `["DELEGATE"]` grades each routing decision.
+
 Choosing the level decides what the column *can* catch. "Did the agent ever issue the refund" is a
 conversation question; a message-level column will miss it on every turn individually.
 
@@ -102,7 +106,7 @@ Message level (step inherits):
 | `@PREVIOUS_USER_MSG` / `@PREVIOUS_ASSISTANT_MSG` | the previous turn's request / answer |
 | `@CURRENT_MESSAGE.input` / `.output` / `.role` | the turn under evaluation |
 | `@CURRENT_STEPS` | all steps of the turn, formatted |
-| `@CURRENT_STEPS.tool` / `.retriever` / `.generation` / `.thinking` / `.chain` | just that step type — how a message-level rubric asks for the evidence it grades against |
+| `@CURRENT_STEPS.tool` / `.retriever` / `.generation` / `.thinking` / `.chain` / `.skill` / `.delegate` | just that step type — how a message-level rubric asks for the evidence it grades against |
 | `@CURRENT_STEPS_COUNT` | number of steps in the turn |
 
 Step level only:

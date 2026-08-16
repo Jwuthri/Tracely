@@ -115,6 +115,25 @@ def test_observe_tree_types_io(exporter: InMemorySpanExporter) -> None:
         assert dict(s.attributes)["tracely.agent.id"] == "planner"
 
 
+def test_delegate_and_skill_spans(exporter: InMemorySpanExporter) -> None:
+    """DELEGATE records the handover edge; SKILL names the capability. Both nest normally."""
+    with tracely.trace(agent="router", conversation="conv-d"):
+        with tracely.delegate("billing-agent", agent="router", task="issue refund"):
+            with tracely.skill("refund-flow", agent="billing-agent", version="v2"):
+                pass
+
+    spans = {s.name: dict(s.attributes) for s in exporter.get_finished_spans()}
+    d, sk = spans["delegate:billing-agent"], spans["refund-flow"]
+    assert d["tracely.observation.type"] == "DELEGATE"
+    assert d["tracely.handoff.caller_agent_id"] == "router"
+    assert d["tracely.handoff.callee_agent_id"] == "billing-agent"
+    assert d["tracely.edge.type"] == "delegate"
+    assert d["tracely.metadata.task"] == "issue refund"
+    assert sk["tracely.observation.type"] == "SKILL"
+    assert sk["tracely.step.name"] == "refund-flow"
+    assert sk["tracely.metadata.skill_version"] == "v2"
+
+
 def test_observe_exception_marks_error(exporter: InMemorySpanExporter) -> None:
     @tracely.observe()
     def boom() -> None:

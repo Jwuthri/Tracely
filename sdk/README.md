@@ -105,8 +105,10 @@ tracely.flush()   # force-flush the exporter (call before the process exits)
 | Call | Span type | Sets |
 |---|---|---|
 | `agent(slug, *, version, run_id, role, conversation, turn, user, trace_name, handoff_from, edge="delegate")` | `AGENT` (run root) | `tracely.agent.id`/`.version`/`.run_id`/`.role`, `tracely.conversation.id` + `session.id`, `tracely.turn.index`, `tracely.env`; `user`→`tracely.user.id`, `trace_name`→`tracely.trace.name`; `handoff_from`→ a handoff edge (`caller`→this agent, `edge.type`). |
+| `delegate(to, *, agent, task, edge="delegate")` | `DELEGATE` | the handover itself — `tracely.handoff.caller_agent_id`/`.callee_agent_id`, `tracely.edge.type`; `task`→`tracely.metadata.task`. Open the callee's `agent(...)` inside it. |
 | `llm(model, *, agent, temperature, top_p, max_tokens, frequency_penalty, presence_penalty, seed, tool_calls, metadata)` | `GENERATION` | `gen_ai.request.model` + the sampling params as `gen_ai.request.*`; `tool_calls`→`tracely.tool_calls` (tools the model **requested**); `metadata`→`tracely.metadata.*`. |
 | `tool(name, *, agent)` | `TOOL` | `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`. |
+| `skill(name, *, agent, version)` | `SKILL` | a named capability/playbook the agent ran — `tracely.step.name`; `version`→`tracely.metadata.skill_version`. |
 | `thinking(name="thinking", *, agent, model)` | `THINKING` | reasoning emitted as its own span; optional `model`. |
 | `retriever(name="retrieve", *, agent)` | `RETRIEVER` | a retrieval step — query in `set_io(input=)`, hits in `set_io(output=)`. |
 | `embedding(model, *, agent)` | `EMBEDDING` | `gen_ai.request.model`; record tokens with `set_usage(input_tokens=)`. |

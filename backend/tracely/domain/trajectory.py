@@ -14,6 +14,7 @@ _KIND = {
     "GENERATION": "llm", "TOOL": "tool", "AGENT": "agent", "SUBAGENT": "subagent",
     "RETRIEVER": "retriever", "CHAIN": "step", "GUARDRAIL": "guardrail",
     "EMBEDDING": "llm", "EVALUATOR": "step", "SPAN": "step", "EVENT": "other",
+    "DELEGATE": "delegate", "SKILL": "skill",
 }
 
 
