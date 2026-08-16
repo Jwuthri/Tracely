@@ -245,7 +245,7 @@ Three Celery tasks, each a thin dispatch into a service class: `ingest_otlp_blob
 | `routers/evaluators.py` · `evaluations.py` | Evaluator CRUD (`GET/POST/PATCH/DELETE`), templates, models/cost, template-variables, `@VARIABLE` resolve-preview, AI-generate; SSE on-demand runs. |
 | `routers/meta_analysis.py` | Per-agent meta-analysis: list agents, run, fetch latest/by-id, delete. |
 | `routers/auth.py` | Auth endpoints (common `me`/`logout`/`projects` + mode-specific local/clerk routers). |
-| `routers/health.py` | Readiness probe (ClickHouse + Postgres; 503 when either is down). |
+| `routers/health.py` | Readiness probe (ClickHouse + Postgres; 503 when either is down) + `/health/queue`, the deployment's own vitals (queue depth incl. prefetched `unacked`, worker liveness, ingest freshness, beat age — always 200). |
 
 ## API surface (`backend/tracely/api/routers/`)
 
@@ -277,6 +277,7 @@ Three Celery tasks, each a thin dispatch into a service class: `ingest_otlp_blob
 | `POST /auth/sync` | `auth.py` | Clerk-mode user sync. |
 | `DELETE /api/project/data` | `admin.py` | wipe the project: every trace/score in ClickHouse + all derived registry rows (agents, cases, gates, clusters, meta-analyses, summaries, annotations). Keeps configuration — keys, users, evaluators, monitors. Requires `{"confirm": "DELETE"}`. |
 | `GET /api/health` | `health.py` | readiness — `200` healthy / `503` when ClickHouse or Postgres is unreachable. |
+| `GET /health/queue` | `health.py` | ops self-check on demand: `degraded` + `problems` from `domain/ops/selfcheck.py` (the same verdict the 5-min beat task logs and alerts on). Always `200` — a backlog must not make the orchestrator kill the API. |
 | `GET/POST/DELETE /mcp` | `mcp_server.py` | MCP (streamable HTTP): ~11 tools over traces, clusters, evaluators and trends for a coding agent. Not a router — each tool calls the endpoints above in-process over an ASGI transport, forwarding the caller's key, so there is no second implementation of anything and no DB access here. |
 
 Every read/write is scoped by `project_id`, resolved from the `Authorization: Bearer <ingest-key>` header (`auth.get_project_id`).

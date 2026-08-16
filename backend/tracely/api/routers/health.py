@@ -20,6 +20,30 @@ router = APIRouter()
 log = structlog.get_logger()
 
 
+@router.get("/health/queue")
+async def queue_health() -> JSONResponse:
+    """The deployment's own vitals: queue depth, worker liveness, ingest freshness. Always 200 —
+    a backlog must not make the orchestrator kill the API, it must make a human look. `degraded`
+    + `problems` carry the verdict for an uptime probe or a dashboard to alert on."""
+    from tracely.domain.ops.selfcheck import evaluate
+    from tracely.services.selfcheck_service import snapshot
+
+    snap = await snapshot()
+    verdict = evaluate(snap)
+    return JSONResponse(
+        status_code=200,
+        content={
+            "degraded": verdict.degraded,
+            "problems": verdict.problems,
+            "queue_depth": snap.queue_depth,
+            "unacked": snap.unacked,
+            "last_task_age_s": snap.last_task_age_s,
+            "last_trace_age_s": snap.last_trace_age_s,
+            "beat_age_s": snap.beat_age_s,
+        },
+    )
+
+
 @router.get("/health")
 async def health() -> JSONResponse:
     deps: dict[str, str] = {}

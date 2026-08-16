@@ -36,10 +36,15 @@ def ingest_otlp(project_id: str, content_type: str, raw: bytes) -> str:
     # Local import: avoids a circular path through `workers.tasks -> celery_app -> include`.
     from tracely.workers.tasks import ingest_otlp_blob
 
+    from tracely.services.selfcheck_service import LAST_ACCEPT_KEY, stamp
+
     batch_id = uuid.uuid4().hex
     key = blobstore.event_blob_key(project_id, batch_id, content_type)
     blobstore.put_blob(key, raw, content_type or "application/x-protobuf")
     ingest_otlp_blob.delay(project_id, key, content_type or "")
+    # "Spans were accepted" is half of the deployment's most important signal: accepted spans +
+    # a stale ClickHouse = the worker is dead while every client still sees 202s.
+    stamp(LAST_ACCEPT_KEY)
     return batch_id
 
 

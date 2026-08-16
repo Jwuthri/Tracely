@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # CONCURRENCY too.
     celery_pool: str = "solo"
     celery_concurrency: int = 1
+    # The queue name the API produces onto and the worker consumes (celery_app's
+    # `task_default_queue`). Named here so the ops self-check measures the RIGHT list.
+    celery_queue: str = "ingestion"
+    # Where the deployment's own health alerts go (Slack incoming-webhook URL or any webhook
+    # endpoint). Blank = log only; the beat self-check still runs and still logs `selfcheck`.
+    ops_alert_webhook: str = ""
 
     # S3 / MinIO
     s3_endpoint_url: str = "http://localhost:9000"

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import task_postrun
 
 from tracely.config import settings
 
@@ -17,7 +18,7 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
-    task_default_queue="ingestion",
+    task_default_queue=settings.celery_queue,
     task_acks_late=True,
     worker_prefetch_multiplier=4,
     task_serializer="json",
@@ -30,15 +31,31 @@ celery_app.conf.update(
     # Bound task runtime so a hung task can't pin the (solo) worker forever.
     task_time_limit=30 * 60,  # hard kill at 30m
     task_soft_time_limit=25 * 60,  # SoftTimeLimitExceeded at 25m (lets a task clean up)
-    # Periodic schedule: drive the monitoring engine every 5 minutes. (Celery beat must be running
-    # to actually fire — `celery -A tracely beat`. In local docker we run it alongside the worker
-    # via `celery worker -B`.) Quiet by default; only fires when a monitor condition crosses its
-    # threshold + the dedup interval has elapsed.
+    # Periodic schedule. NOTHING here fires unless a beat scheduler is running: the local docker
+    # worker embeds one (`--beat` in docker-compose.yml), and prod must run exactly one beat
+    # process. Monitors stay quiet by default — they only fire when a condition crosses its
+    # threshold and the dedup interval has elapsed.
     beat_schedule={
         "tracely.evaluate_monitors-every-5-min": {
             "task": "tracely.evaluate_monitors",
             "schedule": crontab(minute="*/5"),
         },
+        # The deployment watching itself: queue depth, worker liveness, ingest freshness.
+        # Logs every tick (a heartbeat log-based alerting can watch) and pages when degraded.
+        "tracely.selfcheck-every-5-min": {
+            "task": "tracely.selfcheck",
+            "schedule": crontab(minute="*/5"),
+        },
     },
     timezone="UTC",
 )
+
+
+@task_postrun.connect
+def _stamp_worker_alive(**_: object) -> None:
+    """The worker's pulse: "a task finished just now". A deep queue is only an incident when
+    nothing is coming off it, and this is what tells those two apart (`domain/ops/selfcheck.py`).
+    Imported lazily — this module is imported by the API producer too."""
+    from tracely.services.selfcheck_service import LAST_TASK_KEY, stamp
+
+    stamp(LAST_TASK_KEY)

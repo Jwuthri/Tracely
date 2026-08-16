@@ -17,6 +17,11 @@ x-app-env: &app-env
   # to prefork / >=2 in the deploy env. Also forwarded to the worker command above.
   CELERY_POOL: ${CELERY_POOL:-solo}
   CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-1}
+  # The queue the API produces onto and the worker drains — the ops self-check measures its depth.
+  CELERY_QUEUE: ${CELERY_QUEUE:-ingestion}
+  # Where the beat self-check sends "this deployment is degraded" (Slack incoming webhook or any
+  # webhook URL). Blank = log only: it still runs and still logs a `selfcheck` heartbeat.
+  OPS_ALERT_WEBHOOK: ${OPS_ALERT_WEBHOOK:-}
   S3_ENDPOINT_URL: http://minio:9000
   S3_REGION: us-east-1
   S3_ACCESS_KEY_ID: tracely
@@ -227,7 +232,10 @@ services:
     # Pool + concurrency come from CELERY_POOL / CELERY_CONCURRENCY (defaults: solo / 1 for local dev,
     # since numba/UMAP/HDBSCAN in failure-intelligence are fork-fragile). Prod uses prefork with
     # concurrency >= 2 — set both in the prod env and recreate the worker.
-    command: ["sh", "-c", "celery -A tracely_workers.worker worker --pool=${CELERY_POOL:-solo} --concurrency=${CELERY_CONCURRENCY:-1} --loglevel=info"]
+    # `-B` embeds the beat scheduler in this worker — monitors and the ops self-check are
+    # beat-driven and simply never fired without it. Fine for a single local worker; in prod run
+    # exactly ONE beat process (see DEPLOY.md) or every worker re-fires the schedule.
+    command: ["sh", "-c", "celery -A tracely_workers.worker worker --pool=${CELERY_POOL:-solo} --concurrency=${CELERY_CONCURRENCY:-1} --beat --loglevel=info"]
     volumes:                       # editable install -> live source for fast iteration
       - ./backend:/app/backend
       - ./workers:/app/workers

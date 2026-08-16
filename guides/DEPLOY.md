@@ -209,6 +209,20 @@ Run **at least two worker replicas** so a single hang doesn't drop ingestion. `t
 + `visibility_timeout=3h` mean an unacked task is redelivered after 3 hours — enough headroom for
 the slowest cluster-rebuild without double-running fast ingest tasks.
 
+### Beat: exactly one, and not zero
+
+Monitors and the ops self-check are **beat-driven** — with no scheduler running they never fire,
+silently (this is how it shipped locally for a while: the compose worker had no `--beat`, so the
+monitoring engine had never once run). Local docker embeds it in the single worker. In prod run
+**one** dedicated scheduler, never `--beat` on every replica or each one re-fires the schedule:
+
+```bash
+celery -A tracely_workers.worker beat --loglevel=info    # its own 1-replica service
+```
+
+Confirm it took: `/health/queue` reports `beat_age_s` — a null or a growing number means nothing
+is scheduling.
+
 ---
 
 ## 4. Backups (the only P0 we can't automate)
@@ -248,6 +262,49 @@ healthcheck:
 ```
 
 A 503 means one of your dependencies is down; check the JSON body for which.
+
+---
+
+## 5b. The deployment watching itself
+
+`/health` answers "can the API serve reads". It says nothing about the failure mode that actually
+bites: **the worker dies and every client keeps getting 202s** while nothing lands in ClickHouse.
+Traffic looks perfect, data stops.
+
+`GET /health/queue` reports that shape — always **200**, because a backlog must make a human look,
+not make your orchestrator kill the API:
+
+```json
+{"degraded": true,
+ "problems": ["1,204 tasks queued and nothing has finished in 22m — the worker looks stuck"],
+ "queue_depth": 1200, "unacked": 4, "last_task_age_s": 1337, "last_trace_age_s": 4210, "beat_age_s": 12}
+```
+
+`unacked` matters as much as `queue_depth`: prefetched tasks leave the Redis list, so a buried
+worker shows `queue_depth: 0` — the depth is the **sum**.
+
+The same check runs on beat every 5 minutes. It logs a structured `selfcheck` line every tick (a
+heartbeat for log-based alerting) and, when `OPS_ALERT_WEBHOOK` is set, pushes to Slack or any
+webhook — at most **once an hour** while degraded, because an alert that fires every 5 minutes gets
+muted and then it may as well not exist.
+
+```dotenv
+OPS_ALERT_WEBHOOK=https://hooks.slack.com/services/…   # blank = log only
+```
+
+What it pages on (thresholds in `backend/tracely/domain/ops/selfcheck.py`, all deliberately
+generous — a page nobody trusts is worse than no page):
+
+| Signal | Meaning |
+|---|---|
+| deep queue **and** no task finished in 15m | worker stuck — the classic |
+| deep queue, worker still finishing | draining but deep; capacity warning, not an outage |
+| spans accepted but nothing stored in 1h | ingest path broken behind a green API |
+| `beat_age_s` > 3h | scheduler dead — monitors and this check itself stopped |
+
+**Sentry** (optional, `SENTRY_DSN`) now initializes in the worker as well as the API — set it on
+both services. Exceptions inside tasks used to vanish into worker logs, which is exactly where
+evaluation, clustering and gate runs break.
 
 ---
 

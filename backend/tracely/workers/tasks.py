@@ -246,6 +246,22 @@ def evaluate_monitors_task(self) -> dict:
         return {"monitors": 0, "fired": 0, "error": str(exc)}
 
 
+@celery_app.task(name="tracely.selfcheck", bind=True, max_retries=0)
+def selfcheck_task(self) -> dict:
+    """Watch our own deployment (beat, every 5 min). Tracely's failure modes are quiet — a dead
+    worker still 202s every ingest — so this is the thing that turns 'the numbers stopped moving'
+    into a page. Best-effort by construction: it must never itself be the reason a beat tick dies."""
+    import asyncio
+
+    from tracely.services.selfcheck_service import run
+
+    try:
+        return asyncio.run(run())
+    except Exception as exc:  # noqa: BLE001
+        log.warning("selfcheck_failed", error=str(exc))
+        return {"degraded": None, "error": str(exc)}
+
+
 @celery_app.task(name="tracely.run_scenario", bind=True, max_retries=0)
 def run_scenario_task(
     self, project_id: str, scenario_id: str, conversation_id: str, env: str = "ci"
