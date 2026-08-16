@@ -29,13 +29,19 @@ const RULER_H = 32;
 const BASE_PX_PER_MS = 0.3; // track px per ms of *active* time at zoom 1 (short traces fill the pane; longer ones scroll)
 const GAP_THRESHOLD_MS = 1000; // idle longer than this (e.g. think-time between turns) is collapsed
 
+// span_id is only unique per TRACE. A conversation timeline concatenates every turn's spans, so
+// ids like 0000000000000002 repeat across turns — qualify them with the run (== trace id at ingest,
+// see span_mapper) to get an identity that survives the concatenation.
+const uid = (s: SpanOut) => `${s.agent_run_id}/${s.span_id}`;
+const parentUid = (s: SpanOut) => `${s.agent_run_id}/${s.parent_span_id}`;
+
 function depthOf(span: SpanOut, byId: Map<string, SpanOut>): number {
   let d = 0;
   let cur = span;
   const seen = new Set<string>();
-  while (cur.parent_span_id && byId.has(cur.parent_span_id) && !seen.has(cur.span_id)) {
-    seen.add(cur.span_id);
-    cur = byId.get(cur.parent_span_id)!;
+  while (cur.parent_span_id && byId.has(parentUid(cur)) && !seen.has(uid(cur))) {
+    seen.add(uid(cur));
+    cur = byId.get(parentUid(cur))!;
     d++;
     if (d > 100) break;
   }
@@ -112,15 +118,7 @@ function buildTimeline(spans: SpanOut[]): {
 
 const TICKS = [0, 0.25, 0.5, 0.75, 1];
 
-export function Waterfall({
-  spans,
-  sel: controlledSel,
-  onSel,
-}: {
-  spans: SpanOut[];
-  sel?: string | null;
-  onSel?: (id: string) => void;
-}) {
+export function Waterfall({ spans }: { spans: SpanOut[] }) {
   // Defer the initial selection to after the visibility filter has run — otherwise the default
   // would be the first raw span, which may be hidden.
   const [internalSel, setInternalSel] = useState<string | null>(null);
@@ -136,7 +134,7 @@ export function Waterfall({
     () => [...visibleSpans].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()),
     [visibleSpans],
   );
-  const byId = useMemo(() => new Map(ordered.map((s) => [s.span_id, s])), [ordered]);
+  const byId = useMemo(() => new Map(ordered.map((s) => [uid(s), s])), [ordered]);
   const tl = useMemo(() => buildTimeline(ordered), [ordered]);
 
   // Resizable split between the timeline (left) and the dense span-detail panel (right). Defaults to
@@ -171,12 +169,11 @@ export function Waterfall({
     document.body.style.cursor = "col-resize";
   };
 
-  const sel = controlledSel !== undefined ? controlledSel : (internalSel ?? ordered[0]?.span_id ?? null);
-  const setSel = onSel ?? setInternalSel;
+  const sel = internalSel ?? (ordered[0] ? uid(ordered[0]) : null);
   if (ordered.length === 0) {
     return <div className="card p-8 text-center text-[13px] text-fg-faint">No spans in this trace.</div>;
   }
-  const selected = ordered.find((s) => s.span_id === sel) ?? null;
+  const selected = ordered.find((s) => uid(s) === sel) ?? null;
   const { totalDisplay, toDisplay, breaks, activeMs } = tl;
   const trackPx = Math.round(totalDisplay * BASE_PX_PER_MS * zoom);
   const clampZoom = (z: number) => Math.min(8, Math.max(0.1, z));
@@ -206,13 +203,14 @@ export function Waterfall({
           {/* fixed label column (never scrolls horizontally) */}
           <div className="shrink-0 border-r border-line bg-ink-900/30" style={{ width: LABEL_W }}>
             <div style={{ height: RULER_H }} className="border-b border-line" />
-            {ordered.map((s, i) => {
+            {ordered.map((s) => {
               const err = s.level === "ERROR";
-              const active = s.span_id === sel;
+              const u = uid(s);
+              const active = u === sel;
               return (
                 <button
-                  key={`${i}:${s.span_id}`}
-                  onClick={() => setSel(s.span_id)}
+                  key={u}
+                  onClick={() => setInternalSel(u)}
                   style={{ height: ROW_H, paddingLeft: 12 + depthOf(s, byId) * 14 }}
                   className={clsx(
                     "flex w-full items-center gap-2 border-b border-line/50 pr-3 text-left transition-colors last:border-0",
@@ -261,7 +259,7 @@ export function Waterfall({
               ))}
 
               {/* bars */}
-              {ordered.map((s, i) => {
+              {ordered.map((s) => {
                 const start = new Date(s.start_time).getTime();
                 const end = new Date(s.end_time ?? s.start_time).getTime();
                 const left = (toDisplay(start) / totalDisplay) * 100;
@@ -269,11 +267,12 @@ export function Waterfall({
                 const endPct = left + width;
                 const labelInside = endPct > 85;
                 const err = s.level === "ERROR";
-                const active = s.span_id === sel;
+                const u = uid(s);
+                const active = u === sel;
                 return (
                   <button
-                    key={`${i}:${s.span_id}`}
-                    onClick={() => setSel(s.span_id)}
+                    key={u}
+                    onClick={() => setInternalSel(u)}
                     style={{ height: ROW_H }}
                     className={clsx(
                       "relative block w-full border-b border-line/50 transition-colors last:border-0",
