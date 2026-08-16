@@ -1205,7 +1205,33 @@ def fixtures(bundle: dict | None) -> Iterator[None]:
     try:
         yield
     finally:
+        _warn_unconsumed(_fixtures.get())
         _fixtures.reset(token)
+
+
+def _unconsumed(store: dict | None) -> list[str]:
+    """`kind:key ×n` for every recorded call the replayed run never asked for."""
+    left = []
+    for kind, by_key in (store or {}).items():
+        for key, queue in (by_key or {}).items():
+            if queue:
+                left.append(f"{kind}:{key} ×{len(queue)}")
+    return sorted(left)
+
+
+def _warn_unconsumed(store: dict | None) -> None:
+    """A replay that leaves recorded calls on the table did NOT reproduce the recorded run: the
+    agent took a different path, or — the quiet one — it called a provider Tracely cannot patch
+    and went to the network instead. Both make the gate's verdict mean less than it appears to,
+    so say so out loud rather than letting a live call pass for a hermetic one."""
+    left = _unconsumed(store)
+    if left:
+        log.warning(
+            "hermetic replay left %d recorded call(s) unused (%s) — the run took a different "
+            "path, or a provider went live because Tracely could not patch it",
+            len(left),
+            ", ".join(left[:6]) + (" …" if len(left) > 6 else ""),
+        )
 
 
 def _pop_fixture(kind: str, key: str, args: Any = None) -> dict | None:
@@ -1404,6 +1430,29 @@ def _reconstruct_anthropic(output: Any) -> Any:
     return SimpleNamespace(content=blocks, stop_reason=msg.get("stop_reason"), usage=None)
 
 
+def _reconstruct_google(output: Any) -> Any:
+    """Rebuild a duck-typed google-genai GenerateContentResponse — enough for the dominant access
+    patterns (`resp.text`, `resp.function_calls`, and walking `candidates[0].content.parts`)."""
+    content, raw_tcs = _extract_completion(output)
+    parts: list[Any] = []
+    if content:
+        parts.append(SimpleNamespace(text=content, function_call=None))
+    calls = []
+    for tc in raw_tcs:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function") or {}
+        call = SimpleNamespace(name=fn.get("name", ""), args=_maybe_json(fn.get("arguments")))
+        calls.append(call)
+        parts.append(SimpleNamespace(text=None, function_call=call))
+    candidate = SimpleNamespace(
+        content=SimpleNamespace(parts=parts, role="model"), finish_reason="STOP"
+    )
+    return SimpleNamespace(
+        text=content or "", candidates=[candidate], function_calls=calls or None, usage_metadata=None
+    )
+
+
 def _patch_class_method(
     cls: Any,
     name: str,
@@ -1487,7 +1536,104 @@ def _patch_anthropic_replay() -> None:
         )
 
 
-_REPLAY_PROVIDERS: list[Callable[[], None]] = [_patch_openai_replay, _patch_anthropic_replay]
+def _patch_google_replay() -> None:
+    from google.genai.models import AsyncModels, Models
+
+    for cls in (Models, AsyncModels):
+        _patch_class_method(
+            cls,
+            "generate_content",
+            model_key="model",
+            input_extractor=lambda kw: kw.get("contents"),
+            reconstruct=_reconstruct_google,
+        )
+
+
+def _patch_mistral_replay() -> None:
+    # mistralai v1 responses are OpenAI-shaped (`choices[0].message.content`), so the OpenAI
+    # reconstruction serves them as-is.
+    from mistralai.chat import Chat
+
+    for method in ("complete", "complete_async"):
+        _patch_class_method(
+            Chat,
+            method,
+            model_key="model",
+            input_extractor=lambda kw: kw.get("messages"),
+            reconstruct=_reconstruct_openai_chat,
+        )
+
+
+def _patch_module_function(
+    module: Any,
+    name: str,
+    *,
+    model_key: str,
+    input_extractor: Callable[[dict], Any],
+    reconstruct: Callable[[Any], Any],
+) -> None:
+    """Same contract as `_patch_class_method`, for a provider whose entry point is a module-level
+    function (litellm) rather than a bound method — so there is no `self` to pass through."""
+    original = getattr(module, name)
+    if getattr(original, "_tracely_replay", False):
+        return
+
+    def _serve(model: str, kwargs: dict) -> tuple[bool, Any]:
+        store = _fixtures.get()
+        if not store:
+            return False, None
+        inp = input_extractor(kwargs)
+        entry = _pop_fixture("llm", model, inp) or _pop_fixture_any("llm")
+        if entry is None:
+            return False, None
+        with llm(model or "") as span:
+            if inp is not None:
+                set_io(span, input=inp)
+            span.set_attribute("tracely.replay.fixture", True)
+            if entry.get("error"):
+                error(span, str(entry["error"]))
+                raise ToolError(str(entry["error"]))
+            out = entry.get("output")
+            set_io(span, output=out)
+        return True, reconstruct(out)
+
+    if inspect.iscoroutinefunction(inspect.unwrap(original)):
+
+        @functools.wraps(original)
+        async def traced(*a: Any, **k: Any) -> Any:
+            handled, result = _serve(k.get(model_key, "") or (a[0] if a else ""), k)
+            return result if handled else await original(*a, **k)
+    else:
+
+        @functools.wraps(original)
+        def traced(*a: Any, **k: Any) -> Any:
+            handled, result = _serve(k.get(model_key, "") or (a[0] if a else ""), k)
+            return result if handled else original(*a, **k)
+
+    traced._tracely_replay = True  # type: ignore[attr-defined]
+    setattr(module, name, traced)
+
+
+def _patch_litellm_replay() -> None:
+    import litellm
+
+    for name in ("completion", "acompletion"):
+        _patch_module_function(
+            litellm,
+            name,
+            model_key="model",
+            input_extractor=lambda kw: kw.get("messages"),
+            reconstruct=_reconstruct_openai_chat,
+        )
+
+
+_REPLAY_PROVIDERS: list[Callable[[], None]] = [
+    _patch_openai_replay,
+    _patch_anthropic_replay,
+    _patch_google_replay,
+    _patch_mistral_replay,
+    _patch_litellm_replay,
+]
 
 
 def _install_replay_patches() -> None:

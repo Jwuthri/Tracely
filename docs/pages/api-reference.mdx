@@ -271,7 +271,7 @@ drop-ins, manual spans). Highlights:
 | `examples/dropin_openai.py` · `dropin_anthropic.py` | non-patching `wrap_openai` / `wrap_anthropic` drop-ins. |
 | `examples/manual_spans.py` | the manual escape-hatch API as a full agent (no provider/key needed). |
 | `examples/weather_agent.py` / `weather_agent_cli.py` | a real agent wired with `call_tool`/`call_llm` for `tracely replay --entrypoint` / `--cmd`. |
-| `examples/seed_conversations.py` | rich demo data using **every** SDK helper — single/multi-turn, multi-agent + handoffs, RAG (guardrail→embed→retrieve→chain), thinking, multimodal, structured output, multi-model. `make seed-demo`. |
+| `examples/seed_conversations.py` | rich demo data using **every** SDK helper — single/multi-turn, multi-agent fan-out (1 question → 5 specialists, named skills, sub-agents, declared agent catalogs, shared state), RAG (guardrail→embed→retrieve→chain), thinking, multimodal, structured output, multi-model. `make seed-demo`. |
 | `examples/seed_multiturn.py` | one multi-turn conversation (manual API, no key) — the showcase for the **rolling summary** + **declared agents** (`@LIST_AGENT`). |
 | `examples/seed_regression.py` | promote a failing trace → run red→green CI gates (fills Cases + Gates). `make seed-regression`. |
 | `examples/seed_multicall.py` / `seed_handler.py` | repeated-call + handler examples for fixture replay. |

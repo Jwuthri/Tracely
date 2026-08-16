@@ -196,6 +196,9 @@ The message-level Content cell renders the text plus an image thumbnail and a fi
 
 ## Putting it together
 
-See the eleven scenarios in `seed_conversations.py` — single & multi-turn, multi-agent + handoffs,
-RAG, multimodal, structured output, tool error + recovery, guardrail block, hallucination, silent
-tool, and a deep-research run. Run it with `make seed-demo`.
+See the fourteen scenarios in `seed_conversations.py` — single & multi-turn, multi-agent +
+handoffs, RAG, multimodal, structured output, tool error + recovery, guardrail block,
+hallucination, silent tool, and a deep-research run. Three of them are the multi-agent shapes:
+one question fanned out to five specialists (each running a named skill, one delegating again to
+a sub-agent of its own), a coding swarm that goes red→green, and a routing miss where every
+specialist is right and the routing decision is wrong. Run it with `make seed-demo`.

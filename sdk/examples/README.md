@@ -75,7 +75,7 @@ The big labs now ship their own agent harnesses; each has an OpenInference instr
 
 | File | Shows |
 |---|---|
-| [`seed_conversations.py`](seed_conversations.py) | rich manual-API demo data — every observation type (`make seed-demo`) |
+| [`seed_conversations.py`](seed_conversations.py) | rich manual-API demo data — every observation type, plus the multi-agent shapes: a 5-specialist fan-out with skills + sub-agents, a coding swarm, a routing miss (`make seed-demo`) |
 | [`seed_multiturn.py`](seed_multiturn.py) | one multi-turn conversation via the manual API (no key) — the showcase for the **rolling summary** + **declared agents** (`tracely.trace(agents=...)`) |
 | [`seed_regression.py`](seed_regression.py) | promote a failing trace → red→green CI gates (`make seed-regression`) |
 | [`seed_multicall.py`](seed_multicall.py) / [`seed_handler.py`](seed_handler.py) | repeated-call + handler fixtures for hermetic replay |
