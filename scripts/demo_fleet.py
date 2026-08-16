@@ -19,17 +19,23 @@ AGENTS = [
         "name": "concierge",
         "description": "Front-of-house orchestrator: understands the guest, routes work to the "
         "right specialist, owns the final reply.",
-        "tools": [{"name": "send_reply"}],
+        "tools": [{"name": "send_reply", "description": "Send the final answer back to the guest."}],
     },
     {
         "name": "billing",
         "description": "Refunds, invoices and card operations. Never guesses an amount.",
-        "tools": [{"name": "fetch_invoice"}, {"name": "issue_refund"}],
+        "tools": [
+            {"name": "fetch_invoice", "description": "Pull the invoice for an order id, with line items and totals."},
+            {"name": "issue_refund", "description": "Refund an amount to the original payment method. Idempotent per order."},
+        ],
     },
     {
         "name": "researcher",
         "description": "Digs through the knowledge base and warranty policies.",
-        "tools": [{"name": "lookup_kb"}],
+        "tools": [
+            {"name": "lookup_kb", "description": "Search the warranty and policy knowledge base."},
+            {"name": "escalate_to_human", "description": "Hand the case to a human specialist. Never used on happy paths."},
+        ],
     },
 ]
 

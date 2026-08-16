@@ -3,17 +3,17 @@
 import clsx from "clsx";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { layoutOffice, librarySkills, narrate, poseAt, wallTools, type Pose } from "./office";
+import { layoutOffice, librarySkills, narrate, poseAt, stationInfo, wallTools, type DeclaredTool, type Pose, type StationInfo } from "./office";
 import { Bookshelf, CoffeeMachine, Desk, OfficeDoor, PixelPerson, Plant, ToolsRack } from "./sprites";
-import { fmtMs, OFFICE_PACING, orderActors, toPlayEvents, type PlayEvent, type ReplayActor, type ReplayEvent } from "./timeline";
+import { fmtMs, OFFICE_PACING, orderActors, realMsAt, toPlayEvents, type PlayEvent, type ReplayActor, type ReplayEvent } from "./timeline";
 import { usePlayClock } from "./useClock";
 
 /* The Fleet office: the conversation acted out as a scene. Every character is a real agent
    from the trace; delegations are walks with speech bubbles, thinking is a thought cloud,
    tools happen at the tool wall, skills at the library. */
 
-type Declared = { name: string; description: string; tools: string[] };
-type Payload = { actors: ReplayActor[]; events: ReplayEvent[]; declared: Declared[] };
+type Declared = { name: string; description: string; tools: DeclaredTool[] };
+type Payload = { actors: ReplayActor[]; events: ReplayEvent[]; declared: Declared[]; durationMs: number };
 
 const SPEEDS = [0.5, 1, 2, 4];
 
@@ -26,7 +26,11 @@ const hueOf = (id: string) => {
 export function OfficeStage({ threadId }: { threadId: string }) {
   const [data, setData] = useState<Payload | null>(null);
   const [failed, setFailed] = useState(false);
-  const [selected, setSelected] = useState<string>("");
+  // one selection for the whole office: a person at a desk, a book on the shelf, a tool on
+  // the wall — they all open the same side panel.
+  const [selected, setSelected] = useState<{ k: "agent" | "skill" | "tool"; id: string } | null>(null);
+  const pick = (k: "agent" | "skill" | "tool", id: string) =>
+    setSelected((cur) => (cur?.k === k && cur.id === id ? null : { k, id }));
 
   useEffect(() => {
     let alive = true;
@@ -35,12 +39,12 @@ export function OfficeStage({ threadId }: { threadId: string }) {
         if (!r.ok) throw new Error(String(r.status));
         return r.json();
       })
-      .then((d) => alive && setData({ actors: d.actors ?? [], events: d.events ?? [], declared: d.declared ?? [] }))
+      .then((d) => alive && setData({ actors: d.actors ?? [], events: d.events ?? [], declared: d.declared ?? [], durationMs: d.duration_ms ?? 0 }))
       .catch(() => {
         // a backend failure is NOT an empty office — say so instead of lying
         if (alive) {
           setFailed(true);
-          setData({ actors: [], events: [], declared: [] });
+          setData({ actors: [], events: [], declared: [], durationMs: 0 });
         }
       });
     return () => { alive = false; };
@@ -48,6 +52,7 @@ export function OfficeStage({ threadId }: { threadId: string }) {
 
   const { events, total } = useMemo(() => toPlayEvents(data?.events ?? [], OFFICE_PACING), [data]);
   const actors = useMemo(() => orderActors(data?.actors ?? []), [data]);
+  const durationMs = data?.durationMs ?? 0;
   const layout = useMemo(() => layoutOffice(actors), [actors]);
   const skills = useMemo(() => librarySkills(events), [events]);
   const declaredTools = useMemo(
@@ -95,7 +100,10 @@ export function OfficeStage({ threadId }: { threadId: string }) {
     );
   }
 
-  const sel = actors.find((a) => a.id === selected);
+  const sel = selected?.k === "agent" ? actors.find((a) => a.id === selected.id) : undefined;
+  const thing = selected && selected.k !== "agent"
+    ? stationInfo(selected.id, selected.k, events, declaredTools)
+    : null;
 
   return (
     <div className="space-y-4">
@@ -117,7 +125,10 @@ export function OfficeStage({ threadId }: { threadId: string }) {
         <Link href={`/sessions/${encodeURIComponent(threadId)}/replay`} className="btn-ghost">
           ⧉ timeline view
         </Link>
-        <span className="ml-auto font-mono text-[11px] text-fg-faint">{fmtMs(t)} / {fmtMs(total)}</span>
+        <span className="ml-auto font-mono text-[11px] text-fg-faint"
+          title="Real trace time — the play clock squeezes pauses and long calls">
+          {fmtMs(realMsAt(events, t))} / {fmtMs(durationMs)}
+        </span>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1fr_290px]">
@@ -141,8 +152,12 @@ export function OfficeStage({ threadId }: { threadId: string }) {
           <div className="fleet-floor absolute inset-x-0 bottom-0 top-[17%]" />
 
           {/* fixed furniture */}
-          <div className="absolute left-[2%] top-[30%] w-[10%]"><Bookshelf skills={skills} active={activeSkill} /></div>
-          <div className="absolute right-[2%] top-[30%] w-[10%]"><ToolsRack tools={tools} active={activeTool} /></div>
+          <div className="absolute left-[2%] top-[30%] w-[10%]">
+            <Bookshelf skills={skills} active={activeSkill} onPick={(n) => pick("skill", n)} />
+          </div>
+          <div className="absolute right-[2%] top-[30%] w-[10%]">
+            <ToolsRack tools={tools} active={activeTool} onPick={(n) => pick("tool", n)} />
+          </div>
           <div className="absolute bottom-[4%] left-[3%] w-[5.5%]"><CoffeeMachine /></div>
           <div className="absolute bottom-[6%] right-[8%] w-[3.5%]"><Plant /></div>
           <div className="absolute left-[30%] top-[20%] w-[3.5%]"><Plant /></div>
@@ -167,8 +182,8 @@ export function OfficeStage({ threadId }: { threadId: string }) {
             if (!p) return null;
             return (
               <Walker key={a.id} actor={a} pose={p} slot={i}
-                selected={selected === a.id}
-                onClick={() => setSelected(selected === a.id ? "" : a.id)} />
+                selected={selected?.k === "agent" && selected.id === a.id}
+                onClick={() => pick("agent", a.id)} />
             );
           })}
 
@@ -180,9 +195,11 @@ export function OfficeStage({ threadId }: { threadId: string }) {
           {sel ? (
             <InspectCard actor={sel} pose={poses.get(sel.id) ?? null} events={events}
               declared={data.declared.find((d) => d.name.toLowerCase() === sel.name.toLowerCase())}
-              onClose={() => setSelected("")} />
+              onClose={() => setSelected(null)} />
+          ) : thing ? (
+            <StationCard info={thing} nameOf={nameOf} onClose={() => setSelected(null)} />
           ) : (
-            <Roster actors={actors} poses={poses} onPick={setSelected} declared={data.declared} />
+            <Roster actors={actors} poses={poses} onPick={(id) => pick("agent", id)} declared={data.declared} />
           )}
         </aside>
       </div>
@@ -322,7 +339,7 @@ function Roster({ actors, poses, onPick, declared }: {
         })}
         {declared.length > 0 && (
           <p className="px-2 pt-2 font-mono text-[9.5px] leading-relaxed text-fg-faint">
-            agent definitions declared via the SDK — click anyone for their card.
+            click anyone for their card — or a book on the library / a tool on the wall.
           </p>
         )}
       </div>
@@ -367,7 +384,7 @@ function InspectCard({ actor, pose, events, declared, onClose }: {
           <div className="mt-3">
             <p className="mb-1 font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">tools</p>
             <div className="flex flex-wrap gap-1">
-              {[...new Set([...(declared?.tools ?? []), ...toolCounts.keys()])].map((tl) => (
+              {[...new Set([...(declared?.tools ?? []).map((d) => d.name), ...toolCounts.keys()])].map((tl) => (
                 <span key={tl} className={clsx("rounded border px-1.5 py-0.5 font-mono text-[9.5px]",
                   toolCounts.has(tl) ? "border-t_tool/40 bg-t_tool/10 text-t_tool" : "border-line text-fg-faint")}>
                   {tl}{toolCounts.has(tl) ? ` ×${toolCounts.get(tl)}` : ""}
@@ -376,6 +393,54 @@ function InspectCard({ actor, pose, events, declared, onClose }: {
             </div>
           </div>
         ) : null}
+      </div>
+    </>
+  );
+}
+
+/* ── side panel: a thing instead of a person (a book, a tool) ── */
+function StationCard({ info, nameOf, onClose }: {
+  info: StationInfo; nameOf: (id: string) => string; onClose: () => void;
+}) {
+  const skill = info.kind === "skill";
+  return (
+    <>
+      <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+        <span className="font-mono text-[11px] uppercase tracking-wider text-fg-muted">
+          {skill ? "library card" : "tool sheet"}
+        </span>
+        <button onClick={onClose} className="text-[12px] text-fg-faint hover:text-fg">✕</button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className={clsx("mx-auto grid h-14 w-14 place-items-center rounded-lg border text-[22px]",
+          skill ? "border-t_retriever/40 bg-t_retriever/10 text-t_retriever" : "border-t_tool/40 bg-t_tool/10 text-t_tool")}>
+          {skill ? "◈" : "⚙"}
+        </div>
+        <p className="mt-2 break-words text-center font-mono text-[13.5px] font-bold">{info.name}</p>
+        <p className="text-center font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">
+          {skill ? "skill · read at the library" : "tool · run at the wall"}
+        </p>
+        <p className="mt-3 rounded-lg border border-line-soft bg-ink-800/60 p-2.5 text-[11.5px] leading-relaxed text-fg-muted"
+          title={info.description}>
+          {info.description
+            ? <span className="line-clamp-4">{info.description}</span>
+            : <span className="text-fg-faint">no description declared for this {info.kind}.</span>}
+        </p>
+        <dl className="mt-3 space-y-1.5 font-mono text-[10.5px]">
+          <Row k="runs" v={info.runs ? `${info.runs}×` : "never in this conversation"}
+            accent={info.runs ? undefined : "text-fg-faint"} />
+          <Row k="used by" v={info.by.map(nameOf).join(", ") || "—"} />
+          {info.failures > 0 && <Row k="failures" v={String(info.failures)} accent="text-fail" />}
+        </dl>
+        {info.lastResult && info.lastResult !== info.description && (
+          <div className="mt-3">
+            <p className="mb-1 font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">last result</p>
+            <p className="line-clamp-3 rounded-lg border border-line-soft bg-ink-800/60 p-2.5 font-mono text-[10.5px] leading-relaxed text-fg-muted"
+              title={info.lastResult}>
+              {info.lastResult}
+            </p>
+          </div>
+        )}
       </div>
     </>
   );

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   activeAt, currentByActor, findSpan, fmtMs, isContainer, kindStyle, onStage, orderActors,
-  payloadText, toPlayEvents,
+  payloadText, realMsAt, toPlayEvents,
   type PlayEvent, type ReplayActor, type ReplayEvent, type SpanDetail,
 } from "./timeline";
 
@@ -23,7 +23,7 @@ function FleetLink({ threadId }: { threadId: string }) {
 }
 
 export function ConversationStage({ threadId }: { threadId: string }) {
-  const [data, setData] = useState<{ actors: ReplayActor[]; events: ReplayEvent[] } | null>(null);
+  const [data, setData] = useState<{ actors: ReplayActor[]; events: ReplayEvent[]; durationMs: number } | null>(null);
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
@@ -34,8 +34,8 @@ export function ConversationStage({ threadId }: { threadId: string }) {
     let alive = true;
     fetch(`/api/session-replay?thread=${encodeURIComponent(threadId)}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => alive && setData({ actors: d.actors ?? [], events: d.events ?? [] }))
-      .catch(() => alive && setData({ actors: [], events: [] }));
+      .then((d) => alive && setData({ actors: d.actors ?? [], events: d.events ?? [], durationMs: d.duration_ms ?? 0 }))
+      .catch(() => alive && setData({ actors: [], events: [], durationMs: 0 }));
     return () => { alive = false; };
   }, [threadId]);
 
@@ -44,6 +44,7 @@ export function ConversationStage({ threadId }: { threadId: string }) {
     [data],
   );
   const actors = useMemo(() => orderActors(data?.actors ?? []), [data]);
+  const durationMs = data?.durationMs ?? 0;
 
   useEffect(() => {
     if (!playing || !total) return;
@@ -135,7 +136,7 @@ export function ConversationStage({ threadId }: { threadId: string }) {
         </div>
         <FleetLink threadId={threadId} />
         <span className="ml-auto font-mono text-[11px] text-fg-faint">
-          {fmtMs(t)} / {fmtMs(total)} · {played.length}/{events.length} steps
+          {fmtMs(realMsAt(events, t))} / {fmtMs(durationMs)} · {played.length}/{events.length} steps
         </span>
       </div>
 

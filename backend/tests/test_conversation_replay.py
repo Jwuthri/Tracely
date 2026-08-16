@@ -263,14 +263,20 @@ def test_containers_never_get_inferred_delegations():
     assert wrapper["delegate_to"] == ""
 
 
-def test_declared_tool_names_tolerates_junk():
-    from tracely.api.routers.sessions import _declared_tool_names
+def test_declared_tools_tolerates_junk():
+    from tracely.api.routers.sessions import _declared_tools
 
-    assert _declared_tool_names({"tools": 42}) == []
-    assert _declared_tool_names({"tools": "lookup"}) == []
-    assert _declared_tool_names({"tools": True}) == []
-    assert _declared_tool_names({"tools": {"a": {}, "b": {}}}) == ["a", "b"]
-    assert _declared_tool_names({"tools": [{"name": "x"}, "y"]}) == ["x", "y"]
+    assert _declared_tools({"tools": 42}) == []
+    assert _declared_tools({"tools": "lookup"}) == []
+    assert _declared_tools({"tools": True}) == []
+    assert _declared_tools({"tools": {"a": {}, "b": {}}}) == [
+        {"name": "a", "description": ""},
+        {"name": "b", "description": ""},
+    ]
+    assert _declared_tools({"tools": [{"name": "x", "description": "does x"}, "y"]}) == [
+        {"name": "x", "description": "does x"},
+        {"name": "y", "description": ""},
+    ]
 
 
 def test_agent_envelope_never_swallows_the_team():

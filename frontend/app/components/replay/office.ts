@@ -202,14 +202,59 @@ export function librarySkills(events: PlayEvent[]): string[] {
  *  catalog that never ran (dim) — so a big catalog can't evict the tools that did the work. */
 export function wallTools(
   events: PlayEvent[],
-  declared: string[],
+  declared: DeclaredTool[],
 ): { name: string; used: boolean }[] {
   const used = [...new Set(events.filter((e) => e.station === "computer").map((e) => e.name))];
   const usedSet = new Set(used);
+  const seen = new Set(used);
   return [
     ...used.map((name) => ({ name, used: true })),
-    ...[...new Set(declared)].filter((n) => !usedSet.has(n)).map((name) => ({ name, used: false })),
+    ...declared
+      .filter((d) => !usedSet.has(d.name) && !seen.has(d.name) && seen.add(d.name))
+      .map((d) => ({ name: d.name, used: false })),
   ];
+}
+
+/** A tool as the caller declared it in the agent catalog. */
+export type DeclaredTool = { name: string; description: string };
+
+/** Everything the side panel shows for one shelf item — a book at the library, a tool on the
+ *  wall. Same idea as the personnel file, for the things instead of the people. */
+export type StationInfo = {
+  name: string;
+  kind: "skill" | "tool";
+  description: string;
+  runs: number;
+  failures: number;
+  by: string[];          // actor ids that used it, first use first
+  lastResult: string;    // what it returned the last time it ran
+  used: boolean;
+};
+
+/** Build that card. `description` prefers what the catalog declares; a skill (never declared)
+ *  falls back to what it actually returned, so the card is never blank for something that ran. */
+export function stationInfo(
+  name: string,
+  kind: "skill" | "tool",
+  events: PlayEvent[],
+  declared: DeclaredTool[] = [],
+): StationInfo {
+  const station = kind === "skill" ? "library" : "computer";
+  const runs = events.filter((e) => e.name === name && e.station === station);
+  const by: string[] = [];
+  for (const e of runs) if (!by.includes(e.actor)) by.push(e.actor);
+  const lastResult = [...runs].reverse().find((e) => e.detail)?.detail ?? "";
+  const declaredDesc = declared.find((d) => d.name === name)?.description ?? "";
+  return {
+    name,
+    kind,
+    description: declaredDesc || lastResult,
+    runs: runs.length,
+    failures: runs.filter((e) => e.status === "error").length,
+    by,
+    lastResult,
+    used: runs.length > 0,
+  };
 }
 
 /** The narration line for the LED sign: the latest started event, described. */

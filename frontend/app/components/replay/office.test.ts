@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { layoutOffice, librarySkills, narrate, poseAt, wallTools } from "./office";
+import { layoutOffice, librarySkills, narrate, poseAt, stationInfo, wallTools } from "./office";
 import { toPlayEvents, type ReplayActor, type ReplayEvent } from "./timeline";
 
 const actor = (id: string, parent = "", depth = 0): ReplayActor =>
@@ -81,10 +81,30 @@ it("librarySkills and wallTools collect the right furniture", () => {
   expect(librarySkills(script)).toEqual(["refund-flow", "lookup_kb"]);
   // executed tools come first (lit); declared-but-never-run follow (dim) — a big catalog
   // can never evict the tools that actually ran
-  expect(wallTools(script, ["send_reply", "charge_card"])).toEqual([
+  const declared = [{ name: "send_reply", description: "reply to the guest" }, { name: "charge_card", description: "" }];
+  expect(wallTools(script, declared)).toEqual([
     { name: "charge_card", used: true },
     { name: "send_reply", used: false },
   ]);
+});
+
+it("stationInfo builds the card for a book or a tool on the wall", () => {
+  const script = toPlayEvents([
+    ev(0, 100, "a", "skill", "refund-flow", { station: "library", detail: "step 1 → step 2" }),
+    ev(200, 100, "b", "tool", "charge_card", { station: "computer", status: "error" }),
+    ev(400, 100, "a", "tool", "charge_card", { station: "computer", detail: "{\"ok\":true}" }),
+  ]).events;
+  const declared = [{ name: "charge_card", description: "Charges the card on file." }];
+
+  const tool = stationInfo("charge_card", "tool", script, declared);
+  expect(tool).toMatchObject({ runs: 2, failures: 1, by: ["b", "a"], used: true });
+  expect(tool.description).toBe("Charges the card on file.");   // the catalog wins
+  expect(tool.lastResult).toBe('{"ok":true}');
+
+  // a skill is never in the tool catalog — it describes itself by what it returned
+  expect(stationInfo("refund-flow", "skill", script, declared).description).toBe("step 1 → step 2");
+  // a declared tool that never ran still has its card
+  expect(stationInfo("send_reply", "tool", script, declared)).toMatchObject({ runs: 0, used: false, by: [] });
 });
 
 it("narrate describes the current beat", () => {

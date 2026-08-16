@@ -60,8 +60,20 @@ jobs:
       - name: Test
         run: pnpm test
       # `next build` type-checks (tsc) + lints + compiles — the frontend's fast feedback gate.
+      # Retried: `next/font/google` downloads the three font families from fonts.gstatic.com at
+      # BUILD time, and a transient fetch failure there fails the whole build with a `next/font`
+      # error (Next's own 3 internal retries fire within a second, so they don't outlast a blip).
+      # That is a network flake, not a code failure. A real compile error fails all three attempts
+      # in seconds. If this starts firing often, self-host the woff2 files with `next/font/local`
+      # and the build stops touching the network at all.
       - name: Build
-        run: pnpm build
+        run: |
+          for i in 1 2 3; do
+            if pnpm build; then exit 0; fi
+            echo "::warning::next build failed (attempt $i/3) — retrying in 15s"
+            sleep 15
+          done
+          exit 1
         env:
           NEXT_PUBLIC_AUTH_MODE: dev
           NEXT_TELEMETRY_DISABLED: "1"

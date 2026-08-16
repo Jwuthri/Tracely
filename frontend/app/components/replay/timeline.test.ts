@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeAt, currentByActor, findSpan, isContainer, onStage, orderActors, payloadText, toPlayEvents, type ReplayActor, type ReplayEvent } from "./timeline";
+import { activeAt, currentByActor, findSpan, isContainer, onStage, orderActors, payloadText, toPlayEvents, type ReplayActor, type ReplayEvent, realMsAt } from "./timeline";
 
 const ev = (t: number, dur: number, actor: string, kind: string, name: string): ReplayEvent => ({
   t_ms: t, dur_ms: dur, actor, kind, name, status: "ok", model: "", detail: "",
@@ -82,5 +82,30 @@ describe("step detail helpers", () => {
     expect(payloadText("hello")).toBe("hello");
     expect(payloadText("{not json")).toBe("{not json");
     expect(payloadText(null)).toBe("");
+  });
+});
+
+describe("watching clock vs trace clock", () => {
+  it("clamps a long span so it cannot leave a dead tail", () => {
+    // a 9s model call overlapping a quick tool: the office must not stand still for 9s
+    const { events, total } = toPlayEvents([
+      ev(0, 9000, "a", "llm", "long-think"),
+      ev(100, 200, "b", "tool", "quick"),
+    ]);
+    expect(events[0].pdur).toBeLessThanOrEqual(1600);
+    const lastStart = Math.max(...events.map((e) => e.pt));
+    expect(total - lastStart).toBeLessThan(1700); // tail is bounded, not 9s
+  });
+
+  it("realMsAt maps the play head back onto REAL trace time", () => {
+    const { events } = toPlayEvents([
+      ev(0, 1000, "a", "llm", "first"),
+      ev(20000, 500, "a", "tool", "after-a-long-pause"),
+    ]);
+    expect(realMsAt(events, 0)).toBe(0);
+    // the 20s pause is squeezed on the play clock, but the readout still says 20s
+    const second = events[1];
+    expect(realMsAt(events, second.pt)).toBe(20000);
+    expect(realMsAt(events, second.pt + second.pdur)).toBe(20500);
   });
 });

@@ -77,7 +77,9 @@ export function Desk({ hue, on, name }: { hue: number; on: boolean; name: string
 }
 
 /** The skill library: one book spine per skill; the active one slides out and glows. */
-export function Bookshelf({ skills, active }: { skills: string[]; active: string }) {
+export function Bookshelf({ skills, active, onPick }: {
+  skills: string[]; active: string; onPick?: (name: string) => void;
+}) {
   const spineHue = (s: string) => {
     let h = 0;
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
@@ -87,7 +89,7 @@ export function Bookshelf({ skills, active }: { skills: string[]; active: string
   skills.slice(0, 12).forEach((s, i) => shelves[i % 3].push(s));
   return (
     <div className="flex flex-col items-center">
-      <svg viewBox="0 0 74 110" width="100%" style={crisp} aria-hidden>
+      <svg viewBox="0 0 74 110" width="100%" style={crisp} aria-hidden={onPick ? undefined : true}>
         <rect x="0" y="0" width="74" height="110" rx="2" fill="#4a2f18" />
         <rect x="4" y="4" width="66" height="102" fill="#2c1b0d" />
         {shelves.map((row, si) => (
@@ -96,16 +98,19 @@ export function Bookshelf({ skills, active }: { skills: string[]; active: string
             {row.map((s, bi) => {
               const isActive = s === active;
               return (
-                <rect
-                  key={s}
-                  x={8 + bi * 13}
-                  y={isActive ? 8 + si * 32 : 12 + si * 32}
-                  width="10"
-                  height="24"
-                  rx="1"
-                  fill={`hsl(${spineHue(s)} 55% ${isActive ? 62 : 45}%)`}
-                  className={isActive ? "fleet-book" : undefined}
-                />
+                <g key={s} role={onPick ? "button" : undefined} onClick={() => onPick?.(s)}
+                  className={onPick ? "cursor-pointer hover:brightness-150" : undefined}>
+                  <title>{s}</title>
+                  <rect
+                    x={8 + bi * 13}
+                    y={isActive ? 8 + si * 32 : 12 + si * 32}
+                    width="10"
+                    height="24"
+                    rx="1"
+                    fill={`hsl(${spineHue(s)} 55% ${isActive ? 62 : 45}%)`}
+                    className={isActive ? "fleet-book" : undefined}
+                  />
+                </g>
               );
             })}
           </g>
@@ -119,10 +124,12 @@ export function Bookshelf({ skills, active }: { skills: string[]; active: string
 /** The tool wall: a rack with one LED slot per tool. Running one lights it up; tools that
  *  ran keep a warm LED, declared-but-never-run ones stay visibly dark — the wall must not
  *  present the catalog as activity. */
-export function ToolsRack({ tools, active }: { tools: { name: string; used: boolean }[]; active: string }) {
+export function ToolsRack({ tools, active, onPick }: {
+  tools: { name: string; used: boolean }[]; active: string; onPick?: (name: string) => void;
+}) {
   return (
     <div className="flex flex-col items-center">
-      <svg viewBox="0 0 74 110" width="100%" style={crisp} aria-hidden>
+      <svg viewBox="0 0 74 110" width="100%" style={crisp} aria-hidden={onPick ? undefined : true}>
         <rect x="0" y="0" width="74" height="110" rx="2" fill="#1c2434" />
         <rect x="4" y="4" width="66" height="102" fill="#12192a" />
         {tools.slice(0, 8).map((t, i) => {
@@ -130,7 +137,10 @@ export function ToolsRack({ tools, active }: { tools: { name: string; used: bool
           const led = isActive ? "#34d399" : t.used ? "#1f6f52" : "#26314a";
           const label = isActive ? "#7df0ff" : t.used ? "#39435c" : "#232c42";
           return (
-            <g key={t.name} opacity={t.used || isActive ? 1 : 0.55}>
+            <g key={t.name} opacity={t.used || isActive ? 1 : 0.55}
+              role={onPick ? "button" : undefined} onClick={() => onPick?.(t.name)}
+              className={onPick ? "cursor-pointer hover:brightness-150" : undefined}>
+              <title>{t.name}</title>
               <rect x="8" y={9 + i * 12.5} width="58" height="9" rx="1.5" fill={isActive ? "#20304e" : "#182236"} />
               <circle cx="14" cy={13.5 + i * 12.5} r="2.6" fill={led} className={isActive ? "fleet-led" : undefined} />
               <rect x="20" y={11.5 + i * 12.5} width={Math.min(40, t.name.length * 3.4)} height="4" rx="1" fill={label} />

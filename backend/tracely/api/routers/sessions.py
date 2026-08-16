@@ -333,15 +333,25 @@ async def get_session_agents(thread_id: str, project_id: str = Depends(get_proje
     return {"thread_id": thread_id, "declared": declared, "observed": observed}
 
 
-def _declared_tool_names(agent: dict) -> list[str]:
-    """Tool NAMES from a free-form declared agent. `tools` may be a dict-of-tools (the
-    documented shape), a list, or any junk the config POST accepted — the catalog is
-    deliberately unvalidated, so a non-iterable here must degrade to [], never 500."""
+def _declared_tools(agent: dict) -> list[dict]:
+    """`{name, description}` per tool of a free-form declared agent. `tools` may be a
+    dict-of-tools (the documented shape), a list, or any junk the config POST accepted — the
+    catalog is deliberately unvalidated, so a non-iterable here must degrade to [], never 500.
+    The description is what the Fleet view's tool-wall card shows."""
     raw = agent.get("tools")
     if isinstance(raw, dict):
-        return [str(k) for k in raw]
+        return [
+            {"name": str(k), "description": str((v or {}).get("description", "") if isinstance(v, dict) else "")}
+            for k, v in raw.items()
+        ]
     if isinstance(raw, list):
-        return [str(t.get("name", "") if isinstance(t, dict) else t) for t in raw]
+        return [
+            {
+                "name": str(t.get("name", "") if isinstance(t, dict) else t),
+                "description": str(t.get("description", "")) if isinstance(t, dict) else "",
+            }
+            for t in raw
+        ]
     return []
 
 
@@ -372,7 +382,7 @@ async def get_session_replay(thread_id: str, project_id: str = Depends(get_proje
             {
                 "name": str(a.get("name") or ""),
                 "description": str(a.get("description") or ""),
-                "tools": _declared_tool_names(a),
+                "tools": _declared_tools(a),
             }
             for a in declared_raw
             if isinstance(a, dict)

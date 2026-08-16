@@ -155,7 +155,8 @@ with tracely.trace(agent="support", conversation="conv-1", agents=AGENTS):   # s
 ```
 
 Only `name` / `description` / `tools` are interpreted (`tools` is a dict keyed by tool name, or a
-plain list); **any other key** — `system_prompt`, `model`, `guardrails`, `config` — is stored and
+plain list) — a tool's own `description` is what the Fleet office shows when you click it on the
+tool wall; **any other key** — `system_prompt`, `model`, `guardrails`, `config` — is stored and
 rendered verbatim. Non-Python services can push the same catalog with
 `POST /api/sessions/{conversation_id}/config` (`{"agents": [...]}`). Without a declaration, Tracely
 still derives an observed agent view from the spans; a declared catalog wins when present.

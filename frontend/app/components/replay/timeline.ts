@@ -41,8 +41,9 @@ export const kindStyle = (k: string) => KIND_STYLE[k] ?? KIND_STYLE.step;
 export const isContainer = (e: { kind: string; container?: boolean }) =>
   e.container ?? (e.kind === "turn" || e.kind === "spawn" || e.kind === "delegate");
 
-const MAX_GAP_MS = 400;  // dead air between turns is squeezed to this
-const MIN_DUR_MS = 140;  // a 3ms tool call still needs to be seeable
+const MAX_GAP_MS = 400;   // dead air between turns is squeezed to this
+const MIN_DUR_MS = 140;   // a 3ms tool call still needs to be seeable
+const MAX_DUR_MS = 1600;  // …and a 9s model call must not hold the stage after everyone stopped
 
 /** The office view walks characters between stations — a beat has to outlast the ~700ms walk
  *  or every scene is a teleport. The timeline view keeps the tighter defaults. */
@@ -50,12 +51,21 @@ export const OFFICE_PACING = { maxGapMs: 900, minDurMs: 900 };
 
 /**
  * Lay events on a play clock: real gaps longer than maxGapMs collapse (a conversation with a
- * 20s pause between turns would otherwise be 20s of an empty stage), every event gets a floor
- * duration so instant spans are still visible, and ordering is preserved.
+ * 20s pause between turns would otherwise be 20s of an empty stage), every event is clamped to
+ * [minDurMs, maxDurMs] so instant spans stay visible AND one long model call cannot run on
+ * after the last beat started (that left the office standing still for seconds), and ordering
+ * is preserved.
+ *
+ * This is a WATCHING clock, not a stopwatch — `realMsAt` maps it back to real trace time, which
+ * is what the UI should display so the readout matches the duration on the trace page.
  */
 export function toPlayEvents(
   events: ReplayEvent[],
-  { maxGapMs = MAX_GAP_MS, minDurMs = MIN_DUR_MS }: { maxGapMs?: number; minDurMs?: number } = {},
+  {
+    maxGapMs = MAX_GAP_MS,
+    minDurMs = MIN_DUR_MS,
+    maxDurMs = MAX_DUR_MS,
+  }: { maxGapMs?: number; minDurMs?: number; maxDurMs?: number } = {},
 ): { events: PlayEvent[]; total: number } {
   const sorted = [...events].sort((a, b) => a.t_ms - b.t_ms);
   const out: PlayEvent[] = [];
@@ -64,7 +74,8 @@ export function toPlayEvents(
   sorted.forEach((e, index) => {
     clock += Math.min(Math.max(0, e.t_ms - prevReal), maxGapMs);
     prevReal = e.t_ms;
-    out.push({ ...e, index, pt: clock, pdur: Math.max(e.dur_ms, minDurMs) });
+    const pdur = Math.min(Math.max(e.dur_ms, minDurMs), Math.max(maxDurMs, minDurMs));
+    out.push({ ...e, index, pt: clock, pdur });
   });
   // A container BRACKETS events whose gaps were just squeezed, so its real duration no longer
   // fits the play clock (a 16s turn on a 3.5s clock draws a bar 4x the timeline). Remap its
@@ -76,13 +87,30 @@ export function toPlayEvents(
     const ceil = k + 1 < out.length ? out[k + 1].pt - out[k].pt : Infinity;
     return out[k].pt + Math.min(Math.max(0, real - out[k].t_ms), ceil);
   };
-  for (const e of out)
-    if (isContainer(e)) e.pdur = Math.max(playAt(e.t_ms + e.dur_ms) - e.pt, minDurMs);
   // The clock ends when the WORK ends: containers (turn envelopes) span their whole turn's
   // real duration, and counting them left a long dead tail after the last visible beat.
+  // Compute it BEFORE remapping containers — clamping durations shortened the work, so a
+  // container measured against the old span would overhang the end of the timeline.
   const work = out.filter((e) => !isContainer(e));
   const total = (work.length ? work : out).reduce((m, e) => Math.max(m, e.pt + e.pdur), 0);
+  for (const e of out)
+    if (isContainer(e))
+      e.pdur = Math.max(Math.min(playAt(e.t_ms + e.dur_ms) - e.pt, total - e.pt), minDurMs);
   return { events: out, total };
+}
+
+/**
+ * The REAL trace timestamp the play head stands on. The play clock squeezes gaps and clamps
+ * durations, so it never matches the trace's wall-clock duration — show this instead.
+ */
+export function realMsAt(events: PlayEvent[], t: number): number {
+  let real = 0;
+  for (const e of events) {
+    if (e.pt > t) break;
+    const frac = e.pdur > 0 ? Math.min(1, (t - e.pt) / e.pdur) : 1;
+    real = Math.max(real, e.t_ms + e.dur_ms * frac);
+  }
+  return real;
 }
 
 /** Events in flight at play-time `t`. */
