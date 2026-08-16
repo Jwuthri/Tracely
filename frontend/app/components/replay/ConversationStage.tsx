@@ -135,6 +135,9 @@ export function ConversationStage({ threadId }: { threadId: string }) {
           ))}
         </div>
         <FleetLink threadId={threadId} />
+        <Link href={`/sessions/${encodeURIComponent(threadId)}`} className="btn-ghost">
+          ↩ conversation
+        </Link>
         <span className="ml-auto font-mono text-[11px] text-fg-faint">
           {fmtMs(realMsAt(events, t))} / {fmtMs(durationMs)} · {played.length}/{events.length} steps
         </span>

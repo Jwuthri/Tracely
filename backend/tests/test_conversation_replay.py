@@ -1,5 +1,6 @@
 """Replay script derivation: actor nesting, ordering, and the sub-agent relation."""
 
+import json
 from datetime import datetime, timedelta
 
 from tracely.domain.traces.replay import build_replay
@@ -261,6 +262,28 @@ def test_containers_never_get_inferred_delegations():
     r = build_replay(spans, {"faq": "agent_faq"})
     wrapper = next(e for e in r["events"] if e["name"] == "agent_teams.turn")
     assert wrapper["delegate_to"] == ""
+
+
+def test_text_of_never_shows_the_message_envelope():
+    """A tool-calling turn has empty content — the bubble must say what it reached for, never
+    dump `[{"role": "assistant", "tool_calls": [...]}]`."""
+    from tracely.domain.traces.replay import _text_of
+
+    calls = json.dumps(
+        [{"role": "assistant", "content": "", "tool_calls": [
+            {"id": "call_1", "type": "function", "function": {"name": "agent_faq.retrieve", "arguments": "{}"}},
+            {"id": "call_2", "type": "function", "function": {"name": "lookup_kb"}},
+        ]}]
+    )
+    assert _text_of(calls) == "→ agent_faq.retrieve, lookup_kb"
+
+    # nothing sayable at all → silence, not JSON
+    assert _text_of(json.dumps([{"role": "assistant", "content": ""}])) == ""
+    assert _text_of(json.dumps([{"role": "assistant", "tool_calls": "junk"}])) == ""
+    # content blocks
+    assert _text_of(json.dumps([{"role": "assistant", "content": [{"type": "text", "text": "hi"}]}])) == "hi"
+    # a plain tool output is NOT a message envelope — it still previews (the tool-sheet card)
+    assert _text_of(json.dumps({"total": 1299})) == '{"total": 1299}'
 
 
 def test_declared_tools_tolerates_junk():

@@ -79,12 +79,43 @@ def _text_of(value: Any, limit: int = 120) -> str:
         if isinstance(parsed, str):
             return _preview(parsed, limit)
         msgs = parsed if isinstance(parsed, list) else [parsed]
+        envelope = any(isinstance(m, dict) and ("role" in m or "tool_calls" in m) for m in msgs)
         for m in reversed(msgs):
-            if isinstance(m, dict):
-                content = m.get("content")
-                if isinstance(content, str) and content.strip():
-                    return _preview(content, limit)
+            if not isinstance(m, dict):
+                continue
+            content = m.get("content")
+            if isinstance(content, str) and content.strip():
+                return _preview(content, limit)
+            if isinstance(content, list):  # Anthropic-style content blocks
+                text = " ".join(
+                    b.get("text", "") for b in content if isinstance(b, dict) and b.get("text")
+                ).strip()
+                if text:
+                    return _preview(text, limit)
+            # A turn that ONLY calls tools has empty content — say what it reached for.
+            calls = _called_names(m)
+            if calls:
+                return _preview("→ " + ", ".join(calls), limit)
+        # A message envelope with nothing sayable: better silence than the raw JSON in a
+        # speech bubble. Non-message payloads (a tool's `{"total": 1299}`) still preview.
+        if envelope:
+            return ""
     return _preview(value, limit)
+
+
+def _called_names(message: dict) -> list[str]:
+    """Function names of a message's `tool_calls` — tolerant of every junk shape the wire
+    delivers (a non-list, a string entry, a `function` that isn't a dict)."""
+    raw = message.get("tool_calls")
+    names = []
+    for call in raw if isinstance(raw, list) else []:
+        if not isinstance(call, dict):
+            continue
+        fn = call.get("function")
+        name = (fn.get("name") if isinstance(fn, dict) else None) or call.get("name")
+        if isinstance(name, str) and name:
+            names.append(name)
+    return names
 
 
 def _delegation_say(span: dict, callee_alias: str) -> str:
