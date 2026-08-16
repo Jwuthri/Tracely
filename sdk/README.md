@@ -275,6 +275,26 @@ drop-ins, manual spans). Highlights:
 
 ---
 
+## Releasing
+
+Tagging is the release: `.github/workflows/publish-sdk.yml` runs the SDK tests, builds, smoke-tests
+the **built wheel** in a throwaway venv (a wheel that imports but is missing `delegate`/`skill` is
+the failure this catches), and uploads via PyPI **Trusted Publishing** — no token lives in the repo.
+
+```bash
+# 1. bump `version` in sdk/pyproject.toml, then
+uv lock && git commit -am "chore(sdk): x.y.z" && git push
+# 2. tag it — the workflow refuses a tag that disagrees with pyproject
+git tag sdk-v0.3.3 && git push origin sdk-v0.3.3
+```
+
+`workflow_dispatch` runs everything except the upload, for a dry run.
+
+Publishing from a laptop still works (`uv publish dist-sdk/*`) but needs an API **token** —
+PyPI retired username/password auth, so the username at that prompt is the literal `__token__`.
+
+---
+
 ## Key decisions (and why)
 
 1. **Thin wrapper, not a framework.** It only sets attributes on OTel spans — anyone already on OpenTelemetry/OpenInference can skip it and just emit the `tracely.*` hints. No lock-in.

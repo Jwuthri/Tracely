@@ -1,0 +1,87 @@
+name: publish sdk
+
+# Release the Python SDK to PyPI on a `sdk-v*` tag — via Trusted Publishing, so there is no
+# token in this repo and nothing to rotate or leak. PyPI retired username/password auth, and a
+# long-lived API token in CI is the next thing to regret; OIDC is the durable answer.
+#
+# ── one-time setup on PyPI ────────────────────────────────────────────────────────────────
+#   pypi.org → project `tracely-ai` → Manage → Publishing → Add a new publisher (GitHub):
+#     Owner:          Jwuthri
+#     Repository:     Tracely
+#     Workflow name:  publish-sdk.yml
+#     Environment:    pypi
+#   Then here: Settings → Environments → New environment → `pypi` (add a required reviewer if
+#   you want a human to approve each release).
+#
+# ── releasing ─────────────────────────────────────────────────────────────────────────────
+#   bump `version` in sdk/pyproject.toml, `uv lock`, commit, then:
+#     git tag sdk-v0.3.3 && git push origin sdk-v0.3.3
+
+on:
+  push:
+    tags: ["sdk-v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and check only — do not upload"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: build · verify · publish
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # the OIDC token Trusted Publishing exchanges for an upload token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # A tag that disagrees with pyproject means publishing a version nobody asked for — and a
+      # PyPI version number can never be reused. Fail here, where it costs nothing.
+      - name: Tag matches sdk/pyproject.toml
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tagged="${GITHUB_REF_NAME#sdk-v}"
+          declared=$(grep -m1 '^version = ' sdk/pyproject.toml | cut -d'"' -f2)
+          echo "tag=$tagged pyproject=$declared"
+          [ "$tagged" = "$declared" ] || { echo "::error::tag $GITHUB_REF_NAME != version $declared"; exit 1; }
+
+      - name: Test (the SDK ships only if its tests pass)
+        run: |
+          uv sync --frozen --all-packages --all-extras
+          uv run pytest -q sdk/tests
+
+      - name: Build
+        run: uv build --package tracely-ai --out-dir dist-sdk
+
+      # Catches the classic silent break: a wheel that imports but is missing the very API the
+      # release exists to ship. Runs against the BUILT artifact in a throwaway env, not the tree.
+      - name: Smoke-test the built wheel
+        run: |
+          uv venv /tmp/wheelcheck
+          VIRTUAL_ENV=/tmp/wheelcheck uv pip install dist-sdk/*.whl
+          /tmp/wheelcheck/bin/python - <<'PY'
+          import tracely_sdk as t
+          for name in ("trace", "agent", "llm", "tool", "skill", "delegate", "retriever",
+                       "thinking", "call_tool", "call_llm", "fixtures", "observe"):
+              assert hasattr(t, name), f"built wheel is missing {name}"
+          t.init(endpoint="http://127.0.0.1:1", api_key="x", instrument=False)
+          with t.trace(agent="a", conversation="c"):
+              with t.delegate("b", agent="a", task="hand off"):
+                  with t.skill("playbook", agent="b", version="v1"):
+                      pass
+          print("wheel ok")
+          PY
+
+      - name: Publish to PyPI
+        if: startsWith(github.ref, 'refs/tags/') && !inputs.dry_run
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-sdk
