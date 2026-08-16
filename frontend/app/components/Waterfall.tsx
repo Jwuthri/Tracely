@@ -206,12 +206,12 @@ export function Waterfall({
           {/* fixed label column (never scrolls horizontally) */}
           <div className="shrink-0 border-r border-line bg-ink-900/30" style={{ width: LABEL_W }}>
             <div style={{ height: RULER_H }} className="border-b border-line" />
-            {ordered.map((s) => {
+            {ordered.map((s, i) => {
               const err = s.level === "ERROR";
               const active = s.span_id === sel;
               return (
                 <button
-                  key={s.span_id}
+                  key={`${i}:${s.span_id}`}
                   onClick={() => setSel(s.span_id)}
                   style={{ height: ROW_H, paddingLeft: 12 + depthOf(s, byId) * 14 }}
                   className={clsx(
@@ -261,7 +261,7 @@ export function Waterfall({
               ))}
 
               {/* bars */}
-              {ordered.map((s) => {
+              {ordered.map((s, i) => {
                 const start = new Date(s.start_time).getTime();
                 const end = new Date(s.end_time ?? s.start_time).getTime();
                 const left = (toDisplay(start) / totalDisplay) * 100;
@@ -272,7 +272,7 @@ export function Waterfall({
                 const active = s.span_id === sel;
                 return (
                   <button
-                    key={s.span_id}
+                    key={`${i}:${s.span_id}`}
                     onClick={() => setSel(s.span_id)}
                     style={{ height: ROW_H }}
                     className={clsx(
