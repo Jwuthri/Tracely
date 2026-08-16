@@ -95,7 +95,18 @@ export default async function TracePage({ params }: { params: Promise<{ traceId:
               {usage.cost ? <span className="text-warn/90">{fmtUsd(usage.cost)}</span> : null}
             </div>
           </div>
-          {failing && <PromoteButton traceId={traceId} />}
+          <div className="flex items-center gap-3">
+            {/* Watch this run act itself out. `thread_spans_full` accepts a TRACE id as well as a
+                conversation id, so a one-turn run replays fine — but prefer the thread when the
+                run belongs to a conversation, so the replay covers every turn. */}
+            <a href={`/sessions/${encodeURIComponent(thread_id || traceId)}/replay`} className="btn-ghost">
+              ▶ Replay
+            </a>
+            <a href={`/sessions/${encodeURIComponent(thread_id || traceId)}/fleet`} className="btn-ghost">
+              ⌂ Fleet
+            </a>
+            {failing && <PromoteButton traceId={traceId} />}
+          </div>
         </div>
       </header>
 
