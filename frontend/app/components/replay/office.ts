@@ -113,11 +113,8 @@ export function poseAt(
 ): Pose {
   const desk = layout.desks[actor.id] ?? { x: 50, y: 50 };
   const mine = events.filter((e) => e.actor === actor.id);
-  const first = mine[0];
-  const entered = first !== undefined && t >= first.pt;
-  if (!entered) {
-    return { ...layout.door, at: "door", action: null, bubble: null, facing: -1, entered: false, working: false };
-  }
+  // The whole team is seated from t=0 — a sub-agent idles at its desk until the main agent
+  // brings it work, rather than popping into existence at its first span.
 
   const inflight = inflightOf(actor.id, events, t);
   const delegation = delegationOf(actor.id, events, t);

@@ -271,3 +271,37 @@ def test_declared_tool_names_tolerates_junk():
     assert _declared_tool_names({"tools": True}) == []
     assert _declared_tool_names({"tools": {"a": {}, "b": {}}}) == ["a", "b"]
     assert _declared_tool_names({"tools": [{"name": "x"}, "y"]}) == ["x", "y"]
+
+
+def test_agent_envelope_never_swallows_the_team():
+    """Julien's real supervisor trace: the turn wrapper is an AGENT span, and every child span
+    carries its OWN agent_id (supervisor, balance specialist). The envelope must not absorb
+    them into one actor — own agent_id beats the ancestor walk."""
+    team, sup, bal = "team-uuid", "sup-uuid", "bal-uuid"
+    spans = [
+        span("a", "", "AGENT", "agent_teams.turn", 0, 4800, agent=team),
+        dict(span("b", "a", "GENERATION", "gpt", 5, 1500, agent=sup), tool_call_names=["balance"]),
+        dict(span("c", "a", "DELEGATE", "balance", 1570, 2400, agent=sup), input="current balance"),
+        span("d", "c", "GENERATION", "gpt", 1580, 1100, agent=bal),
+        span("e", "c", "TOOL", "mock_get_balance", 2700, 10, agent=bal),
+        span("f", "a", "GENERATION", "gpt", 3980, 800, agent=sup),
+    ]
+    r = build_replay(
+        spans,
+        names={team: "tracely_demo_team", sup: "supervisor", bal: "balance"},
+        aliases={"balance": bal, "supervisor": sup},
+    )
+    actors = {a["id"]: a for a in r["actors"]}
+    assert set(actors) == {team, sup, bal}, "three actors, not one"
+    by = {e["name"]: e for e in r["events"]}
+    assert by["mock_get_balance"]["actor"] == bal      # specialist's tool is theirs
+    assert by["gpt"]["actor"] == sup                    # supervisor's llm is theirs
+    assert actors[bal]["parent"] == sup                 # DELEGATE name -> callee edge
+    assert actors[bal]["kind"] == "subagent"
+    # the delegation resolves by NAME and carries the task
+    deleg = by["balance"]
+    assert deleg["delegate_to"] == bal
+    assert deleg["say"] == "current balance"
+    assert deleg["container"] is True                   # DELEGATE brackets the callee's work
+    # the supervisor's llm requesting "balance" is the SAME handoff — no second walk
+    assert by["gpt"]["delegate_to"] == ""

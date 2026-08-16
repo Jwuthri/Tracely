@@ -40,10 +40,12 @@ describe("poseAt", () => {
     ev(2000, 200, "sup", "think", "thinking", { detail: "hmm" }),
   ]).events;
 
-  it("waits at the door before the first event", () => {
+  it("everyone is seated idle at their desk from t=0", () => {
     const p = poseAt(actors[1], script, 100, layout);
-    expect(p.entered).toBe(false);
-    expect(p.at).toBe("door");
+    expect(p.entered).toBe(true);
+    expect(p.at).toBe("desk");
+    expect(p.working).toBe(false);
+    expect(p.bubble).toBeNull();
   });
   it("walks to the callee's desk on a handoff and says the task", () => {
     const p = poseAt(actors[0], script, 700, layout);

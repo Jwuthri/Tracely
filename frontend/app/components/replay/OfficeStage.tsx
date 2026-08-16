@@ -222,14 +222,13 @@ function Walker({ actor, pose, slot, selected, onClick }: {
   return (
     <button
       onClick={onClick}
-      className={clsx("absolute -translate-x-1/2 -translate-y-full cursor-pointer transition-all duration-700 ease-in-out",
-        !pose.entered && "opacity-0")}
+      className="absolute -translate-x-1/2 -translate-y-full cursor-pointer transition-all duration-700 ease-in-out"
       style={{ left: `${pose.x}%`, top: `${pose.y}%`, zIndex: Math.round(pose.y) + 10 }}
       title={actor.name}
     >
       {pose.bubble && <BubbleView bubble={pose.bubble} />}
       <div className={clsx(selected && "rounded-lg ring-2 ring-signal/70")}> 
-        <PixelPerson hue={hue} size={size} walking={walking} working={pose.working && !walking} facing={pose.facing} dim={!pose.entered} />
+        <PixelPerson hue={hue} size={size} walking={walking} working={pose.working && !walking} facing={pose.facing} />
       </div>
       <div className="mx-auto -mt-0.5 h-1.5 w-7 rounded-full bg-black/40 blur-[1.5px]" />
       <span className={clsx("mt-0.5 block rounded-sm px-1 font-mono text-[9px]",

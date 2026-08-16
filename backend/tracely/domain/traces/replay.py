@@ -91,6 +91,11 @@ def _delegation_say(span: dict, callee_alias: str) -> str:
     strings."""
     direct = span.get("input")
     if isinstance(direct, str) and direct.strip() and not direct.lstrip().startswith(("[", "{")):
+        if direct.lstrip().startswith('"'):  # ingest stores set_io strings JSON-encoded
+            try:
+                direct = json.loads(direct)
+            except (ValueError, TypeError):
+                pass
         return _preview(direct)
     raw = span.get("output")
     if isinstance(raw, str) and raw.lstrip().startswith(("[", "{")):
@@ -177,8 +182,11 @@ def build_replay(
             if owner and owner != key and key not in parent_of:
                 parent_of[key] = owner
         else:
-            # A non-actor span with no actor ancestor still names its agent (flat SDK traces).
-            actor_of[key_self] = owner or str(span.get("agent_id") or "") or "agent"
+            # The span's OWN agent_id is authoritative — real teams tag every span with the
+            # agent that ran it, and attributing by enclosing AGENT envelope collapsed a whole
+            # team (supervisor + specialists) into the wrapper's single actor. The ancestor
+            # walk only fills the gap for instrumentation that doesn't tag child spans.
+            actor_of[key_self] = str(span.get("agent_id") or "") or owner or "agent"
 
     # ── actors, ordered by first appearance ──
     order: list[str] = []
@@ -220,7 +228,11 @@ def build_replay(
         if str(span.get("type") or "").upper() != "DELEGATE":
             continue
         caller = actor_of[ref(span, span.get("span_id"))]
-        callee = resolve_actor(str(span.get("callee_agent_id") or ""))
+        # explicit callee id first; else the span NAME — harnesses name the delegate span
+        # after the specialist it calls ("balance", "store_locations")
+        callee = resolve_actor(str(span.get("callee_agent_id") or "")) or resolve_actor(
+            str(span.get("name") or "")
+        )
         if callee and callee != caller and callee not in parent_of:
             parent_of[callee] = caller
     # 2) Multi-agent harnesses call a sub-agent as a TOOL, and often emit spans whose real parent
@@ -252,6 +264,17 @@ def build_replay(
         actor["depth"] = depth
         actor["kind"] = "subagent" if depth else "agent"
 
+    # Explicit DELEGATE callees per trace: an llm span requesting the same specialist in the
+    # same trace is the SAME handoff — inferring a second walk for it doubles the scene.
+    explicit_delegations: set[tuple[str, str]] = set()
+    for span in rows:
+        if str(span.get("type") or "").upper() != "DELEGATE":
+            continue
+        callee_ref = str(span.get("callee_agent_id") or "") or str(span.get("name") or "")
+        target = resolve_actor(callee_ref)
+        if target:
+            explicit_delegations.add((str(span.get("trace_id") or ""), target))
+
     # ── events ──
     events: list[dict] = []
     for span in rows:
@@ -276,12 +299,17 @@ def build_replay(
         # panel uses for hierarchy.
         delegate_to, say = "", ""
         if stype == "DELEGATE":
-            delegate_to = resolve_actor(str(span.get("callee_agent_id") or ""))
-            say = _delegation_say(span, str(span.get("callee_agent_id") or ""))
+            callee_ref = str(span.get("callee_agent_id") or "") or str(span.get("name") or "")
+            delegate_to = resolve_actor(callee_ref)
+            say = _delegation_say(span, callee_ref)
         elif kind not in ("turn", "spawn"):
             for alias in span.get("tool_call_names") or []:
                 target = resolve_actor(str(alias))
-                if target and target != key:
+                if (
+                    target
+                    and target != key
+                    and (str(span.get("trace_id") or ""), target) not in explicit_delegations
+                ):
                     delegate_to, station = target, "peer"
                     say = _delegation_say(span, str(alias))
                     break
