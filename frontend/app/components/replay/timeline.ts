@@ -66,6 +66,18 @@ export function toPlayEvents(
     prevReal = e.t_ms;
     out.push({ ...e, index, pt: clock, pdur: Math.max(e.dur_ms, minDurMs) });
   });
+  // A container BRACKETS events whose gaps were just squeezed, so its real duration no longer
+  // fits the play clock (a 16s turn on a 3.5s clock draws a bar 4x the timeline). Remap its
+  // end through the same squeeze: between two starts real time advances 1:1 but never past the
+  // (already squeezed) next start; after the last start it runs free.
+  const playAt = (real: number) => {
+    let k = out.length - 1;
+    while (k > 0 && out[k].t_ms > real) k--;
+    const ceil = k + 1 < out.length ? out[k + 1].pt - out[k].pt : Infinity;
+    return out[k].pt + Math.min(Math.max(0, real - out[k].t_ms), ceil);
+  };
+  for (const e of out)
+    if (isContainer(e)) e.pdur = Math.max(playAt(e.t_ms + e.dur_ms) - e.pt, minDurMs);
   // The clock ends when the WORK ends: containers (turn envelopes) span their whole turn's
   // real duration, and counting them left a long dead tail after the last visible beat.
   const work = out.filter((e) => !isContainer(e));

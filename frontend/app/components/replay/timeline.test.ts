@@ -18,6 +18,15 @@ describe("toPlayEvents", () => {
     expect(events.map((e) => e.name)).toEqual(["first", "fast"]);
     expect(events[1].pdur).toBe(140);  // floor applied
   });
+  it("containers are squeezed like the work they bracket", () => {
+    // A 16s turn envelope around squeezed work must not draw a 16s bar on a ~1s play
+    // clock (it ran off the right edge of the timeline card).
+    const wrap = { ...ev(0, 16000, "team", "turn", "turn-1"), container: true };
+    const { events, total } = toPlayEvents([wrap, ev(100, 300, "a", "tool", "x"), ev(12900, 3100, "a", "tool", "y")]);
+    const c = events[0];
+    expect(c.pt + c.pdur).toBeLessThanOrEqual(total);          // fits the stage
+    expect(c.pt + c.pdur).toBe(events[2].pt + events[2].pdur); // ends WITH its last child
+  });
 });
 
 it("activeAt returns only in-flight events", () => {

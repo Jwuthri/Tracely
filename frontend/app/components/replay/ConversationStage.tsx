@@ -265,7 +265,7 @@ function Lanes({ actors, events, total, t, onSeek, onPick, selected }: {
               title={a.name}>
               {a.depth ? "└ " : ""}{a.name}
             </span>
-            <div className="relative h-5 flex-1 rounded bg-ink-800">
+            <div className="relative h-5 flex-1 overflow-hidden rounded bg-ink-800">
               {events.filter((e) => e.actor === a.id).map((e) => {
                 const st = kindStyle(e.kind);
                 const wrap = isContainer(e);
