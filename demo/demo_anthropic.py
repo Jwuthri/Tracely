@@ -19,10 +19,9 @@ vocabulary on top of the automatic Anthropic instrumentation:
   - `tracely.observe(as_type="tool")`         → each tool call is a TOOL span; the
     rejected $189 refund raises, so that span is marked ERROR — Tracely's
     failure-detection signal — while the agent recovers gracefully.
-  - GUARDRAIL / DELEGATE / AGENT / SKILL spans → the injection check, the
-    handoff edge, the sub-agent run and the playbook it followed all render as
-    first-class observation types in the trace tree (via `tracely.guardrail`,
-    `tracely.agent(handoff_from=…)` and `@tracely.observe(as_type=…)`).
+  - `tracely.guardrail` / `delegate` / `agent` / `skill` → the injection check,
+    the handoff, the sub-agent run and the playbook it followed all render as
+    first-class observation types in the trace tree.
 
 Run:  uv run demo_anthropic.py        (needs ANTHROPIC_API_KEY)
 """
@@ -129,26 +128,25 @@ def observed(name: str):
     return tracely.observe(getattr(shared, name), name=name, as_type="tool")
 
 
-@tracely.observe(as_type="skill", name="refund-playbook")
-def run_refund_playbook(task: str) -> str:
-    """The specialist's playbook run — a named SKILL span, so "which playbook
-    handled this?" is a filter and a per-skill failure cluster in Tracely."""
-    return run_loop(
-        SPECIALIST_SYSTEM,
-        anthropic_tools(["get_order", "issue_refund"]),
-        {"get_order": observed("get_order"), "issue_refund": observed("issue_refund")},
-        [{"role": "user", "content": task}],
-    )
-
-
-@tracely.observe(as_type="delegate", name=f"delegate:{SPECIALIST}")
 def escalate_refund(order_id: str, amount_usd: float, reason: str) -> str:
-    """The concierge → specialist handoff: a DELEGATE span wrapping the sub-agent's
-    run, with `handoff_from` drawing the caller → callee edge in the agent graph."""
+    """The concierge → specialist handoff, span by span: DELEGATE records the
+    routing decision itself, the nested AGENT span (with `handoff_from`) is the
+    sub-agent's run and draws the caller → callee edge in the agent graph, and
+    SKILL names + versions the playbook the specialist followed — so "which
+    playbook handled this?" is a filter and a per-skill failure cluster."""
     task = f"Customer requests a ${amount_usd:.2f} refund on {order_id}: {reason}"
-    with tracely.agent(SPECIALIST, handoff_from=CONCIERGE) as a:
-        answer = run_refund_playbook(task)
-        tracely.set_io(a, input=task, output=answer)
+    with tracely.delegate(SPECIALIST, agent=CONCIERGE, task=task) as d:
+        tracely.set_io(d, input={"order_id": order_id, "amount_usd": amount_usd, "reason": reason})
+        with tracely.agent(SPECIALIST, handoff_from=CONCIERGE) as a:
+            with tracely.skill("refund-playbook", agent=SPECIALIST, version="v2"):
+                answer = run_loop(
+                    SPECIALIST_SYSTEM,
+                    anthropic_tools(["get_order", "issue_refund"]),
+                    {"get_order": observed("get_order"), "issue_refund": observed("issue_refund")},
+                    [{"role": "user", "content": task}],
+                )
+            tracely.set_io(a, input=task, output=answer)
+        tracely.set_io(d, output=answer)
     return answer
 
 

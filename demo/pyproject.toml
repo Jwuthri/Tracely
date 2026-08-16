@@ -5,16 +5,10 @@ description = "End-to-end demos: LangGraph, OpenAI Agents SDK and Anthropic agen
 requires-python = ">=3.10"
 dependencies = [
   # tracely-ai + the auto-instrumentors for each framework (extras pull the framework SDKs too)
-  "tracely-ai[langchain,openai-agents,anthropic]>=0.3.2",
+  "tracely-ai[langchain,openai-agents,anthropic]>=0.3.3",
   # LangGraph demo (the [langchain] extra only ships the instrumentor)
   "langchain>=1.0",
   "langgraph>=1.0",
   "langchain-openai>=1.0",
   "python-dotenv>=1.0",
 ]
-
-# Inside the Tracely repo, run against the local SDK (../sdk) instead of PyPI —
-# the demos always exercise the current code. Standalone users: delete this
-# block and `uv sync` pulls tracely-ai from PyPI.
-[tool.uv.sources]
-tracely-ai = { path = "../sdk", editable = true }

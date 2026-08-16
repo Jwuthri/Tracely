@@ -43,10 +43,9 @@ uv run demo_anthropic.py       # needs ANTHROPIC_API_KEY
 
 (or `make langgraph` / `make openai-agents` / `make anthropic` / `make all`.)
 
-Each script prints the agent's answers, then flushes its traces to Tracely. The demos run
-against the local `sdk/` package (see `[tool.uv.sources]` in `pyproject.toml`), so they
-always exercise the current SDK; standalone users can delete that block to pull
-`tracely-ai` from PyPI instead.
+Each script prints the agent's answers, then flushes its traces to Tracely. The demos use
+the published [`tracely-ai`](https://pypi.org/project/tracely-ai/) package (≥ 0.3.3) —
+exactly what your own app would install. git tag sdk-v0.3.4 && git push origin sdk-v0.3.4
 
 ## The integration, in full
 
