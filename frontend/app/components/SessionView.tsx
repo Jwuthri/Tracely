@@ -6,7 +6,8 @@ import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
 import { AgentsSidePanel } from "./AgentsSidePanel";
 import { StateIcon, StatePanel } from "./StatePanel";
 import { spanHasState } from "./state-fold";
-import { TabButton } from "./SingleTraceView";
+import Link from "next/link";
+import { TabButton, TabLink } from "./SingleTraceView";
 import { TraceTable } from "./TraceTable";
 import { Waterfall } from "./Waterfall";
 import { Badge, verdictVariant } from "./ui";
@@ -20,6 +21,7 @@ export function SessionView({
   conv,
   turns,
   shared = false,
+  views = false,
 }: {
   conv: ConvNode;
   turns: FullTurn[];
@@ -27,6 +29,9 @@ export function SessionView({
   // proxy). Everything else here renders from props; the table's optional fetches already
   // degrade to empty on a 401 rather than erroring.
   shared?: boolean;
+  // Show Replay / Fleet as tabs. Off by default: they are routes of a real conversation, which
+  // an eval-level view or a public share page does not have.
+  views?: boolean;
 }) {
   const [tab, setTab] = useState<"table" | "timeline">("table");
 
@@ -56,13 +61,29 @@ export function SessionView({
           <TabButton active={tab === "timeline"} onClick={() => setTab("timeline")}>
             Timeline <span className="font-mono text-[11px] text-fg-faint">{allSpans.length}</span>
           </TabButton>
+          {views && (
+            <>
+              <span className="mx-1 h-4 w-px bg-line" />
+              <TabLink href={`/sessions/${encodeURIComponent(conv.thread)}/replay`}>▶ Replay</TabLink>
+              <TabLink href={`/sessions/${encodeURIComponent(conv.thread)}/fleet`}>⌂ Fleet</TabLink>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-2">
-          {overallVerdict && (
-            <Badge variant={verdictVariant(overallVerdict)} dot>
-              evals {overallVerdict}
-            </Badge>
-          )}
+          {overallVerdict &&
+            (shared ? (
+              <Badge variant={verdictVariant(overallVerdict)} dot>
+                evals {overallVerdict}
+              </Badge>
+            ) : (
+              <Link href={`/sessions/${encodeURIComponent(conv.thread)}/evals`}
+                title="Open Tracely's evaluation of this conversation"
+                className="transition-opacity hover:opacity-80">
+                <Badge variant={verdictVariant(overallVerdict)} dot>
+                  evals {overallVerdict} →
+                </Badge>
+              </Link>
+            ))}
           {/* No fetch behind this one (it folds `allSpans`), so it works on the share page too. */}
           {hasState && (
             <button

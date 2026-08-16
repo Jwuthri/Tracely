@@ -1,6 +1,7 @@
 "use client";
 
 import clsx from "clsx";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { ConvNode, SpanOut } from "../lib/api";
 import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
@@ -84,17 +85,26 @@ export function SingleTraceView({
   );
 }
 
+const TAB_CLASS = "relative flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium transition-colors";
+
 export function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       onClick={onClick}
-      className={clsx(
-        "relative flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium transition-colors",
-        active ? "text-fg" : "text-fg-faint hover:text-fg-muted",
-      )}
+      className={clsx(TAB_CLASS, active ? "text-fg" : "text-fg-faint hover:text-fg-muted")}
     >
       {children}
       {active && <span className="absolute inset-x-3 -bottom-px h-0.5 rounded bg-signal" />}
     </button>
+  );
+}
+
+/** A tab that happens to be another page — Replay and Fleet are lenses on this conversation,
+ *  not actions, so they sit in the tab strip instead of the page header. */
+export function TabLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link href={href} className={clsx(TAB_CLASS, "text-fg-faint hover:text-fg-muted")}>
+      {children}
+    </Link>
   );
 }

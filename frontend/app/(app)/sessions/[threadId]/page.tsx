@@ -57,30 +57,16 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
             {usage.cost ? <span className="text-amber-300/90">{fmtUsd(usage.cost)}</span> : null}
           </div>
           </div>
+          {/* Only ACTIONS live up here. The other lenses on this conversation (Replay, Fleet)
+              are tabs in SessionView, and Tracely's own grading hangs off the verdict pill
+              there — a header of eight equal ghost buttons said nothing was important. */}
           <div className="flex items-center gap-3">
-            {turns.length > 0 && (
-              <a href={`/sessions/${encodeURIComponent(threadId)}/replay`} className="btn-ghost">
-                ▶ Replay
-              </a>
-            )}
-            {turns.length > 0 && (
-              <a href={`/sessions/${encodeURIComponent(threadId)}/fleet`} className="btn-ghost">
-                ⌂ Fleet
-              </a>
-            )}
             {turns.length > 0 && agentRef && (
               <SaveAsScenarioButton
                 threadId={threadId}
                 agent={agentRef}
                 defaultTitle={firstInput ? `Prod · ${firstInput.slice(0, 70)}` : undefined}
               />
-            )}
-            {/* Tracely's own grading of THIS conversation. It lives here rather than as rows in
-                /traces, where every conversation added one list entry per eval level. */}
-            {turns.length > 0 && (
-              <a href={`/sessions/${encodeURIComponent(threadId)}/evals`} className="btn-ghost">
-                Show evals
-              </a>
             )}
             {turns.length > 0 && <ShareButton threadId={threadId} />}
           </div>
@@ -92,7 +78,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
         <AwaitingTurns threadId={threadId} />
       ) : (
         <div className="reveal" style={{ animationDelay: "60ms" }}>
-          <SessionView conv={conv} turns={fullTurns} />
+          <SessionView conv={conv} turns={fullTurns} views />
         </div>
       )}
     </div>
