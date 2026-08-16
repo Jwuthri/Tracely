@@ -31,3 +31,4 @@ out/
 
 # build artifacts
 dist/
+dist-sdk/
