@@ -110,7 +110,7 @@ const Chevron = ({ open }: { open: boolean }) => (
 );
 
 const Key = ({ name, idx }: { name: string; idx?: boolean }) => (
-  <span className={clsx("font-mono", idx ? "text-fg-faint" : "text-fuchsia-400")}>{name}</span>
+  <span className={clsx("font-mono", idx ? "text-fg-faint" : "text-syn-key")}>{name}</span>
 );
 
 // A scalar leaf, colored to match the JSON highlighter (string=cyan, number=amber, bool/null=violet).

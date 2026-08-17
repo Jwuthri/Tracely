@@ -99,7 +99,7 @@ export function ChangePasswordForm() {
         disabled={!canSubmit}
         className="btn-primary"
       >
-        {busy && <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white" />}
+        {busy && <span className="h-3 w-3 animate-spin rounded-full border-2 border-hilite/40 border-t-white" />}
         {busy ? "Updating…" : "Update password"}
       </button>
     </form>

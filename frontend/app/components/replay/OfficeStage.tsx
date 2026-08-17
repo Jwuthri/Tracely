@@ -130,7 +130,10 @@ export function OfficeStage({ threadId }: { threadId: string }) {
 
       <div className="grid gap-4 xl:grid-cols-[1fr_290px]">
         {/* ── the office ── */}
-        <div className="fleet-stage relative aspect-[16/10] select-none overflow-hidden rounded-2xl border border-line shadow-panel">
+        {/* The office is a lit room, not a surface: it stays dark in both themes (the pixel
+            sprites are painted for it), so pin the palette here — the labels and chips inside
+            are tokens and would otherwise flip to ink-on-ink over the floor. */}
+        <div data-theme="dark" className="fleet-stage relative aspect-[16/10] select-none overflow-hidden rounded-2xl border border-line shadow-panel">
           {/* wall */}
           <div className="absolute inset-x-0 top-0 h-[17%] border-b-4 border-[#181022] bg-[#2a2138]">
             <div className="absolute left-[6%] top-[22%] h-[52%] w-[9%] rounded-sm border-2 border-[#181022] bg-gradient-to-b from-[#3d4d79] to-[#27304b]" />

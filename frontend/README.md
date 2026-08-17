@@ -35,7 +35,7 @@ There are **two** ways the UI talks to the backend, and which one you use depend
 | `components/CommandPalette.tsx` | ⌘K/Ctrl-K global search → `/api/search`; result types trace / issue / case / gate with keyboard nav. |
 | `components/AccountMenu.tsx` | User avatar menu (top-right) — profile, sign out, links to settings. Renders only in `local`/`clerk` auth modes. |
 | `app/_providers/` | Auth context provider + Clerk dynamic-import wrapper (auth mode is resolved server-side and passed down as a prop). |
-| `app/globals.css` + `tailwind.config.ts` | Theme tokens — `ink` (surfaces, near-black `#090b10`), `line` (borders), `fg`/`fg-muted`/`fg-faint` (text), `signal` (cyan accent), `ok/fail/warn/info`, and span-type colors `t_agent/t_llm/t_tool/t_retriever/t_step`. Utilities: `.card`, `.hairline`, `.reveal` (staggered fade-up), `.bg-grid`. |
+| `app/globals.css` + `tailwind.config.ts` | Theme tokens — `ink` (surfaces), `line` (borders), `fg`/`fg-muted`/`fg-faint` (text), `signal` (cyan accent), `ok/fail/warn/info`, `hilite` (the white-on-dark / ink-on-light tint), span-type colors `t_agent/t_llm/t_tool/…` and `syn-*` (JSON highlighting). Every one is a CSS variable, so the palette has **two themes** (see below). Utilities: `.card`, `.hairline`, `.reveal` (staggered fade-up), `.bg-grid`. |
 
 ## Route groups
 
@@ -142,4 +142,15 @@ All are **Server Components** unless noted; each lists the `lib/api.ts` calls it
 5. **Evaluators as dynamic columns.** Each enabled evaluator is a column in the same table — no separate Evaluations tab to navigate to. Adding a column is a guided modal flow; the column's scores stream in live via SSE.
 6. **Portal event isolation for floating panels.** `FloatingPanel` renders into `document.body` via `createPortal`. The backdrop click calls `e.stopPropagation()` to break React's synthetic event bubbling and prevent row-navigation events from firing.
 7. **Cost is derived in-app.** The backend doesn't trace cost, so price comes from a per-model rate table in `usage.ts`; one open question (see the PRD) is whether to compute `cost_details` at ingest instead so it's authoritative everywhere.
-8. **Theme as tokens.** Semantic color tokens (`ink/line/fg/signal/ok/fail/...` + span-type colors) keep the dark UI consistent and make per-type/per-verdict styling declarative.
+8. **Theme as tokens.** Semantic color tokens (`ink/line/fg/signal/ok/fail/...` + span-type colors) keep the UI consistent and make per-type/per-verdict styling declarative — and because every token is a CSS variable, one attribute repaints the whole app.
+
+## Dark and light
+
+`tailwind.config.ts` names no colour. Each one is `rgb(var(--c-x) / <alpha-value>)`, and the two palettes are two blocks in `app/globals.css`: `:root, [data-theme="dark"]` (the default) and `[data-theme="light"]`. Rules:
+
+- **Never hardcode a colour in a component.** `bg-white/[0.04]` is a dark-theme assumption — use `bg-hilite/[0.04]`, which is white on dark and ink on light. Raw Tailwind palette classes (`text-cyan-300`) are the same mistake; the JSON viewer uses `text-syn-str` and friends.
+- **Both blocks or neither.** A token defined in one theme and not the other silently inherits the other's value (white-on-white). `app/globals.theme.test.ts` fails the build for it.
+- **The switch is `<html data-theme>`**, written before first paint by the inline script in `app/layout.tsx` and flipped by `components/ThemeToggle.tsx` (localStorage key `tracely-theme`, default dark). A React effect would flash.
+- **A subtree can pin a theme** by setting `data-theme` on a wrapper — that is why the dark block is also keyed on `[data-theme="dark"]`. The marketing page (`app/(marketing)/layout.tsx`) and the Fleet office diorama do exactly that: they are art directed dark and stay dark whatever the app is set to.
+- Light values are picked for **WCAG AA on their own surface** (body text ≥ 7:1, muted text and accents ≥ 4.5:1 on the canvas, the card, and their own 15% tint) — keep that when adding one.
+- `app/`, `middleware.ts` and `tailwind.config.ts` are the only paths volume-mounted into the Docker frontend, which is exactly what a palette change touches — edits show up on :3001 without a rebuild.

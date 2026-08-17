@@ -89,7 +89,7 @@ export function FleetPeek() {
     : narrate(events, t, (id) => ACTORS.find((a) => a.id === id)?.name ?? id);
 
   return (
-    <div className="fleet-stage relative aspect-[16/10] select-none overflow-hidden rounded-2xl border border-line shadow-panel">
+    <div data-theme="dark" className="fleet-stage relative aspect-[16/10] select-none overflow-hidden rounded-2xl border border-line shadow-panel">
       {/* wall */}
       <div className="absolute inset-x-0 top-0 h-[17%] border-b-4 border-[#181022] bg-[#2a2138]">
         <div className="absolute left-[6%] top-[22%] h-[52%] w-[9%] rounded-sm border-2 border-[#181022] bg-gradient-to-b from-[#3d4d79] to-[#27304b]" />

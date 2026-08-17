@@ -193,9 +193,9 @@ export function Waterfall({ spans }: { spans: SpanOut[] }) {
             )}
           </span>
           <div className="flex items-center gap-1 font-mono text-[11px]">
-            <button onClick={() => setZoom((z) => clampZoom(z / 1.5))} className="rounded px-2 py-0.5 text-fg-muted transition-colors hover:bg-white/[0.05] hover:text-fg" title="Zoom out">−</button>
-            <button onClick={() => setZoom(1)} className={clsx("rounded px-2 py-0.5 transition-colors hover:bg-white/[0.05]", zoom === 1 ? "text-fg-faint" : "text-signal")} title="Reset zoom">{zoom === 1 ? "fit" : `${zoom.toFixed(1)}×`}</button>
-            <button onClick={() => setZoom((z) => clampZoom(z * 1.5))} className="rounded px-2 py-0.5 text-fg-muted transition-colors hover:bg-white/[0.05] hover:text-fg" title="Zoom in">+</button>
+            <button onClick={() => setZoom((z) => clampZoom(z / 1.5))} className="rounded px-2 py-0.5 text-fg-muted transition-colors hover:bg-hilite/[0.05] hover:text-fg" title="Zoom out">−</button>
+            <button onClick={() => setZoom(1)} className={clsx("rounded px-2 py-0.5 transition-colors hover:bg-hilite/[0.05]", zoom === 1 ? "text-fg-faint" : "text-signal")} title="Reset zoom">{zoom === 1 ? "fit" : `${zoom.toFixed(1)}×`}</button>
+            <button onClick={() => setZoom((z) => clampZoom(z * 1.5))} className="rounded px-2 py-0.5 text-fg-muted transition-colors hover:bg-hilite/[0.05] hover:text-fg" title="Zoom in">+</button>
           </div>
         </div>
 
@@ -214,7 +214,7 @@ export function Waterfall({ spans }: { spans: SpanOut[] }) {
                   style={{ height: ROW_H, paddingLeft: 12 + depthOf(s, byId) * 14 }}
                   className={clsx(
                     "flex w-full items-center gap-2 border-b border-line/50 pr-3 text-left transition-colors last:border-0",
-                    active ? "bg-signal/[0.06]" : "hover:bg-white/[0.025]",
+                    active ? "bg-signal/[0.06]" : "hover:bg-hilite/[0.025]",
                   )}
                 >
                   <TypeChip type={s.type} />
@@ -276,15 +276,15 @@ export function Waterfall({ spans }: { spans: SpanOut[] }) {
                     style={{ height: ROW_H }}
                     className={clsx(
                       "relative block w-full border-b border-line/50 transition-colors last:border-0",
-                      active ? "bg-signal/[0.06]" : "hover:bg-white/[0.025]",
+                      active ? "bg-signal/[0.06]" : "hover:bg-hilite/[0.025]",
                     )}
                   >
-                    <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 bg-white/[0.03]" />
+                    <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 bg-hilite/[0.03]" />
                     <div
                       className={clsx(
                         "absolute top-1/2 h-2.5 -translate-y-1/2 rounded-[3px] shadow-sm",
                         err ? "bg-fail" : (BAR[s.type] ?? "bg-t_step"),
-                        active && "ring-1 ring-white/40",
+                        active && "ring-1 ring-hilite/40",
                       )}
                       style={{ left: `${left}%`, width: `${width}%` }}
                     />

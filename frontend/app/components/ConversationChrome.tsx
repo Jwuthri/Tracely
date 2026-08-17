@@ -37,7 +37,7 @@ export function ConversationHeader({
             {usage.cached_tokens ? <span>{usage.cached_tokens.toLocaleString("en-US")} cached</span> : null}
             {usage.output_tokens ? <span>{usage.output_tokens.toLocaleString("en-US")} out</span> : null}
             {usage.total_tokens ? <span>{usage.total_tokens.toLocaleString("en-US")} tokens</span> : null}
-            {usage.cost ? <span className="text-amber-300/90">{fmtUsd(usage.cost)}</span> : null}
+            {usage.cost ? <span className="text-syn-bool/90">{fmtUsd(usage.cost)}</span> : null}
           </div>
         </div>
         {/* Only ACTIONS live up here — the lenses are tabs, and the grading hangs off the

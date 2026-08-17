@@ -17,14 +17,14 @@ export function HighlightedJson({ text }: { text: string }) {
     if (m.index > last) out.push(text.slice(last, m.index));
     if (m[1] !== undefined && m[2] !== undefined) {
       // "key":  -> key (fuchsia) + colon (slate)
-      out.push(<span key={i++} className="text-fuchsia-400">{m[1]}</span>);
+      out.push(<span key={i++} className="text-syn-key">{m[1]}</span>);
       out.push(<span key={i++} className="text-fg-faint">{m[2]}</span>);
     } else if (m[1] !== undefined) {
-      out.push(<span key={i++} className="text-cyan-300">{m[1]}</span>); // string value
+      out.push(<span key={i++} className="text-syn-str">{m[1]}</span>); // string value
     } else if (m[3] !== undefined) {
-      out.push(<span key={i++} className="text-violet-400">{m[3]}</span>); // true/false/null
+      out.push(<span key={i++} className="text-syn-num">{m[3]}</span>); // true/false/null
     } else if (m[4] !== undefined) {
-      out.push(<span key={i++} className="text-amber-300">{m[4]}</span>); // number
+      out.push(<span key={i++} className="text-syn-bool">{m[4]}</span>); // number
     }
     last = re.lastIndex;
   }
@@ -75,10 +75,10 @@ const CopyIcon = (p: SVGProps<SVGSVGElement>) => (
 
 type Accent = "cyan" | "fuchsia" | "amber" | "violet";
 const ACCENT_BOX: Record<Accent, string> = {
-  cyan: "bg-cyan-500/15 text-cyan-400",
-  fuchsia: "bg-fuchsia-500/15 text-fuchsia-400",
-  amber: "bg-amber-500/15 text-amber-400",
-  violet: "bg-violet-500/15 text-violet-300",
+  cyan: "bg-syn-str/15 text-syn-str",
+  fuchsia: "bg-syn-key/15 text-syn-key",
+  amber: "bg-syn-bool/15 text-syn-bool",
+  violet: "bg-syn-num/15 text-syn-num",
 };
 export function IconBox({ accent, children }: { accent: Accent; children: ReactNode }) {
   return <div className={clsx("flex h-5 w-5 shrink-0 items-center justify-center rounded", ACCENT_BOX[accent])}>{children}</div>;
@@ -135,7 +135,7 @@ export function FloatingPanel({
   return createPortal(
     <>
       <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); onClose(); }} />
-      <div className="fixed z-50 flex flex-col overflow-hidden rounded-lg border border-line bg-ink-900 shadow-2xl shadow-black/60" style={{ ...pos, width: W, maxHeight }}>
+      <div className="fixed z-50 flex flex-col overflow-hidden rounded-lg border border-line bg-ink-900 shadow-pop" style={{ ...pos, width: W, maxHeight }}>
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-3 py-2">
           <div className="flex min-w-0 items-center gap-2">
             {icon}
@@ -227,8 +227,8 @@ function ObjPreview({ obj }: { obj: Record<string, unknown> }) {
   const short = vs.length > 16 ? `${vs.slice(0, 16)}…` : vs;
   return (
     <span className="flex items-center gap-1">
-      <span className="text-fuchsia-400">{k}:</span>
-      <span className="text-cyan-300/80">&quot;{short}&quot;</span>
+      <span className="text-syn-key">{k}:</span>
+      <span className="text-syn-str/80">&quot;{short}&quot;</span>
       {keys.length > 1 && <span className="text-fg-faint">+{keys.length - 1}</span>}
     </span>
   );
@@ -254,9 +254,9 @@ export function JsonPill({ raw }: { raw: string }) {
   const icon = <IconBox accent={accent}><span className="text-[10px] font-bold">{glyph}</span></IconBox>;
   const summary = isArr ? (
     <span className="flex items-center gap-0.5">
-      <span className="text-violet-400">[</span>
-      <span className="text-[10px] font-medium text-violet-300/80">{count}</span>
-      <span className="text-violet-400">]</span>
+      <span className="text-syn-num">[</span>
+      <span className="text-[10px] font-medium text-syn-num/80">{count}</span>
+      <span className="text-syn-num">]</span>
     </span>
   ) : (
     <ObjPreview obj={data as Record<string, unknown>} />

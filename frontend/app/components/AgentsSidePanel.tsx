@@ -68,7 +68,7 @@ export function AgentsSidePanel({ threadId, onClose }: { threadId: string; onClo
           </div>
           <button
             onClick={onClose}
-            className="rounded-md p-1.5 text-fg-faint transition-colors hover:bg-white/5 hover:text-fg"
+            className="rounded-md p-1.5 text-fg-faint transition-colors hover:bg-hilite/5 hover:text-fg"
             aria-label="Close"
           >
             <CloseIcon />
@@ -78,8 +78,8 @@ export function AgentsSidePanel({ threadId, onClose }: { threadId: string; onClo
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {data === null ? (
             <div className="space-y-3">
-              <div className="h-24 animate-pulse rounded-lg bg-white/[0.03]" />
-              <div className="h-24 animate-pulse rounded-lg bg-white/[0.03]" />
+              <div className="h-24 animate-pulse rounded-lg bg-hilite/[0.03]" />
+              <div className="h-24 animate-pulse rounded-lg bg-hilite/[0.03]" />
             </div>
           ) : empty ? (
             <p className="mt-8 text-center text-[13px] text-fg-faint">
@@ -96,7 +96,7 @@ export function AgentsSidePanel({ threadId, onClose }: { threadId: string; onClo
                   <SectionLabel>Declared</SectionLabel>
                   <div className="space-y-3">
                     {data.declared.map((a, i) => (
-                      <div key={`${a.name}-${i}`} className="rounded-lg border border-line bg-white/[0.02] p-4">
+                      <div key={`${a.name}-${i}`} className="rounded-lg border border-line bg-hilite/[0.02] p-4">
                         <div className="text-[13.5px] font-semibold text-fg">{a.name}</div>
                         {a.description && (
                           <div className="mt-0.5 text-[12px] text-fg-muted">{a.description}</div>
@@ -129,7 +129,7 @@ export function AgentsSidePanel({ threadId, onClose }: { threadId: string; onClo
                   <SectionLabel>Agents</SectionLabel>
                   <div className="space-y-3">
                     {data.observed.map((a) => (
-                      <div key={a.agent_id || a.name} className="rounded-lg border border-line bg-white/[0.02] p-4">
+                      <div key={a.agent_id || a.name} className="rounded-lg border border-line bg-hilite/[0.02] p-4">
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0">
                             <div className="truncate text-[13.5px] font-semibold text-fg">{a.name}</div>
@@ -160,7 +160,7 @@ export function AgentsSidePanel({ threadId, onClose }: { threadId: string; onClo
                                 <span
                                   key={t.name}
                                   title={t.count ? `${t.count} call${t.count === 1 ? "" : "s"}` : "requested, no execution span"}
-                                  className="inline-flex items-center gap-1.5 rounded-md border border-line bg-white/[0.04] px-2 py-1 font-mono text-[11px] text-fg-muted"
+                                  className="inline-flex items-center gap-1.5 rounded-md border border-line bg-hilite/[0.04] px-2 py-1 font-mono text-[11px] text-fg-muted"
                                 >
                                   <span className="h-1.5 w-1.5 rounded-[3px] bg-t_tool" />
                                   {t.name}
@@ -197,18 +197,18 @@ function ConfigRow({ label, value, derived }: { label: string; value: unknown; d
       : `${Object.keys(value as object).length} keys`;
 
   return (
-    <div className="mt-2 overflow-hidden rounded-md border border-line/70 bg-black/20">
+    <div className="mt-2 overflow-hidden rounded-md border border-line/70 bg-ink-950/60">
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.04]"
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-hilite/[0.04]"
       >
         <Chevron open={open} />
         <span className="font-mono text-[11px] text-fg">{label}</span>
         {derived && (
           <span
             title="recovered from the trace, not declared"
-            className="rounded border border-line bg-white/[0.04] px-1 py-px font-mono text-[9px] uppercase tracking-wide text-fg-faint"
+            className="rounded border border-line bg-hilite/[0.04] px-1 py-px font-mono text-[9px] uppercase tracking-wide text-fg-faint"
           >
             derived
           </span>
@@ -232,11 +232,11 @@ function ToolRow({ tool }: { tool: DeclaredTool }) {
   const hasDetail = Object.keys(params).length > 0 || Object.keys(extras).length > 0;
 
   return (
-    <div className="overflow-hidden rounded-md border border-line/70 bg-black/20">
+    <div className="overflow-hidden rounded-md border border-line/70 bg-ink-950/60">
       <button
         onClick={() => hasDetail && setOpen((o) => !o)}
         aria-expanded={hasDetail ? open : undefined}
-        className={`w-full px-2.5 py-1.5 text-left transition-colors ${hasDetail ? "hover:bg-white/[0.04]" : "cursor-default"}`}
+        className={`w-full px-2.5 py-1.5 text-left transition-colors ${hasDetail ? "hover:bg-hilite/[0.04]" : "cursor-default"}`}
       >
         <div className="flex items-center justify-between gap-2">
           <span className="flex min-w-0 items-center gap-1.5 font-mono text-[11.5px] text-fg">
@@ -258,7 +258,7 @@ function ToolRow({ tool }: { tool: DeclaredTool }) {
             {Object.keys(params).map((p) => (
               <span
                 key={p}
-                className="rounded border border-line bg-white/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-fg-faint"
+                className="rounded border border-line bg-hilite/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-fg-faint"
               >
                 {p}
               </span>

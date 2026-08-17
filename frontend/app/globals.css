@@ -2,14 +2,169 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+:root,
+[data-theme="dark"] {
   /* --font-sans / --font-mono / --font-display are injected on <html> by next/font in
      app/layout.tsx (self-hosted, no render-blocking request to fonts.googleapis.com). Do not
      redeclare them here: :root and next/font's class have equal specificity, so whichever
      stylesheet loads last would silently win. */
-  /* The app is dark-only. Without this every NATIVE control — number spinners, select
-     dropdowns, checkboxes, date pickers, autofill — renders in light browser chrome. */
+
+  /* ---------------------------------------------------------------------------------------
+     THE PALETTE. Two themes, one set of names — tailwind.config.ts reads every one of these as
+     rgb(var(--c-x) / <alpha-value>), so a component never names a colour, only a role.
+     Dark is the default and lives here on :root: a user with no stored preference, and every
+     server-rendered first paint, gets the theme the product was designed in. It is repeated on
+     [data-theme="dark"] so a NESTED wrapper can pin a subtree to it (the marketing page, the
+     Fleet office) even while the app runs light — :root alone only ever matches <html>.
+     Light overrides below, under [data-theme="light"].
+     Adding a colour means adding it to BOTH blocks — a missing light value silently falls back
+     to the dark one and shows up as, say, white-on-white.
+     --------------------------------------------------------------------------------------- */
+  --c-ink: 9 11 16;
+  --c-ink-950: 5 7 12;
+  --c-ink-900: 11 14 20;
+  --c-ink-800: 15 19 27;
+  --c-ink-700: 20 25 37;
+  --c-ink-600: 26 32 48;
+
+  --c-line: 27 34 48;
+  --c-line-soft: 20 26 38;
+  --c-line-bright: 40 50 74;
+
+  --c-fg: 232 235 242;
+  --c-fg-muted: 154 163 182;
+  --c-fg-faint: 92 102 121;
+
+  --c-signal: 34 211 238;
+  --c-signal-soft: 125 240 255;
+  --c-signal-dim: 14 116 144;
+  --c-signal-deep: 10 58 69;
+
+  --c-ok: 52 211 153;
+  --c-ok-dim: 15 61 51;
+  --c-fail: 251 113 133;
+  --c-fail-dim: 69 31 43;
+  --c-warn: 251 191 36;
+  --c-warn-dim: 61 47 18;
+  --c-info: 96 165 250;
+  --c-info-dim: 22 41 74;
+
+  --c-hilite: 255 255 255;
+
+  --c-t-agent: 122 162 255;
+  --c-t-llm: 52 211 153;
+  --c-t-tool: 251 146 60;
+  --c-t-retriever: 192 132 252;
+  --c-t-think: 196 181 253;
+  --c-t-delegate: 56 189 248;
+  --c-t-skill: 244 114 182;
+  --c-t-step: 139 148 167;
+
+  /* JSON / payload syntax highlighting — the one place the app renders code */
+  --c-syn-key: 232 121 249;
+  --c-syn-str: 103 232 249;
+  --c-syn-num: 167 139 250;
+  --c-syn-bool: 252 211 77;
+
+  /* surfaces that are not a flat token: the page canvas, its aurora, the grid, the scrollbar */
+  --canvas: #090b10;
+  --canvas-aurora:
+    radial-gradient(1000px 560px at 8% -10%, rgba(34, 211, 238, 0.07), transparent 60%),
+    radial-gradient(820px 520px at 102% -6%, rgba(122, 162, 255, 0.05), transparent 55%);
+  --grid-line: rgba(255, 255, 255, 0.022);
+  --blueprint-line: rgba(186, 215, 247, 0.035);
+  --hairline-x: rgba(186, 215, 247, 0.16);
+  --scrollbar: #1d2434;
+  --scrollbar-hover: #2b3448;
+  --select-bg: rgba(34, 211, 238, 0.25);
+  --select-fg: #d6fbff;
+  --heading-gradient: linear-gradient(180deg, #f2f6ff 25%, #8fe8fa 100%);
+  --cyan-gradient: linear-gradient(180deg, #7df0ff 0%, #22d3ee 55%, #0e7490 130%);
+
+  --sh-glow: 0 0 0 1px rgba(34, 211, 238, 0.25), 0 8px 30px -8px rgba(34, 211, 238, 0.35);
+  --sh-panel: 0 1px 0 0 rgba(255, 255, 255, 0.03) inset, 0 20px 40px -24px rgba(0, 0, 0, 0.8);
+  --sh-frame:
+    0 1px 1px 0 rgba(216, 236, 248, 0.14) inset, 0 24px 48px 0 rgba(34, 211, 238, 0.04) inset,
+    0 32px 64px -24px rgba(0, 0, 0, 0.85);
+  --sh-pop: 0 25px 50px -12px rgba(0, 0, 0, 0.75);
+
+  /* Without this every NATIVE control — number spinners, select dropdowns, checkboxes, date
+     pickers, autofill — renders in the wrong browser chrome. */
   color-scheme: dark;
+}
+
+/* Light. Not an inversion: the canvas is a cool off-white, cards are pure white and lift off it,
+   and every accent is darkened until it carries its meaning on white (cyan #22d3ee reads as a
+   highlighter on paper — the light signal is cyan-600). Contrast targets: body text ≥ 7:1,
+   muted text and accents ≥ 4.5:1 on their own surface. */
+[data-theme="light"] {
+  --c-ink: 244 247 251;
+  --c-ink-950: 234 239 246; /* recessed panels: the one step DARKER than the canvas */
+  --c-ink-900: 249 251 253;
+  --c-ink-800: 255 255 255; /* the card surface */
+  --c-ink-700: 240 244 250;
+  --c-ink-600: 230 236 245;
+
+  --c-line: 219 226 237;
+  --c-line-soft: 233 238 245;
+  --c-line-bright: 197 208 224;
+
+  --c-fg: 16 24 40;
+  --c-fg-muted: 84 96 118;
+  --c-fg-faint: 97 107 123;
+
+  --c-signal: 3 112 137;
+  --c-signal-soft: 2 88 108; /* "soft" is the hover step — on paper that means deeper, not brighter */
+  --c-signal-dim: 148 205 219;
+  --c-signal-deep: 224 246 251;
+
+  --c-ok: 1 120 85;
+  --c-ok-dim: 209 250 229;
+  --c-fail: 205 28 66;
+  --c-fail-dim: 255 228 232;
+  --c-warn: 161 82 7;
+  --c-warn-dim: 253 240 205;
+  --c-info: 29 90 219;
+  --c-info-dim: 219 232 254;
+
+  --c-hilite: 16 24 40;
+
+  --c-t-agent: 56 101 210;
+  --c-t-llm: 3 128 91;
+  --c-t-tool: 177 88 11;
+  --c-t-retriever: 134 56 205;
+  --c-t-think: 100 76 202;
+  --c-t-delegate: 1 118 171;
+  --c-t-skill: 203 40 121;
+  --c-t-step: 95 108 130;
+
+  --c-syn-key: 162 28 175;
+  --c-syn-str: 21 94 117;
+  --c-syn-num: 109 40 217;
+  --c-syn-bool: 166 76 8;
+
+  --canvas: #f4f7fb;
+  --canvas-aurora:
+    radial-gradient(1000px 560px at 8% -10%, rgba(8, 132, 162, 0.07), transparent 60%),
+    radial-gradient(820px 520px at 102% -6%, rgba(56, 101, 210, 0.05), transparent 55%);
+  --grid-line: rgba(16, 24, 40, 0.045);
+  --blueprint-line: rgba(16, 24, 40, 0.05);
+  --hairline-x: rgba(16, 24, 40, 0.14);
+  --scrollbar: #c8d2e0;
+  --scrollbar-hover: #aab8cc;
+  --select-bg: rgba(8, 132, 162, 0.22);
+  --select-fg: #06323d;
+  --heading-gradient: linear-gradient(180deg, #101828 25%, #0b6a83 100%);
+  --cyan-gradient: linear-gradient(180deg, #0e7490 0%, #0884a2 55%, #22d3ee 130%);
+
+  --sh-glow: 0 0 0 1px rgba(8, 132, 162, 0.3), 0 8px 24px -10px rgba(8, 132, 162, 0.35);
+  --sh-panel: 0 1px 0 0 rgba(255, 255, 255, 0.8) inset, 0 12px 28px -20px rgba(16, 24, 40, 0.45);
+  --sh-frame:
+    0 1px 1px 0 rgba(255, 255, 255, 0.9) inset, 0 1px 2px 0 rgba(16, 24, 40, 0.06),
+    0 24px 48px -28px rgba(16, 24, 40, 0.35);
+  --sh-pop: 0 10px 15px -3px rgba(16, 24, 40, 0.12), 0 20px 40px -12px rgba(16, 24, 40, 0.2);
+
+  color-scheme: light;
 }
 
 @layer base {
@@ -18,28 +173,26 @@
     text-rendering: optimizeLegibility;
   }
   body {
-    background-color: #090b10;
-    background-image:
-      radial-gradient(1000px 560px at 8% -10%, rgba(34, 211, 238, 0.07), transparent 60%),
-      radial-gradient(820px 520px at 102% -6%, rgba(122, 162, 255, 0.05), transparent 55%);
+    background-color: var(--canvas);
+    background-image: var(--canvas-aurora);
     background-attachment: fixed;
   }
   ::selection {
-    background: rgba(34, 211, 238, 0.25);
-    color: #d6fbff;
+    background: var(--select-bg);
+    color: var(--select-fg);
   }
   ::-webkit-scrollbar {
     width: 11px;
     height: 11px;
   }
   ::-webkit-scrollbar-thumb {
-    background: #1d2434;
+    background: var(--scrollbar);
     border-radius: 9px;
     border: 3px solid transparent;
     background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #2b3448;
+    background: var(--scrollbar-hover);
     background-clip: content-box;
   }
   ::-webkit-scrollbar-corner {
@@ -65,8 +218,8 @@
 @layer utilities {
   .bg-grid {
     background-image:
-      linear-gradient(to right, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+      linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
     background-size: 46px 46px;
     background-position: -1px -1px;
   }
@@ -100,8 +253,8 @@
   /* blueprint grid, wider and masked so it dissolves at the edges */
   .bg-blueprint {
     background-image:
-      linear-gradient(to right, rgba(186, 215, 247, 0.035) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(186, 215, 247, 0.035) 1px, transparent 1px);
+      linear-gradient(to right, var(--blueprint-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--blueprint-line) 1px, transparent 1px);
     background-size: 64px 64px;
     background-position: -1px -1px;
     mask-image: radial-gradient(ellipse 90% 80% at 50% 30%, black 30%, transparent 75%);
@@ -112,13 +265,13 @@
     @apply rounded-2xl border border-line/80 bg-ink-800/55 backdrop-blur-md shadow-frame;
   }
   .text-gradient {
-    background: linear-gradient(180deg, #f2f6ff 25%, #8fe8fa 100%);
+    background: var(--heading-gradient);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
   }
   .text-gradient-cyan {
-    background: linear-gradient(180deg, #7df0ff 0%, #22d3ee 55%, #0e7490 130%);
+    background: var(--cyan-gradient);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -128,7 +281,7 @@
   }
   .hairline-x {
     height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(186, 215, 247, 0.16), transparent);
+    background: linear-gradient(90deg, transparent, var(--hairline-x), transparent);
   }
   .nav-blur {
     @apply border-b border-line/60 bg-ink-950/70 backdrop-blur-md;

@@ -142,7 +142,7 @@ function Meta({ k, v, href }: { k: string; v: React.ReactNode; href?: string }) 
     </div>
   );
   return href ? (
-    <a href={href} className="transition-colors hover:bg-white/[0.025]">
+    <a href={href} className="transition-colors hover:bg-hilite/[0.025]">
       {inner}
     </a>
   ) : (

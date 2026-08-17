@@ -181,7 +181,7 @@ function Table({
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r[0]} className="border-b border-line/40 last:border-0 hover:bg-white/[0.015]">
+                <tr key={r[0]} className="border-b border-line/40 last:border-0 hover:bg-hilite/[0.015]">
                   {r.map((cell, i) => (
                     <td
                       key={i}

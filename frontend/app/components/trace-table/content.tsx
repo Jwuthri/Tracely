@@ -99,7 +99,7 @@ function Attachment({ part }: { part: Exclude<Part, { kind: "text" }> }) {
     );
   }
   const icon = isImg ? (
-    <ImageIcon className="h-3.5 w-3.5 shrink-0 text-fuchsia-400" />
+    <ImageIcon className="h-3.5 w-3.5 shrink-0 text-syn-key" />
   ) : (
     <FileIcon className="h-3.5 w-3.5 shrink-0 text-info" />
   );

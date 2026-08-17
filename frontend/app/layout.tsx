@@ -56,7 +56,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html
       lang="en"
       className={`${fontSans.variable} ${fontDisplay.variable} ${fontMono.variable}`}
+      // The theme script below writes data-theme onto this very element before React hydrates,
+      // so the server HTML and the client DOM legitimately differ here. suppressHydrationWarning
+      // is one level deep — it silences the <html> tag's own attributes, nothing inside.
+      suppressHydrationWarning
     >
+      <head>
+        {/* Paint the stored theme onto <html> BEFORE the first paint. A React effect runs after
+            hydration, which on a light-theme reload means a full dark page flashes first. Dark is
+            the default, so no stored preference = no work. Keep the key in sync with
+            components/ThemeToggle.tsx. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(localStorage.getItem("tracely-theme")==="light")document.documentElement.dataset.theme="light"}catch(e){}`,
+          }}
+        />
+      </head>
       <body className="min-h-screen bg-ink font-sans text-fg antialiased">
         {/* The dashboard shell (sidebar/topbar) lives in the (app) route group; (auth) pages render bare. */}
         <AuthRootProvider>{children}</AuthRootProvider>

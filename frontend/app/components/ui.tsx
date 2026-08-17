@@ -9,7 +9,7 @@ const BADGE: Record<Variant, string> = {
   warn: "bg-warn/10 text-warn border-warn/25",
   info: "bg-info/10 text-info border-info/25",
   signal: "bg-signal/10 text-signal border-signal/25",
-  neutral: "bg-white/[0.04] text-fg-muted border-line",
+  neutral: "bg-hilite/[0.04] text-fg-muted border-line",
 };
 const DOT: Record<Variant, string> = {
   ok: "bg-ok",

@@ -73,7 +73,7 @@ export default async function GatesPage({
             <RowLink
               key={g.id}
               href={`/gates/${g.id}`}
-              className="group grid grid-cols-[92px_1fr_150px_120px_28px] items-center gap-3 border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-white/[0.025]"
+              className="group grid grid-cols-[92px_1fr_150px_120px_28px] items-center gap-3 border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-hilite/[0.025]"
             >
               <Badge variant={gateVariant(g.status)} dot>
                 {g.status}

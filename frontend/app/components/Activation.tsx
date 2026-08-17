@@ -157,7 +157,7 @@ TRACELY_API=${s.endpoint} TRACELY_KEY=${s.ingestKey} \\
       </div>
       <ol className="divide-y divide-line/50">
         {steps.map((step, i) => (
-          <li key={step.title} className={i === current ? "bg-white/[0.02] px-4 py-3.5" : "px-4 py-2.5"}>
+          <li key={step.title} className={i === current ? "bg-hilite/[0.02] px-4 py-3.5" : "px-4 py-2.5"}>
             <div className="flex items-center gap-2.5">
               <span
                 className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border text-[9px] ${

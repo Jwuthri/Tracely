@@ -106,7 +106,7 @@ export function ClusterList({ clusters }: { clusters: FailureCluster[] }) {
           <RowLink
             key={c.id}
             href={`/clusters/${c.id}`}
-            className={`${GRID} group border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-white/[0.025]`}
+            className={`${GRID} group border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-hilite/[0.025]`}
           >
             <SelectBox checked={selected.has(c.id)} onChange={() => toggle(c.id)} label={`Select "${c.label}"`} />
             <span className="text-right font-display text-[20px] font-extrabold tabular-nums text-fail">{c.count}</span>

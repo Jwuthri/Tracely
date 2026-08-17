@@ -4,10 +4,10 @@ import type { ReactNode } from "react";
 
 function Mark() {
   return (
-    <div className="relative grid h-11 w-11 place-items-center rounded-[13px] border border-signal/30 bg-signal/10 shadow-[0_0_28px_-6px_rgba(34,211,238,0.7)]">
+    <div className="relative grid h-11 w-11 place-items-center rounded-[13px] border border-signal/30 bg-signal/10 shadow-[0_0_28px_-6px_rgb(var(--c-signal)/0.7)]">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-        <path d="M12 2 22 12 12 22 2 12Z" stroke="#22d3ee" strokeWidth="1.8" strokeLinejoin="round" />
-        <circle cx="12" cy="12" r="2.7" fill="#22d3ee" />
+        <path d="M12 2 22 12 12 22 2 12Z" stroke="rgb(var(--c-signal))" strokeWidth="1.8" strokeLinejoin="round" />
+        <circle cx="12" cy="12" r="2.7" fill="rgb(var(--c-signal))" />
       </svg>
     </div>
   );

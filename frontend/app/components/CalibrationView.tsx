@@ -141,7 +141,7 @@ export function CalibrationView() {
               "w-full rounded-xl border p-4 text-left transition-colors",
               e.name === selected
                 ? "border-signal/40 bg-signal/[0.06]"
-                : "border-line bg-ink-900/40 hover:border-line-strong hover:bg-white/[0.02]",
+                : "border-line bg-ink-900/40 hover:border-line-strong hover:bg-hilite/[0.02]",
             )}
           >
             <div className="flex items-center justify-between gap-2">

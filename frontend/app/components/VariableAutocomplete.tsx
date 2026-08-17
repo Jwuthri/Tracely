@@ -66,7 +66,7 @@ export function VariableAutocomplete({
   return (
     <div
       ref={listRef}
-      className="absolute z-50 max-h-60 w-72 overflow-y-auto rounded-lg border border-line-bright bg-ink-800 py-1 shadow-2xl shadow-black/60"
+      className="absolute z-50 max-h-60 w-72 overflow-y-auto rounded-lg border border-line-bright bg-ink-800 py-1 shadow-pop"
       style={{ top: position.top, left: position.left }}
       role="listbox"
     >

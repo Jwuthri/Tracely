@@ -230,7 +230,7 @@ export function ScenariosManager({
                   openEditor(s.id);
                 }
               }}
-              className="group grid cursor-pointer grid-cols-[86px_1fr_auto] items-start gap-3 border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-white/[0.025] focus-visible:bg-white/[0.025] focus-visible:outline-none"
+              className="group grid cursor-pointer grid-cols-[86px_1fr_auto] items-start gap-3 border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-hilite/[0.025] focus-visible:bg-hilite/[0.025] focus-visible:outline-none"
             >
               <Badge variant={s.kind === "ADVERSARIAL" ? "warn" : "info"}>
                 {s.kind === "ADVERSARIAL" ? "attack" : "scripted"}

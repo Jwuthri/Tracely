@@ -55,7 +55,7 @@ export function StatePanel({
           </div>
           <button
             onClick={onClose}
-            className="rounded-md p-1.5 text-fg-faint transition-colors hover:bg-white/5 hover:text-fg"
+            className="rounded-md p-1.5 text-fg-faint transition-colors hover:bg-hilite/5 hover:text-fg"
             aria-label="Close"
           >
             <CloseIcon />
@@ -99,7 +99,7 @@ export function StatePanel({
                 </div>
                 <div className="space-y-3">
                   {visibleSteps.map((s) => (
-                    <div key={s.span_id} className="rounded-lg border border-line bg-white/[0.02] p-3">
+                    <div key={s.span_id} className="rounded-lg border border-line bg-hilite/[0.02] p-3">
                       <div className="flex items-center justify-between gap-2">
                         <span className="truncate text-[12.5px] font-semibold text-fg">{s.label}</span>
                         {s.agent_id && (
@@ -157,11 +157,11 @@ function ValueRow({ label, value, kind }: { label: string; value: unknown; kind?
           : String(value);
 
   return (
-    <div className="overflow-hidden rounded-md border border-line/70 bg-black/20">
+    <div className="overflow-hidden rounded-md border border-line/70 bg-ink-950/60">
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.04]"
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-hilite/[0.04]"
       >
         <Chevron open={open} />
         <span className="shrink-0 font-mono text-[11px] text-fg">{label}</span>

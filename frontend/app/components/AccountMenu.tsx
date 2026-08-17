@@ -144,7 +144,7 @@ export function AccountMenu({ me }: { me: Me | null }) {
                           key={p.id}
                           onClick={() => switchTo(p.id)}
                           disabled={busy}
-                          className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left transition-colors hover:bg-white/[0.04] disabled:opacity-50"
+                          className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left transition-colors hover:bg-hilite/[0.04] disabled:opacity-50"
                         >
                           <span
                             className={clsx(
@@ -229,7 +229,7 @@ export function AccountMenu({ me }: { me: Me | null }) {
           {MODE === "local" && me?.user_id && (
             <a
               href="/settings/account"
-              className="block px-3 py-2 text-[12.5px] text-fg-muted transition-colors hover:bg-white/[0.04] hover:text-fg"
+              className="block px-3 py-2 text-[12.5px] text-fg-muted transition-colors hover:bg-hilite/[0.04] hover:text-fg"
             >
               Change password
             </a>

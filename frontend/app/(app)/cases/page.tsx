@@ -42,7 +42,7 @@ export default async function CasesPage({
             <RowLink
               key={c.id}
               href={`/cases/${c.id}`}
-              className="group grid grid-cols-[1fr_130px_120px_90px_36px] items-center gap-3 border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-white/[0.025]"
+              className="group grid grid-cols-[1fr_130px_120px_90px_36px] items-center gap-3 border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-hilite/[0.025]"
             >
               <span className="flex min-w-0 flex-col gap-0.5">
                 <span className="truncate text-[13.5px] text-fg">{c.title || "case"}</span>

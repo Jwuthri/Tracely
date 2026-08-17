@@ -24,7 +24,7 @@ function inline(text: string, keyp: string): ReactNode[] {
     const key = `${keyp}i${i++}`;
     if (m[1]) {
       out.push(
-        <code key={key} className="rounded bg-white/[0.07] px-1 py-px font-mono text-[10.5px] text-fg">
+        <code key={key} className="rounded bg-hilite/[0.07] px-1 py-px font-mono text-[10.5px] text-fg">
           {tok.slice(1, -1)}
         </code>,
       );
@@ -87,7 +87,7 @@ function parseBlocks(src: string): ReactNode[] {
       blocks.push(
         <pre
           key={k++}
-          className="overflow-auto rounded-md border border-line bg-black/30 p-2 font-mono text-[10.5px] leading-relaxed text-fg-muted"
+          className="overflow-auto rounded-md border border-line bg-ink-950/70 p-2 font-mono text-[10.5px] leading-relaxed text-fg-muted"
         >
           {buf.join("\n")}
         </pre>,

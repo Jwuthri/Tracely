@@ -186,7 +186,7 @@ export function MetaAnalysisPanel() {
             <Block title="Patterns">
               <div className="space-y-2.5">
                 {res.patterns.map((p, i) => (
-                  <div key={i} className="rounded-lg border border-line bg-white/[0.02] p-3">
+                  <div key={i} className="rounded-lg border border-line bg-hilite/[0.02] p-3">
                     <div className="text-[13px] text-fg">{p.description}</div>
                     {p.evidence && (
                       <div className="mt-1 text-[12px] text-fg-faint">{p.evidence}</div>
@@ -208,7 +208,7 @@ export function MetaAnalysisPanel() {
             <Block title="Correlations">
               <div className="overflow-hidden rounded-lg border border-line">
                 <table className="w-full text-[12.5px]">
-                  <thead className="bg-white/[0.03] text-fg-faint">
+                  <thead className="bg-hilite/[0.03] text-fg-faint">
                     <tr>
                       <th className="px-3 py-2 text-left font-medium">Metric pair</th>
                       <th className="px-3 py-2 text-right font-medium">Spearman</th>
@@ -246,7 +246,7 @@ export function MetaAnalysisPanel() {
                 {res.outliers.map((o) => (
                   <div
                     key={o.conversation_id}
-                    className="flex items-start justify-between gap-3 rounded-lg border border-line bg-white/[0.02] p-3"
+                    className="flex items-start justify-between gap-3 rounded-lg border border-line bg-hilite/[0.02] p-3"
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -319,7 +319,7 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
 
 function MiniStat({ label, value, accent }: { label: string; value: React.ReactNode; accent?: string }) {
   return (
-    <div className="rounded-lg border border-line bg-white/[0.02] px-3.5 py-2.5">
+    <div className="rounded-lg border border-line bg-hilite/[0.02] px-3.5 py-2.5">
       <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-fg-faint">{label}</div>
       <div className={`mt-1 font-display text-[22px] font-bold tabular-nums ${accent ?? "text-fg"}`}>
         {value}
@@ -332,7 +332,7 @@ function Chip({ children, title }: { children: React.ReactNode; title?: string }
   return (
     <span
       title={title}
-      className="inline-flex items-center gap-1 rounded-md border border-line bg-white/[0.04] px-1.5 py-0.5 font-mono text-[10.5px] text-fg-muted"
+      className="inline-flex items-center gap-1 rounded-md border border-line bg-hilite/[0.04] px-1.5 py-0.5 font-mono text-[10.5px] text-fg-muted"
     >
       {children}
     </span>
@@ -354,9 +354,9 @@ function Empty() {
 function Skeleton() {
   return (
     <div className="space-y-3">
-      <div className="h-16 animate-pulse rounded-lg bg-white/[0.03]" />
-      <div className="h-4 w-3/4 animate-pulse rounded bg-white/[0.03]" />
-      <div className="h-24 animate-pulse rounded-lg bg-white/[0.03]" />
+      <div className="h-16 animate-pulse rounded-lg bg-hilite/[0.03]" />
+      <div className="h-4 w-3/4 animate-pulse rounded bg-hilite/[0.03]" />
+      <div className="h-24 animate-pulse rounded-lg bg-hilite/[0.03]" />
     </div>
   );
 }

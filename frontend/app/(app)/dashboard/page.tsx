@@ -145,7 +145,7 @@ export default async function Dashboard() {
               <a
                 key={t.trace_id}
                 href={`/traces/${t.trace_id}`}
-                className="flex items-center justify-between border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-white/[0.025]"
+                className="flex items-center justify-between border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-hilite/[0.025]"
               >
                 <span className="flex min-w-0 items-center gap-2.5">
                   <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.has_error ? "bg-fail" : "bg-ok"}`} />
@@ -169,7 +169,7 @@ export default async function Dashboard() {
               <a
                 key={c.id}
                 href={`/cases/${c.id}`}
-                className="flex items-center justify-between border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-white/[0.025]"
+                className="flex items-center justify-between border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-hilite/[0.025]"
               >
                 <span className="truncate text-[13px] text-fg">{c.title || "case"}</span>
                 <span className="flex shrink-0 items-center gap-2">

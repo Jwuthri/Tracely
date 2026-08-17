@@ -3,6 +3,7 @@
 import { Fragment } from "react";
 import { usePathname } from "next/navigation";
 import { IconChevron, IconSearch } from "./icons";
+import { ThemeToggle } from "./ThemeToggle";
 
 const LABELS: Record<string, string> = {
   "": "Dashboard",
@@ -62,6 +63,7 @@ export function Topbar() {
             ⌘K
           </kbd>
         </button>
+        <ThemeToggle />
       </div>
     </header>
   );

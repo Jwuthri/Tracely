@@ -461,7 +461,7 @@ export function AddColumnModal({
     >
       <div
         className={clsx(
-          "mt-4 w-full max-w-xl overflow-hidden rounded-xl border border-line bg-ink-900 shadow-2xl shadow-black/70",
+          "mt-4 w-full max-w-xl overflow-hidden rounded-xl border border-line bg-ink-900 shadow-pop",
           "border-l-4 transition-colors duration-300",
           levelColors.lborder,
         )}

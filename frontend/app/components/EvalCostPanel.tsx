@@ -104,7 +104,7 @@ function CostTable({
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.name} className="border-b border-line/40 last:border-0 hover:bg-white/[0.015]">
+            <tr key={r.name} className="border-b border-line/40 last:border-0 hover:bg-hilite/[0.015]">
               <td className="px-2 py-2 font-mono text-fg">{r.name}</td>
               <td className="px-2 py-2 text-right font-mono tabular-nums text-fg">
                 {fmtCents(r.cost_usd_cents)}

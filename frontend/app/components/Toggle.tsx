@@ -46,7 +46,7 @@ export function Toggle({
         <span
           className={clsx(
             "absolute top-1/2 h-[12px] w-[12px] -translate-y-1/2 rounded-full transition-all",
-            checked ? "left-[16px] bg-signal shadow-[0_0_8px_rgba(34,211,238,0.6)]" : "left-[2px] bg-fg-faint",
+            checked ? "left-[16px] bg-signal shadow-[0_0_8px_rgb(var(--c-signal)/0.6)]" : "left-[2px] bg-fg-faint",
           )}
         />
       </span>
