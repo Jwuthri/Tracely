@@ -55,3 +55,19 @@ export function usePlayClock(total: number) {
 
   return { t, playing, speed, setSpeed, setT, setPlaying, restart, seek, toggle };
 }
+
+/** True for ~one walk's worth of time after a character's stand point moved — drives the
+ *  stepping-legs sprite. Shared by the Fleet office and the landing-page peek. */
+export function useWalking(x: number, y: number) {
+  const [walking, setWalking] = useState(false);
+  const prev = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    const moved = prev.current && (Math.abs(prev.current.x - x) > 1.5 || Math.abs(prev.current.y - y) > 1.5);
+    prev.current = { x, y };
+    if (!moved) return;
+    setWalking(true);
+    const id = setTimeout(() => setWalking(false), 800);
+    return () => clearTimeout(id);
+  }, [x, y]);
+  return walking;
+}

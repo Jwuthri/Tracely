@@ -463,3 +463,115 @@ async def test_a_plain_member_cannot_invite_or_add_workspaces(client, hosted):
     assert (
         await client.post("/auth/projects", json={"name": "Sneaky"}, headers=mh)
     ).status_code == 403
+
+
+# ── leaving, and being removed ────────────────────────────────────────────────
+
+
+async def _invite_and_accept(client, owner_token, email, role="MEMBER", password="member-pw-1"):
+    """Put `email` in the owner's org and hand back their session token + user id."""
+    inv = await client.post(
+        "/auth/invitations", json={"email": email, "role": role}, headers=_bearer(owner_token)
+    )
+    assert inv.status_code == 200, inv.text
+    joined = await client.post(
+        "/auth/invitations/accept", json={"token": inv.json()["token"], "password": password}
+    )
+    assert joined.status_code == 200, joined.text
+    return joined.json()["token"], joined.json()["user_id"]
+
+
+async def test_removing_a_member_revokes_every_workspace_in_the_org(client, hosted):
+    """The point of the endpoint: access is derived from the seat, so dropping it locks the
+    door — no per-workspace cleanup to forget."""
+    owner = await _company_token(client)
+    await client.post("/auth/projects", json={"name": "W2"}, headers=_bearer(owner))
+    mtoken, muid = await _invite_and_accept(client, owner, "teammate@x.test")
+    projects = [p["id"] for p in (await client.get("/auth/me", headers=_bearer(mtoken))).json()["projects"]]
+    assert len(projects) == 2
+
+    r = await client.delete(f"/auth/members/{muid}", headers=_bearer(owner))
+    assert r.status_code == 200, r.text
+
+    for pid in projects:
+        probe = await client.get("/auth/me", headers={**_bearer(mtoken), "X-Tracely-Project": pid})
+        assert probe.status_code == 403
+    assert (await client.get("/auth/me", headers=_bearer(mtoken))).status_code == 403
+    rows = (await client.get("/auth/members", headers=_bearer(owner))).json()
+    assert [r["email"] for r in rows] == ["boss@x.test"]
+
+
+async def test_leaving_lands_you_in_your_remaining_workspace(client, hosted):
+    """Someone who already had their own account keeps it; `switch_to` is where the UI puts them
+    so the next request isn't aimed at a workspace they just lost."""
+    await _signup(client, "boss@x.test")  # first registrant claims the company org
+    own = await _signup(client, "nomad@x.test")  # ...so this one gets a personal org
+    personal = (await client.get("/auth/me", headers=_bearer(own))).json()
+    boss = await client.post(
+        "/auth/login", json={"email": "boss@x.test", "password": "hunter2-pw"}
+    )
+    btoken = boss.json()["token"]
+    company = (await client.get("/auth/me", headers=_bearer(btoken))).json()
+    mtoken, muid = await _invite_and_accept(client, btoken, "nomad@x.test")
+
+    # You leave the org backing your ACTIVE workspace — the header is what the frontend's
+    # active-workspace cookie forwards, and without it "which org?" is whichever is oldest.
+    r = await client.delete(
+        f"/auth/members/{muid}",
+        headers={**_bearer(mtoken), "X-Tracely-Project": company["project_id"]},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["switch_to"] == personal["project_id"]
+    after = (await client.get("/auth/me", headers=_bearer(mtoken))).json()
+    assert [o["id"] for o in after["organizations"]] == [personal["organization_id"]]
+
+
+async def test_leaving_your_only_organization_is_refused(client, hosted):
+    """An invited-only account has nowhere else to sign in to."""
+    owner = await _company_token(client)
+    mtoken, muid = await _invite_and_accept(client, owner, "teammate@x.test")
+    r = await client.delete(f"/auth/members/{muid}", headers=_bearer(mtoken))
+    assert r.status_code == 409 and "only organization" in r.json()["detail"]
+
+
+async def test_the_last_owner_cannot_leave_or_be_removed(client, hosted):
+    """Otherwise the org survives with nobody able to invite, bill or delete it."""
+    owner = await _company_token(client)
+    me = (await client.get("/auth/me", headers=_bearer(owner))).json()
+    admin_token, _ = await _invite_and_accept(client, owner, "admin@x.test", role="ADMIN")
+
+    r = await client.delete(f"/auth/members/{me['user_id']}", headers=_bearer(owner))
+    assert r.status_code == 409 and "must keep an owner" in r.json()["detail"]
+    # and an admin can't take the owner's seat either
+    r = await client.delete(f"/auth/members/{me['user_id']}", headers=_bearer(admin_token))
+    assert r.status_code == 403
+
+
+async def test_a_plain_member_cannot_remove_a_teammate(client, hosted, monkeypatch):
+    monkeypatch.setattr(settings, "free_seat_limit", 4)  # owner + two teammates
+    owner = await _company_token(client)
+    mtoken, _ = await _invite_and_accept(client, owner, "one@x.test")
+    _other, other_uid = await _invite_and_accept(
+        client, owner, "two@x.test", password="member-pw-2"
+    )
+    r = await client.delete(f"/auth/members/{other_uid}", headers=_bearer(mtoken))
+    assert r.status_code == 403
+
+
+async def test_a_personal_account_cannot_be_left(client, hosted):
+    """It is the user's own login, not a team they joined."""
+    await _signup(client, "boss@x.test")
+    solo = await _signup(client, "solo@x.test")
+    me = (await client.get("/auth/me", headers=_bearer(solo))).json()
+    r = await client.delete(f"/auth/members/{me['user_id']}", headers=_bearer(solo))
+    assert r.status_code == 400
+
+
+async def test_removal_cannot_be_aimed_outside_the_callers_org(client, hosted):
+    """No org id in the path, so the worst a hostile owner can do is 404 on a stranger."""
+    boss = await _company_token(client)
+    outsider = await _signup(client, "outsider@x.test")
+    ouid = (await client.get("/auth/me", headers=_bearer(outsider))).json()["user_id"]
+    r = await client.delete(f"/auth/members/{ouid}", headers=_bearer(boss))
+    assert r.status_code == 404
+    assert (await client.get("/auth/me", headers=_bearer(outsider))).status_code == 200

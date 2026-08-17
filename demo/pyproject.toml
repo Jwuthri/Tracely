@@ -11,4 +11,7 @@ dependencies = [
   "langgraph>=1.0",
   "langchain-openai>=1.0",
   "python-dotenv>=1.0",
+  # server.py: serve the agents over HTTP so Tracely scenarios can drive them
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
 ]

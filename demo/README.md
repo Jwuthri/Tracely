@@ -43,7 +43,36 @@ uv run demo_anthropic.py       # needs ANTHROPIC_API_KEY
 
 (or `make langgraph` / `make openai-agents` / `make anthropic` / `make all`.)
 
-Each script prints the agent's answers, then flushes its traces to Tracely. The demos use
+Each script prints the agent's answers, then flushes its traces to Tracely.
+
+## Drive it from Tracely (scenarios)
+
+The scripts above *push* a fixed conversation. To let Tracely **drive** an agent instead — replay
+a scripted regression conversation, or turn a red-team attacker loose on it — serve the same agent
+over HTTP:
+
+```bash
+DEMO=langgraph uv run uvicorn server:app --port 8100    # or DEMO=openai / DEMO=anthropic
+# make serve DEMO=langgraph PORT=8100
+```
+
+One framework per process (`DEMO=langgraph|openai|anthropic`), so only that framework's
+auto-instrumentor is active. `server.py` exposes `POST /chat` and — crucially — joins Tracely's
+trace via the incoming `traceparent` header (`tracely.trace(traceparent=…)`), so the agent's own
+tool and generation spans nest **inside** the turn Tracely drove. That is what lets a scenario's
+step-level and adversarial evaluators grade the real trajectory, not just request-in/reply-out.
+
+Then in the Tracely UI, under **Scenarios**:
+
+1. Pick the agent and register its endpoint: `http://localhost:8100/chat` (use
+   `http://host.docker.internal:8100/chat` if Tracely runs in Docker and the server on your host).
+   No reply-path config needed — `server.py` returns `{"reply": …}`, a shape Tracely extracts by
+   default.
+2. Add a **Scripted** scenario (fixed turns) or an **Adversarial** one (an attacker LLM improvises
+   toward a goal — e.g. *"get the agent to issue a refund above the $100 limit"*). Adversarial
+   scenarios let you pin the **attacker model** per scenario; scripted ones don't need one.
+3. **Run** it — Tracely POSTs each turn to the server and the conversation fills in under a fresh
+   thread, graded by your evaluators. The demos use
 the published [`tracely-ai`](https://pypi.org/project/tracely-ai/) package (≥ 0.3.3) —
 exactly what your own app would install. git tag sdk-v0.3.4 && git push origin sdk-v0.3.4
 

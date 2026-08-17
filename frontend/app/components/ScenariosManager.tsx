@@ -331,6 +331,7 @@ function ScenarioForm({
   );
   const [goal, setGoal] = useState(scenario?.goal ?? "");
   const [maxTurns, setMaxTurns] = useState(scenario?.max_turns ?? 6);
+  const [attackerModel, setAttackerModel] = useState(scenario?.attacker_model ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -348,6 +349,8 @@ function ScenarioForm({
         turns: filled,
         goal,
         max_turns: kind === "ADVERSARIAL" ? maxTurns : filled.length,
+        // Only meaningful for adversarial; harmless (and cleared) for scripted.
+        attacker_model: kind === "ADVERSARIAL" ? attackerModel.trim() : "",
       };
       const r = await fetch(
         editing ? `/api/scenarios/${scenario!.id}` : "/api/scenarios",
@@ -428,19 +431,33 @@ function ScenarioForm({
               className={`${FIELD} mt-1 resize-y leading-relaxed`}
             />
           </div>
-          <div className="w-32">
-            <label className={LABEL} htmlFor={`${uid}-max`}>
-              Max turns
-            </label>
-            <input
-              id={`${uid}-max`}
-              type="number"
-              min={1}
-              max={20}
-              value={maxTurns}
-              onChange={(e) => setMaxTurns(Number(e.target.value))}
-              className={`${FIELD} mt-1`}
-            />
+          <div className="flex flex-wrap gap-3">
+            <div className="w-32">
+              <label className={LABEL} htmlFor={`${uid}-max`}>
+                Max turns
+              </label>
+              <input
+                id={`${uid}-max`}
+                type="number"
+                min={1}
+                max={20}
+                value={maxTurns}
+                onChange={(e) => setMaxTurns(Number(e.target.value))}
+                className={`${FIELD} mt-1`}
+              />
+            </div>
+            <div className="min-w-[220px] flex-1">
+              <label className={LABEL} htmlFor={`${uid}-model`}>
+                Attacker model
+              </label>
+              <input
+                id={`${uid}-model`}
+                value={attackerModel}
+                onChange={(e) => setAttackerModel(e.target.value)}
+                placeholder="server default — e.g. anthropic/claude-opus-5"
+                className={`${FIELD} mt-1`}
+              />
+            </div>
           </div>
           <p className="text-[12px] text-fg-faint">
             An attacker model improvises each turn toward the goal, adapting to what the agent

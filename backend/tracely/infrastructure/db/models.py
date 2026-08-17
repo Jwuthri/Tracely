@@ -469,6 +469,10 @@ class Scenario(Base):
     turns: Mapped[list] = mapped_column(JSON, default=list)
     goal: Mapped[str] = mapped_column(Text, default="")
     max_turns: Mapped[int] = mapped_column(Integer, default=6)
+    # ADVERSARIAL only: the OpenRouter model id the attacker role-plays with. Blank = the server's
+    # `attacker_model` (then the default judge model). SCRIPTED replays fixed turns, so it has no
+    # attacker to pick a model for.
+    attacker_model: Mapped[str] = mapped_column(String(120), default="")
     source_thread_id: Mapped[str] = mapped_column(String(64), default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[str] = mapped_column(String(128), default="ui")

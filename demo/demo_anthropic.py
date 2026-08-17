@@ -161,8 +161,11 @@ HISTORY: list[dict] = []  # clean user/assistant turns, threaded into every new 
 
 
 @tracely.observe(as_type="agent", name=CONCIERGE)
-def concierge_turn(question: str) -> str:
-    """One customer turn = one trace, rooted at this AGENT span."""
+def concierge_turn(question: str, history: list[dict] | None = None) -> str:
+    """One customer turn = one trace, rooted at this AGENT span.
+
+    `history` defaults to the module-global `HISTORY` (standalone script); the FastAPI server
+    passes the caller's history in instead, so the class stays stateless per request."""
     # deterministic input guardrail — a first-class GUARDRAIL span in the trace
     blocked = shared.is_injection(question)
     with tracely.guardrail("prompt-injection-check", agent=CONCIERGE) as g:
@@ -176,8 +179,17 @@ def concierge_turn(question: str) -> str:
         CONCIERGE_SYSTEM,
         anthropic_tools(["get_order", "check_inventory", "shipping_quote", "escalate_refund"]),
         CONCIERGE_IMPLS,
-        [*HISTORY, {"role": "user", "content": question}],
+        [*(HISTORY if history is None else history), {"role": "user", "content": question}],
     )
+
+
+# The name and per-turn entry point the FastAPI server (server.py) drives.
+AGENT = CONCIERGE
+
+
+def reply(message: str, history: list[dict] | None = None, conversation_id: str = "") -> str:
+    """One turn for server.py — history arrives in each request (Anthropic keeps none itself)."""
+    return concierge_turn(message, history or [])
 
 
 # Declared catalog → Tracely's Conversation Agents panel shows the real setup

@@ -11,3 +11,10 @@ anthropic:      ## run the Anthropic orchestrator/worker demo
 	uv run demo_anthropic.py
 
 all: langgraph openai-agents anthropic
+
+# Serve one demo over HTTP so Tracely scenarios can drive it. DEMO=langgraph|openai|anthropic.
+DEMO ?= langgraph
+PORT ?= 8100
+serve:          ## serve a demo agent for Tracely scenarios (DEMO=… PORT=…)
+	DEMO=$(DEMO) uv run uvicorn server:app --port $(PORT)
+

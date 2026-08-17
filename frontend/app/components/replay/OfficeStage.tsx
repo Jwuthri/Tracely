@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { layoutOffice, librarySkills, narrate, poseAt, stationInfo, wallTools, type DeclaredTool, type Pose, type StationInfo } from "./office";
 import { Bookshelf, CoffeeMachine, Desk, OfficeDoor, PixelPerson, Plant, ToolsRack } from "./sprites";
 import { fmtMs, OFFICE_PACING, orderActors, realMsAt, toPlayEvents, type PlayEvent, type ReplayActor, type ReplayEvent } from "./timeline";
-import { usePlayClock } from "./useClock";
+import { usePlayClock, useWalking } from "./useClock";
 
 /* The Fleet office: the conversation acted out as a scene. Every character is a real agent
    from the trace; delegations are walks with speech bubbles, thinking is a thought cloud,
@@ -219,17 +219,7 @@ export function OfficeStage({ threadId }: { threadId: string }) {
 function Walker({ actor, pose, slot, selected, onClick }: {
   actor: ReplayActor; pose: Pose; slot: number; selected: boolean; onClick: () => void;
 }) {
-  const [walking, setWalking] = useState(false);
-  const prev = useRef<{ x: number; y: number } | null>(null);
-  useEffect(() => {
-    const moved = prev.current && (Math.abs(prev.current.x - pose.x) > 1.5 || Math.abs(prev.current.y - pose.y) > 1.5);
-    prev.current = { x: pose.x, y: pose.y };
-    if (moved) {
-      setWalking(true);
-      const id = setTimeout(() => setWalking(false), 800);
-      return () => clearTimeout(id);
-    }
-  }, [pose.x, pose.y]);
+  const walking = useWalking(pose.x, pose.y);
 
   const hue = hueOf(actor.id);
   const size = actor.depth ? 38 : 46;

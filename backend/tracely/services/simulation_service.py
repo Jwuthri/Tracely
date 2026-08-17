@@ -235,7 +235,8 @@ class SimulationService:
                     attacker_prompt(scenario.goal, transcript, tried, weaknesses),
                     response_format=AttackerMove,
                     system_prompt=ATTACKER_SYSTEM,
-                    model=settings.attacker_model or None,
+                    # Per-scenario pin wins; else the server default; else provider's default model.
+                    model=scenario.attacker_model or settings.attacker_model or None,
                     # Warm: a deterministic attacker rephrases the same probe every turn.
                     temperature=0.9,
                 )

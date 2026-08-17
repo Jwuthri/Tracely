@@ -420,6 +420,79 @@ async def revoke_invitation(
     return {"ok": True}
 
 
+@local_router.delete("/auth/members/{user_id}")
+async def remove_member(
+    user_id: str,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Give up a seat, or take one away.
+
+    One endpoint for both, because they are the same row: removing yourself is leaving, removing
+    someone else needs OWNER/ADMIN. Access is derived from the membership, so dropping it revokes
+    every workspace in the org at once — and only ever inside the caller's own org, since that is
+    the only one this can be aimed at. The person keeps their account, their other orgs and their
+    own data.
+
+    Local mode only: under Clerk the identity provider owns membership and `get_principal`
+    re-upserts the row from the verified JWT on the very next request, so a delete here would
+    silently undo itself.
+
+    Three refusals, all about not stranding someone: an org must keep an OWNER (a sole owner who
+    wants out deletes the org instead), a personal account is your own login, and leaving your
+    only org would leave you with nothing to sign in to.
+    """
+    org = await _require_org(principal, session)
+    members = await queries.organization_members(session, org.id)
+    target = next(((u, role) for (u, role) in members if u.id == user_id), None)
+    if target is None:
+        raise HTTPException(404, "not a member of this organization")
+    target_role = target[1]
+    is_self = user_id == principal.user_id
+
+    if not is_self and principal.role not in ("OWNER", "ADMIN"):
+        raise HTTPException(403, "only owners and admins can remove a member")
+    if target_role == "OWNER" and not is_self and principal.role != "OWNER":
+        raise HTTPException(403, "only an owner can remove another owner")
+    # Before the owner checks: the sole owner of a personal account is in that seat by
+    # construction, and "delete the organization instead" is not advice you can act on there.
+    if is_self and org.kind != KIND_COMPANY:
+        raise HTTPException(400, "a personal account can't be left — it is your own login")
+    if target_role == "OWNER" and sum(1 for (_u, r) in members if r == "OWNER") == 1:
+        raise HTTPException(
+            409, "an organization must keep an owner — delete the organization instead"
+        )
+
+    switch_to: str | None = None
+    if is_self:
+        # Where the caller lands afterwards; also proves they aren't leaving their only way in.
+        # Read before the delete, while the membership still resolves the workspaces.
+        switch_to = next(
+            (
+                p.id
+                for (p, _role) in await queries.user_workspaces(session, user_id)
+                if p.organization_id != org.id
+            ),
+            None,
+        )
+        if switch_to is None:
+            raise HTTPException(
+                409,
+                "this is your only organization — leaving would leave you with no workspace "
+                "to sign in to",
+            )
+
+    await queries.remove_organization_member(session, org.id, user_id)
+    log.info(
+        "organization_member_removed",
+        organization_id=org.id,
+        user_id=user_id,
+        by=principal.user_id,
+        left=is_self,
+    )
+    return {"ok": True, "switch_to": switch_to}
+
+
 @local_router.post("/auth/invitations/accept", response_model=SessionOut)
 async def accept_invitation(
     body: AcceptInviteIn, session: AsyncSession = Depends(get_session)

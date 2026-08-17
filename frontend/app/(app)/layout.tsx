@@ -1,5 +1,6 @@
 import { CommandPalette } from "@/app/components/CommandPalette";
 import { MissingLlmKeyBanner } from "@/app/components/MissingLlmKeyBanner";
+import { OnboardingQuest } from "@/app/components/OnboardingQuest";
 import { QuotaBanner } from "@/app/components/QuotaBanner";
 import { Sidebar } from "@/app/components/Sidebar";
 import { Topbar } from "@/app/components/Topbar";
@@ -31,6 +32,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <main className="mx-auto w-full max-w-[1240px] flex-1 px-8 py-8">{children}</main>
       </div>
       <CommandPalette />
+      <OnboardingQuest />
     </div>
   );
 }

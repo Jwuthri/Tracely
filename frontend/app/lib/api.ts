@@ -270,6 +270,8 @@ export type Scenario = {
   turns: ScenarioTurn[];
   goal: string;
   max_turns: number;
+  // ADVERSARIAL only: OpenRouter model id the attacker uses. "" = the server's default.
+  attacker_model: string;
   source_thread_id: string;
   enabled: boolean;
   created_at: string | null;

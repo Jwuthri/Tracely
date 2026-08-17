@@ -163,6 +163,20 @@ CATALOG = [
 ]
 
 
+# The name and per-turn entry point the FastAPI server (server.py) drives.
+AGENT = "lg-supervisor"
+
+
+def reply(message: str, history: list[dict] | None = None, conversation_id: str = "mara") -> str:
+    """One turn for server.py — the InMemorySaver checkpointer threads history server-side, keyed
+    by the conversation, so only the new message is sent (history arg unused)."""
+    config = {"configurable": {"thread_id": conversation_id or "mara"}}
+    out = supervisor.invoke(
+        {"messages": [{"role": "user", "content": message}], "customer": shared.CUSTOMER}, config
+    )
+    return out["messages"][-1].content
+
+
 def main() -> None:
     if not os.environ.get("OPENAI_API_KEY"):
         print("Set OPENAI_API_KEY to run this demo.")

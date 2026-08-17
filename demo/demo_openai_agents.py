@@ -205,6 +205,27 @@ CATALOG = [
 ]
 
 
+# The name and per-turn entry point the FastAPI server (server.py) drives.
+AGENT = "oa-triage"
+_sessions: dict[str, SQLiteSession] = {}  # one SQLiteSession per conversation, kept across turns
+
+
+async def reply(message: str, history: list[dict] | None = None, conversation_id: str = "mara") -> str:
+    """One turn for server.py — a cached SQLiteSession threads history server-side (history arg
+    unused). The injection guardrail on turn 4 trips the same way it does in the script."""
+    key = conversation_id or "mara"
+    session = _sessions.get(key) or _sessions.setdefault(key, SQLiteSession(key))
+    context = CustomerContext(email=shared.CUSTOMER)
+    try:
+        result = await Runner.run(triage_agent, message, session=session, context=context)
+        return str(result.final_output)
+    except InputGuardrailTripwireTriggered:
+        return (
+            "Blocked by the input guardrail: that message tries to override my "
+            "policies. Happy to help through the normal process."
+        )
+
+
 async def main() -> None:
     if not os.environ.get("OPENAI_API_KEY"):
         print("Set OPENAI_API_KEY to run this demo.")

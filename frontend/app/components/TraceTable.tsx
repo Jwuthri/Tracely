@@ -30,7 +30,8 @@ import { useWide, WideToggle, WIDE_STYLE } from "../lib/useWide";
 import { AddColumnModal } from "./AddColumnModal";
 import { AgentsSidePanel } from "./AgentsSidePanel";
 import { SelectBox } from "./SelectBox";
-import { spanHasState, spanStateWrites } from "./state-fold";
+import { spanHasState } from "./state-fold";
+import { type Cache, useConversationTree } from "./trace-table/useConversationTree";
 import {
   AgentBadge,
   MessageContent,
@@ -40,7 +41,7 @@ import {
   stateWritesOf,
   TurnMessage,
 } from "./trace-table/content";
-import { ExpandableText, FloatingPanel, HighlightedJson, IconBox, JsonPill, Pill, Plain, prettyJson } from "./JsonView";
+import { FloatingPanel, HighlightedJson, IconBox, JsonPill, Pill, Plain } from "./JsonView";
 import {
   agentLabel,
   asRoleMessage,
@@ -1117,7 +1118,6 @@ function HeaderRow({ cols, sort }: { cols: Col[]; sort?: SortHandle }) {
 }
 
 // ── root ────────────────────────────────────────────────────────────────────────
-type Cache<T> = Record<string, T | "loading" | undefined>;
 
 /** Sorting is owned by whoever runs the query, because it happens server-side across the whole
  *  list rather than over the loaded page. The table only renders the affordance and reports clicks. */
@@ -1149,28 +1149,9 @@ export function TraceTable({
   // as plain labels — those views show one conversation, so there is nothing to order.
   sort?: SortHandle;
 }) {
-  const seed = useMemo(() => {
-    const turns: Cache<FullTurn[]> = {};
-    const spans: Cache<SpanOut[]> = {};
-    const openC = new Set<string>();
-    const openT = new Set<string>();
-    for (const c of conversations) {
-      if (c.turnsData) {
-        turns[c.thread] = c.turnsData;
-        openC.add(c.thread);
-        for (const t of c.turnsData) {
-          spans[t.trace_id] = t.spans;
-          openT.add(t.trace_id);
-        }
-      }
-    }
-    return { turns, spans, openC, openT };
-  }, [conversations]);
-
-  const [turns, setTurns] = useState<Cache<FullTurn[]>>(seed.turns);
-  const [spans, setSpans] = useState<Cache<SpanOut[]>>(seed.spans);
-  const [openConv, setOpenConv] = useState<Set<string>>(seed.openC);
-  const [openTurn, setOpenTurn] = useState<Set<string>>(seed.openT);
+  // What is open and what has been fetched — see trace-table/useConversationTree.ts.
+  const { turns, spans, openConv, openTurn, toggleConv, toggleTurn, toggleAll, allOpen } =
+    useConversationTree(conversations);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const { hidden: hiddenTypes, toggle: toggleType, reset: resetTypes } = useHiddenTypes();
   const [colMenu, setColMenu] = useState(false);
@@ -1424,84 +1405,6 @@ export function TraceTable({
       /* ignore */
     }
   }, [prefsLoaded, hidden]);
-
-  async function loadTurns(thread: string): Promise<FullTurn[]> {
-    setTurns((p) => ({ ...p, [thread]: "loading" }));
-    try {
-      const r = await fetch(`/api/session?thread=${encodeURIComponent(thread)}`);
-      const j = await r.json();
-      const ft: FullTurn[] = (j.turns ?? []).map((t: ThreadTurn) => ({ ...t, spans: [] }));
-      setTurns((p) => ({ ...p, [thread]: ft }));
-      return ft;
-    } catch {
-      setTurns((p) => ({ ...p, [thread]: [] }));
-      return [];
-    }
-  }
-
-  async function loadSpans(trace: string): Promise<SpanOut[]> {
-    setSpans((p) => ({ ...p, [trace]: "loading" }));
-    try {
-      const r = await fetch(`/api/trace?id=${encodeURIComponent(trace)}`);
-      const j = await r.json();
-      const sp: SpanOut[] = j.spans ?? [];
-      setSpans((p) => ({ ...p, [trace]: sp }));
-      return sp;
-    } catch {
-      setSpans((p) => ({ ...p, [trace]: [] }));
-      return [];
-    }
-  }
-
-  function toggleConv(thread: string) {
-    setOpenConv((prev) => {
-      const next = new Set(prev);
-      if (next.has(thread)) next.delete(thread);
-      else {
-        next.add(thread);
-        if (turns[thread] === undefined) void loadTurns(thread);
-      }
-      return next;
-    });
-  }
-
-  function toggleTurn(trace: string) {
-    setOpenTurn((prev) => {
-      const next = new Set(prev);
-      if (next.has(trace)) next.delete(trace);
-      else {
-        next.add(trace);
-        if (spans[trace] === undefined) void loadSpans(trace);
-      }
-      return next;
-    });
-  }
-
-  const allOpen = conversations.length > 0 && conversations.every((c) => openConv.has(c.thread));
-
-  // Expand everything to the step level: open all conversations, load + open their turns, then
-  // load every turn's steps (lazy data is fetched as needed). Runs as one async cascade.
-  async function expandAll() {
-    setOpenConv(new Set(conversations.map((c) => c.thread)));
-    const perConv = await Promise.all(
-      conversations.map((c) => {
-        const existing = turns[c.thread];
-        return Array.isArray(existing) ? Promise.resolve(existing) : loadTurns(c.thread);
-      }),
-    );
-    const traceIds = perConv.flat().map((t) => t.trace_id);
-    setOpenTurn(new Set(traceIds));
-    await Promise.all(traceIds.map((id) => (spans[id] === undefined ? loadSpans(id) : Promise.resolve([]))));
-  }
-
-  function toggleAll() {
-    if (allOpen) {
-      setOpenConv(new Set());
-      setOpenTurn(new Set());
-      return;
-    }
-    void expandAll();
-  }
 
   function toggleCol(key: string) {
     setHidden((prev) => {

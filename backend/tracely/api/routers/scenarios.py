@@ -50,6 +50,7 @@ def _scenario_dict(sc: Scenario, agent_slug: str | None = None) -> dict[str, Any
         "turns": serialize_turns(normalize_turns(sc.turns)),
         "goal": sc.goal,
         "max_turns": sc.max_turns,
+        "attacker_model": sc.attacker_model,
         "source_thread_id": sc.source_thread_id,
         "enabled": sc.enabled,
         "created_at": sc.created_at.isoformat() if sc.created_at else None,
@@ -106,6 +107,7 @@ async def create_scenario(project_id: str = Depends(get_project_id), body: dict 
                 title=(body.get("title") or "").strip()[:512], kind=kind,
                 turns=serialize_turns(turns), goal=goal,
                 max_turns=_clamp_turns(body.get("max_turns")),
+                attacker_model=(body.get("attacker_model") or "").strip()[:120],
                 source_thread_id=body.get("source_thread_id") or "",
                 enabled=bool(body.get("enabled", True)),
             )
@@ -169,6 +171,8 @@ async def update_scenario(
             for field in ("title", "goal", "source_thread_id"):
                 if field in body:
                     setattr(sc, field, str(body[field]).strip())
+            if "attacker_model" in body:
+                sc.attacker_model = str(body["attacker_model"] or "").strip()[:120]
             if "kind" in body:
                 kind = str(body["kind"]).upper()
                 if kind not in ("SCRIPTED", "ADVERSARIAL"):

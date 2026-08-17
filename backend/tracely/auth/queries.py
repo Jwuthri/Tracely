@@ -79,6 +79,26 @@ async def organization_members(
     return [(u, role) for u, role in rows]
 
 
+async def remove_organization_member(
+    session: AsyncSession, organization_id: str, user_id: str
+) -> bool:
+    """Drop a seat. The user keeps their account and every other org — only this membership goes,
+    and with it (access being derived) every workspace in the org."""
+    row = (
+        await session.execute(
+            select(OrgMembership).where(
+                OrgMembership.organization_id == organization_id,
+                OrgMembership.user_id == user_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return False
+    await session.delete(row)
+    await session.commit()
+    return True
+
+
 async def get_organization(
     session: AsyncSession, organization_id: str
 ) -> Organization | None:

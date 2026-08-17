@@ -4,6 +4,7 @@ import { useRef, type ReactNode, type SVGProps } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { FleetPeek } from "./_components/FleetPeek";
 
 gsap.registerPlugin(useGSAP, ScrollTrigger);
 
@@ -570,6 +571,7 @@ export default function Landing() {
           </a>
           <div className="hidden items-center gap-7 text-sm text-fg-muted md:flex">
             <a className="transition hover:text-fg" href="#loop">How it works</a>
+            <a className="transition hover:text-fg" href="#replay">Replay</a>
             <a className="transition hover:text-fg" href="#features">Features</a>
             <a className="transition hover:text-fg" href="#gate">CI gate</a>
             <a className="transition hover:text-fg" href="#sdk">SDK</a>
@@ -808,6 +810,26 @@ export default function Landing() {
                 ))}
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* ================================ replay ================================ */}
+        <section id="replay" className="scroll-mt-24 px-6 py-28">
+          <div className="mx-auto max-w-[1100px]">
+            <Eyebrow>Watch the run</Eyebrow>
+            <h2 className="sec-reveal mt-6 text-center font-display text-4xl font-bold tracking-tight sm:text-5xl">
+              Your agents, acted out.
+            </h2>
+            <p className="sec-reveal mx-auto mt-5 max-w-2xl text-center text-fg-muted">
+              Every conversation replays as a scene. Delegations walk over and talk, knowledge is read
+              at the library, tools run at the wall — and the failure raises its hand where it happened.
+            </p>
+            <div className="sec-reveal mt-14">
+              <FleetPeek />
+            </div>
+            <p className="sec-reveal mt-5 text-center font-mono text-[12px] text-fg-faint">
+              a sample turn · every conversation in the dashboard replays like this — Sessions → Fleet
+            </p>
           </div>
         </section>
 

@@ -28,7 +28,11 @@ export default async function TeamPage() {
         </div>
       ) : (
         <>
-          <MembersList />
+          <MembersList
+            meId={me?.user_id ?? null}
+            local={mode === "local"}
+            canManage={allowed}
+          />
           {mode !== "local" ? (
             // Clerk owns invitations in hosted mode — the local invite endpoints aren't mounted.
             <div className="card p-6 text-[13px] text-fg-muted">
