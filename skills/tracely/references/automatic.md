@@ -52,14 +52,17 @@ Instrumentor spans know nothing about Tracely. `trace()` stamps the run's identi
 inside it via a custom `SpanProcessor`:
 
 ```python
-with tracely.trace(agent="weather-agent", conversation="conv-1", turn=3,
-                   user="u_7", env="prod", tenant="acme"):
+with tracely.trace(agent="weather-agent", tenant="acme", conversation="conv-1", turn=3,
+                   user="u_7", env="prod", plan="pro"):
     ...
 ```
 
 - Opens **no span** — it's a context marker. Nested `trace()`s merge over the enclosing one.
 - Works as a decorator, sync or async.
-- Extra kwargs become metadata (`tenant="acme"` above).
+- `tenant=` — one codebase, many customers/workspaces/bots: each tenant is registered as its own
+  Agent (endpoint, scenarios, gate, clusters, cases are per-tenant; the traces list filters by it),
+  while `agent=` stays the per-span label in the Agent column. Unset → `agent` is the Agent.
+- Extra kwargs become metadata (`plan="pro"` above).
 - `traceparent=` joins a trace Tracely already minted (see § serving an agent Tracely drives).
 - `agents=[...]` declares the agent catalog (see `manual.md`).
 

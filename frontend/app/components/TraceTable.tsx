@@ -541,6 +541,10 @@ function renderCell(col: Col, ctx: RowCtx): ReactNode {
         : null;
       return <span className="font-mono text-xs tabular-nums text-fg-muted">{fmtMs(durMs)}</span>;
     }
+    // The conversation's agent (its tenant, when one was declared) — what this thread is gated,
+    // clustered and tested as. Distinct from the S-row "Agent", which labels who did each step.
+    case "cagent":
+      return ctx.level === "C" && ctx.conv.agent ? <AgentBadge agent={ctx.conv.agent} /> : null;
     case "crsummary":
       return ctx.level === "C" ? <RollingSummaryCell thread={ctx.conv.thread} kind="conversation" /> : null;
     case "cmeta": {

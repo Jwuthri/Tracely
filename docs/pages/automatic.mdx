@@ -83,14 +83,20 @@ counts, latency, tool calls, and (on error) `level=ERROR`. Sync, async, and stre
 ## Attach run context — `tracely.trace(...)`
 
 Provider spans are created by the instrumentor, which knows nothing about Tracely. Wrap a run in
-`tracely.trace(...)` and Tracely stamps the run's `agent` / `conversation` / `turn` / `user` / `env`
-(plus arbitrary metadata) onto **every** span inside it — auto-captured or manual — via a custom
-span processor. No per-call plumbing.
+`tracely.trace(...)` and Tracely stamps the run's `agent` / `tenant` / `conversation` / `turn` /
+`user` / `env` (plus arbitrary metadata) onto **every** span inside it — auto-captured or manual —
+via a custom span processor. No per-call plumbing.
 
 ```python
-with tracely.trace(agent="weather-agent", conversation="conv-1", user="u_7", env="prod", tenant="acme"):
+with tracely.trace(agent="weather-agent", tenant="acme", conversation="conv-1", user="u_7", env="prod", plan="pro"):
     client.chat.completions.create(model="gpt-4o", messages=[...])   # inherits all of the above
 ```
+
+`tenant` is for one codebase serving many customers / workspaces / bots: each tenant is registered
+as its own **Agent** — with its own endpoint, scenarios, CI gate, failure clusters and regression
+cases — while `agent` stays the per-span label ("supervisor", "billing") in the trace's Agent column.
+The traces list shows a conversation's agent and filters by it. Leave `tenant` unset and the run's
+`agent` is the Agent, as before.
 
 `trace()` also works as a decorator (sync or async):
 

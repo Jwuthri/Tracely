@@ -33,7 +33,7 @@ POST /v1/traces                         api/routers/otlp.py
   ─ (worker) ─
   → tasks.ingest_otlp_blob()            blobstore.get_blob()
                                          otel/mapping.parse_otlp_traces() → event dicts
-                                         tasks._apply_default_agent()          ← undeclared spans → trace's declared agent, else `default`
+                                         tasks._apply_default_agent()          ← tenant (tracely.tenant.id) → every span; else undeclared spans → trace's declared agent, else `default`
                                          registry.upsert_agent()/upsert_agent_version()  ← slug → UUID
                                          clickhouse.insert_rows("events", …)
                                          evaluate_run_task.apply_async(…, countdown=4)   ← debounce late spans

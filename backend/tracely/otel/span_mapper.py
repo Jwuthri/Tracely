@@ -133,6 +133,11 @@ def _map_span(
         # sub-agent it spins up, which registered dozens of agents nobody chose and shredded the
         # dimension the product groups, gates and clusters on. They stay visible in metadata.
         "agent_slug": str(_first(a, ["tracely.agent.id", "langfuse.agent.id"]) or ""),
+        # The conversation's tenant — which customer / workspace / bot this run belongs to when one
+        # codebase serves many. When set it IS the trace's registry agent (every span, see
+        # ingestion_service._attribute_default_agent), so gates, clusters, cases and scenarios are
+        # per-tenant while `agent_slug` above stays a per-span label. Helper key, never a column.
+        "tenant_slug": str(_first(a, ["tracely.tenant.id"]) or ""),
         "agent_version_ref": str(
             _first(a, ["tracely.agent.version", "tracely.agent.version_id"]) or ""
         ),

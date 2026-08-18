@@ -111,13 +111,20 @@ class IngestionService:
 
     @staticmethod
     def _attribute_default_agent(events: list[dict]) -> None:
-        """Attribute agent-less spans to a fallback agent so agent-scoped features (failure
-        clusters, CI gates) still apply to plain LLM calls. Within a trace, an empty-agent span
-        inherits the trace's agent (its app-root's, else any sibling's); only a trace with no
-        agent anywhere gets the configured default. The slug is mirrored into metadata so the UI
-        shows it — under `tracely.agent.id.inherited`, NOT `tracely.agent.id`: an inherited slug
-        must stay distinguishable from one the span declared, or the Agent column can't tell a
-        real per-agent attribution from a trace-wide back-fill."""
+        """Decide which registry agent each trace belongs to — the dimension gates, clusters,
+        regression cases and scenarios are scoped by.
+
+        A trace that declares a TENANT (`tracely.tenant.id` — one codebase serving many
+        customers / workspaces / bots) belongs to that tenant, and so does EVERY span in it: the
+        tenant is what gets registered and what every agent-scoped read sees. The spans' own
+        `agent=` labels ("supervisor", "billing") stay in metadata untouched, so the per-span Agent
+        column still shows who did each step; they just never register agents of their own.
+
+        Without a tenant, the older rule: an agent-less span inherits the trace's agent (its
+        app-root's, else any sibling's) and only a trace with no agent anywhere gets the configured
+        default. Either way an inherited slug is mirrored into metadata under
+        `tracely.agent.id.inherited`, NOT `tracely.agent.id`: the Agent column must be able to tell
+        a slug the span declared from a trace-wide back-fill."""
         default_slug = settings.default_agent_slug
         if not default_slug:
             return
@@ -131,6 +138,15 @@ class IngestionService:
             if any(e.get("internal_kind") for e in evs):
                 continue
             root = next((e for e in evs if e.get("is_app_root")), None)
+            tenant = (root.get("tenant_slug") if root else "") or next(
+                (e.get("tenant_slug") for e in evs if e.get("tenant_slug")), ""
+            )
+            if tenant:
+                for e in evs:
+                    if not e.get("agent_slug"):
+                        e.setdefault("metadata", {})["tracely.agent.id.inherited"] = tenant
+                    e["agent_slug"] = tenant
+                continue
             trace_agent = (
                 (root.get("agent_slug") if root else "")
                 or next((e.get("agent_slug") for e in evs if e.get("agent_slug")), "")
@@ -183,6 +199,7 @@ class IngestionService:
             for ev in events:
                 slug = ev.pop("agent_slug", "")
                 ver = ev.pop("agent_version_ref", "")
+                ev.pop("tenant_slug", "")  # folded into agent_slug above; never a column
                 if slug:
                     if slug not in slug_to_id:
                         slug_to_id[slug] = registry.upsert_agent(session, project_id, slug)

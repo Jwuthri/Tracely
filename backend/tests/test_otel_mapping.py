@@ -480,6 +480,46 @@ def test_a_declared_agent_name_wins():
     assert e["agent_slug"] == "support"
 
 
+def test_tenant_is_the_traces_registry_agent_and_labels_stay_labels():
+    """`trace(agent="supervisor", tenant="cust-1")`: the conversation belongs to cust-1 — every
+    span, so gates/clusters/cases attach there — while each span's own agent label survives in
+    metadata for the Agent column. A span with no label of its own inherits the tenant."""
+    from tracely.services.ingestion_service import IngestionService
+
+    e = _event({"tracely.agent.id": "supervisor", "tracely.tenant.id": "cust-1"})
+    assert e["tenant_slug"] == "cust-1" and e["agent_slug"] == "supervisor"
+
+    events = [
+        {"trace_id": "t", "span_id": "root", "is_app_root": True,
+         "agent_slug": "supervisor", "tenant_slug": "cust-1",
+         "metadata": {"tracely.agent.id": "supervisor"}},
+        {"trace_id": "t", "span_id": "sub", "is_app_root": False,
+         "agent_slug": "billing", "tenant_slug": "cust-1",
+         "metadata": {"tracely.agent.id": "billing"}},
+        {"trace_id": "t", "span_id": "bare", "is_app_root": False,
+         "agent_slug": "", "tenant_slug": "cust-1", "metadata": {}},
+    ]
+    IngestionService._attribute_default_agent(events)
+
+    assert [e["agent_slug"] for e in events] == ["cust-1", "cust-1", "cust-1"]
+    assert events[0]["metadata"]["tracely.agent.id"] == "supervisor"   # label untouched
+    assert events[1]["metadata"]["tracely.agent.id"] == "billing"      # sub-agent label untouched
+    assert events[2]["metadata"]["tracely.agent.id.inherited"] == "cust-1"
+    assert "tracely.agent.id.inherited" not in events[0]["metadata"]
+
+
+def test_without_a_tenant_the_older_rule_holds():
+    from tracely.services.ingestion_service import IngestionService
+
+    events = [
+        {"trace_id": "t", "span_id": "root", "is_app_root": True, "agent_slug": "supervisor"},
+        {"trace_id": "t", "span_id": "sub", "is_app_root": False, "agent_slug": "billing"},
+        {"trace_id": "t", "span_id": "bare", "is_app_root": False, "agent_slug": ""},
+    ]
+    IngestionService._attribute_default_agent(events)
+    assert [e["agent_slug"] for e in events] == ["supervisor", "billing", "supervisor"]
+
+
 def test_gen_ai_conversation_id_threads_a_run():
     e = _event({"gen_ai.operation.name": "chat", "gen_ai.conversation.id": "conv-9"})
     assert e["conversation_id"] == "conv-9"

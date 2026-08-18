@@ -378,9 +378,14 @@ async def sessions_overview(
     include_internal: bool = False,
     sort: str = "recent",
     order: str = "desc",
+    agent_id: str = "",
 ) -> list[dict]:
     """Traces grouped into threads by conversation (a trace with no conversation is its own
     1-turn thread), newest-last-activity first, with per-thread rollups + parsed metadata.
+
+    Each row carries `agent_id`: the registry agent of the thread's latest trace (its ROOT span's,
+    the same attribution failure intel, regression and the gate use). `agent_id` as a filter keeps
+    only threads whose traces belong to that agent — the traces list's Agent select.
 
     `include_internal` adds Tracely's own runs — an evaluation, a scenario — as ordinary rows,
     tagged with `internal_kind` so the table can mark them. Off by default: they are about the
@@ -404,11 +409,16 @@ async def sessions_overview(
     if to_ts:
         time_clause += " AND start_time < parseDateTimeBestEffort({to:String})"
         params["to"] = to_ts
+    agent_clause = ""
+    if agent_id:
+        agent_clause = "HAVING t_agent = {ag:String}"
+        params["ag"] = agent_id
     res = await client.query(
         f"""
         SELECT
           if(conv != '', conv, trace_id)        AS thread,
           count()                               AS turns,
+          argMax(t_agent, ts_max)               AS agent_id,
           -- An internal run is titled by its root span ("eval · 5 evaluator(s)"), not by the
           -- first GENERATION input — which for a recording is the judge's raw system prompt and
           -- reads as noise in the list. Its "answer" is what it was about.
@@ -458,12 +468,14 @@ async def sessions_overview(
             max(internal_kind)                                            AS t_internal,
             max(subject_id)                                               AS t_subject,
             anyIf(name, parent_span_id = '')                              AS t_root_name,
+            anyIf(agent_id, parent_span_id = '')                          AS t_agent,
             CAST(
               (groupArrayArray(mapKeys(mapFilter((k, v) -> startsWith(k, 'tracely.metadata.'), CAST(metadata, 'Map(String, String)')))),
                groupArrayArray(mapValues(mapFilter((k, v) -> startsWith(k, 'tracely.metadata.'), CAST(metadata, 'Map(String, String)'))))),
               'Map(String, String)')                                      AS t_meta
           FROM events FINAL WHERE project_id = {{p:String}}{time_clause}{internal_clause}
           GROUP BY trace_id
+          {agent_clause}
         )
         GROUP BY thread
         -- Drop 1-turn threads with no message content on either side (e.g. a lone TOOL/RETRIEVER

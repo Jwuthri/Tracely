@@ -70,7 +70,9 @@ review of someone's instrumentation.
    `init(service_name=…)`, overridden by `init(agent=…)` for the app or `trace(agent=…)`/`agent(...)`
    per run. A framework's own `gen_ai.agent.name` is deliberately ignored: a harness stamps one on
    every sub-agent it spins up, which would register dozens of agents nobody chose. Name neither and
-   every trace in the workspace lands under a single `default` agent.
+   every trace in the workspace lands under a single `default` agent. **One codebase serving many
+   customers → `trace(tenant=customer_id)`**: each tenant is its own Agent (endpoint, scenarios,
+   gate, clusters, cases; the traces list filters by it) and `agent=` stays the per-span label.
 2. **`conversation=` is what makes a conversation.** Each turn is its own trace; passing the same
    conversation id to every turn is the only thing that threads them. Without it, a 12-turn support
    thread is 12 unrelated rows, and every conversation-level evaluator has nothing to grade.

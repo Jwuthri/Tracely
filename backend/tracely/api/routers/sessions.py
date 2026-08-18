@@ -34,6 +34,7 @@ async def list_sessions(
     evals: bool = False,
     sort: str = "recent",
     order: str = "desc",
+    agent: str = "",
     project_id: str = Depends(get_project_id),
 ) -> list[dict]:
     """Traces grouped into threads by conversation/session (a trace with no conversation is its
@@ -50,7 +51,10 @@ async def list_sessions(
     `sort` is one of `async_reader.SESSION_SORTS` (`recent` | `started` | `duration` | `tokens`)
     with `order` `asc`/`desc` — the table's sortable column headers. An unknown
     value falls back to `recent` rather than erroring: a sort is a view preference, and 400-ing a
-    saved link because a column was renamed is worse than showing the default order."""
+    saved link because a column was renamed is worse than showing the default order.
+
+    `agent` (a registry agent id) keeps only that agent's threads. Each row also carries `agent`
+    (the slug) — the conversation's agent, i.e. the tenant when the SDK declared one."""
     advisory = await advisory_score_names(project_id)
     rows = await async_reader.sessions_overview(
         project_id,
@@ -62,12 +66,20 @@ async def list_sessions(
         include_internal=evals,
         sort=sort,
         order=order,
+        agent_id=agent,
     )
     conv_scores = await async_reader.conversation_scores_by_thread(
         project_id, [r["thread"] for r in rows]
     )
+
+    def slugs() -> dict[str, str]:
+        with SyncSessionLocal() as s:
+            return {a.id: a.slug for a in repo.agents_list(s, project_id)}
+
+    slug_of = await run_in_threadpool(slugs) if rows else {}
     for r in rows:
         r["scores"] = conv_scores.get(r["thread"], [])
+        r["agent"] = slug_of.get(r.get("agent_id") or "", "")
     return rows
 
 

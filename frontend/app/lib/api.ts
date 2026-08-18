@@ -117,6 +117,10 @@ export type Thread = {
   last_ts: string;
   last_trace_id: string;
   failing: number;
+  // The conversation's agent — the registry slug its traces are filed under (the tenant, when the
+  // SDK declared one). What gates, clusters, cases and scenarios are scoped by; the C-row Agent column.
+  agent?: string;
+  agent_id?: string;
   metadata?: Record<string, string>;
   scores?: EvalScore[]; // CONVERSATION-level metric results for the C-row columns
   // "" for a real agent run; "eval" | "sim" when the row is one of Tracely's own runs, listed
@@ -137,15 +141,17 @@ export type SessionsQuery = {
   to?: string | null; // ISO-8601 (UTC) upper bound (exclusive)
   sort?: SessionSort;
   order?: SortOrder;
+  agent?: string; // registry agent id — only that agent's conversations
 };
 
 export async function getSessions(opts: SessionsQuery = {}): Promise<Thread[]> {
-  const { limit = 50, offset = 0, from, to, sort, order } = opts;
+  const { limit = 50, offset = 0, from, to, sort, order, agent } = opts;
   const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (from) qs.set("from_ts", from);
   if (to) qs.set("to_ts", to);
   if (sort) qs.set("sort", sort);
   if (order) qs.set("order", order);
+  if (agent) qs.set("agent", agent);
   return getJson<Thread[]>(`/api/sessions?${qs.toString()}`);
 }
 

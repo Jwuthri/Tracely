@@ -104,7 +104,10 @@ it falls back to `init(service_name=…)` (SDK ≥ 0.4.0), and with neither ever
 `default` agent. Tracely deliberately ignores the framework's own `gen_ai.agent.name` — LangGraph,
 the OpenAI Agents SDK and CrewAI each stamp it on every sub-agent and tool-agent they spin up, so
 reading it registered a dozen agents per demo run. Sub-agents still show up in full: as the trace
-tree, and as the declared catalog (`agents=CATALOG`) in the Conversation → Agents panel.
+tree, and as the declared catalog (`agents=CATALOG`) in the Conversation → Agents panel. Serving
+many customers from one codebase? `trace(agent="supervisor", tenant=customer_id)` files each
+customer's conversations under their own Agent — gates, clusters, cases and scenarios per customer
+— without touching the per-span labels.
 
 The Anthropic demo has no framework, so it also shows the **manual API**: `@tracely.observe`
 turns plain functions into TOOL/AGENT spans, and `tracely.delegate` / `agent` / `skill` /

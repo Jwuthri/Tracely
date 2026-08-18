@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ConvNode, SessionSort, SortOrder } from "../lib/api";
+import type { AgentRow, ConvNode, SessionSort, SortOrder } from "../lib/api";
 import { mergeMeta, metaText } from "../lib/meta";
 import { DateRangePicker } from "./DateRangePicker";
 import { TraceTable } from "./TraceTable";
@@ -28,16 +28,21 @@ export function TracesExplorer({
   initial,
   pageSize,
   hasMore: initialHasMore,
+  agents = [],
 }: {
   initial: ConvNode[];
   pageSize: number;
   hasMore: boolean;
+  agents?: AgentRow[]; // the project's registry agents, for the Agent select
 }) {
   const [rows, setRows] = useState<ConvNode[]>(initial);
   const [hasMore, setHasMore] = useState(initialHasMore);
   const [loading, setLoading] = useState(false);
   const [range, setRange] = useState<Range>({ from: null, to: null });
   const [preset, setPreset] = useState<string>("all");
+  // Server-side, like the range: a customer's conversations can sit past the loaded page, so
+  // "only this agent" has to be a query, not a filter over the 50 rows on screen. "" = every agent.
+  const [agentId, setAgentId] = useState("");
   // Sorting is server-side (see lib/api::SessionSort): the list is a page, so ordering only the
   // loaded rows would make "longest first" mean "longest of the 50 already on screen".
   const [sortBy, setSortBy] = useState<SortBy>(DEFAULT_SORT);
@@ -55,19 +60,22 @@ export function TracesExplorer({
     setHasMore(initialHasMore);
     setRange({ from: null, to: null });
     setPreset("all");
+    setAgentId("");
     setFilter("all");
     setSortBy(DEFAULT_SORT);
   }, [initial, initialHasMore]);
 
-  // `next` and `by` are passed in rather than read from state: every caller is reacting to a change
-  // that hasn't been committed yet, so reading state here would page with the previous window/order.
+  // `next`, `by` and `who` are passed in rather than read from state: every caller is reacting to
+  // a change that hasn't been committed yet, so reading state here would page with the previous
+  // window/order/agent.
   const load = useCallback(
-    async (next: Range, by: SortBy, offset: number, replace: boolean, limit = pageSize) => {
+    async (next: Range, by: SortBy, who: string, offset: number, replace: boolean, limit = pageSize) => {
       setLoading(true);
       try {
         const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
         if (next.from) qs.set("from", next.from);
         if (next.to) qs.set("to", next.to);
+        if (who) qs.set("agent", who);
         if (by.sort !== DEFAULT_SORT.sort || by.order !== DEFAULT_SORT.order) {
           qs.set("sort", by.sort);
           qs.set("order", by.order);
@@ -88,9 +96,9 @@ export function TracesExplorer({
   const onDeleted = useCallback(
     (threads: string[]) => {
       setRows((prev) => prev.filter((r) => !threads.includes(r.thread)));
-      void load(range, sortBy, 0, true, Math.max(pageSize, rows.length - threads.length));
+      void load(range, sortBy, agentId, 0, true, Math.max(pageSize, rows.length - threads.length));
     },
-    [load, range, sortBy, pageSize, rows.length],
+    [load, range, sortBy, agentId, pageSize, rows.length],
   );
 
   // A column header: same column toggles direction, a new column starts descending — newest /
@@ -102,9 +110,9 @@ export function TracesExplorer({
           ? { sort: key, order: sortBy.order === "desc" ? "asc" : "desc" }
           : { sort: key, order: "desc" };
       setSortBy(next);
-      void load(range, next, 0, true);
+      void load(range, next, agentId, 0, true);
     },
-    [load, range, sortBy],
+    [load, range, sortBy, agentId],
   );
 
   function applyPreset(p: (typeof PRESETS)[number]) {
@@ -114,7 +122,7 @@ export function TracesExplorer({
     };
     setPreset(p.key);
     setRange(next);
-    void load(next, sortBy, 0, true);
+    void load(next, sortBy, agentId, 0, true);
   }
 
   // The picker hands back ISO bounds (or null/null when cleared). Clearing falls back to All time.
@@ -126,7 +134,12 @@ export function TracesExplorer({
     const next: Range = { from, to };
     setPreset("custom");
     setRange(next);
-    void load(next, sortBy, 0, true);
+    void load(next, sortBy, agentId, 0, true);
+  }
+
+  function applyAgent(id: string) {
+    setAgentId(id);
+    void load(range, sortBy, id, 0, true);
   }
 
   // Every filter refines the rows already loaded — none of them needs the server.
@@ -152,14 +165,14 @@ export function TracesExplorer({
           t.metadata && Object.keys(t.metadata).length
             ? t.metadata
             : mergeMeta((t.turnsData ?? []).flatMap((tt) => tt.spans));
-        const hay = [t.first_input ?? "", t.last_output ?? "", t.model ?? "", metaText(meta)].join(" ").toLowerCase();
+        const hay = [t.first_input ?? "", t.last_output ?? "", t.model ?? "", t.agent ?? "", metaText(meta)].join(" ").toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
     });
   }, [rows, filter, q]);
 
-  const ranged = range.from != null || range.to != null;
+  const ranged = range.from != null || range.to != null || agentId !== "";
 
   return (
     <div className="space-y-3">
@@ -191,6 +204,28 @@ export function TracesExplorer({
           disabled={loading}
           onApply={applyCustom}
         />
+        {agents.length > 0 && (
+          <>
+            <span className="h-5 w-px bg-line" aria-hidden />
+            <label className="flex items-center gap-2">
+              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-fg-faint">Agent</span>
+              <select
+                value={agentId}
+                onChange={(e) => applyAgent(e.target.value)}
+                disabled={loading}
+                aria-label="Filter by agent"
+                className="rounded-lg border border-line bg-ink-800 px-2 py-1.5 font-mono text-[12px] text-fg-muted transition-colors hover:text-fg focus:border-signal/40 focus:outline-none disabled:opacity-50"
+              >
+                <option value="">All agents</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.slug}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
       </div>
 
       {/* Status + text filters (refine the loaded rows) */}
@@ -220,7 +255,7 @@ export function TracesExplorer({
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Filter by text, model, metadata…"
+          placeholder="Filter by text, model, agent, metadata…"
           className="w-56 rounded-lg border border-line bg-ink-800 px-3 py-1.5 text-[12.5px] text-fg placeholder:text-fg-faint focus:border-signal/40 focus:outline-none"
           suppressHydrationWarning
         />
@@ -231,7 +266,7 @@ export function TracesExplorer({
           {loading ? (
             "Loading…"
           ) : ranged ? (
-            "No traces in this time range — widen the range or pick All time."
+            "No traces match — widen the range or pick All time / All agents."
           ) : (
             <>
               No traces yet — send one with the SDK or point an OTLP exporter at{" "}
@@ -256,7 +291,7 @@ export function TracesExplorer({
           <div className="flex items-center justify-center gap-3 pt-1">
             {hasMore ? (
               <button
-                onClick={() => void load(range, sortBy, rows.length, false)}
+                onClick={() => void load(range, sortBy, agentId, rows.length, false)}
                 disabled={loading}
                 className="rounded-lg border border-line bg-ink-800 px-4 py-2 text-[12.5px] font-medium text-fg-muted transition-colors hover:text-fg disabled:opacity-50"
               >

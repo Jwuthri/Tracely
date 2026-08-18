@@ -1,11 +1,11 @@
-import { getSessions } from "@/app/lib/api";
+import { getAgents, getSessions } from "@/app/lib/api";
 import { TracesExplorer } from "@/app/components/TracesExplorer";
 
 // First page is rendered server-side for fast first paint; TracesExplorer pages/filters from there.
 const PAGE = 50;
 
 export default async function TracesPage() {
-  const threads = await getSessions({ limit: PAGE });
+  const [threads, agents] = await Promise.all([getSessions({ limit: PAGE }), getAgents()]);
   return (
     <div className="space-y-6">
       <header className="reveal">
@@ -15,7 +15,7 @@ export default async function TracesPage() {
         </p>
       </header>
 
-      <TracesExplorer initial={threads} pageSize={PAGE} hasMore={threads.length === PAGE} />
+      <TracesExplorer initial={threads} pageSize={PAGE} hasMore={threads.length === PAGE} agents={agents} />
     </div>
   );
 }

@@ -96,6 +96,8 @@ _env: str = "prod"
 # init(agent=…) / init(service_name=…): the agent name every span falls back to when the run
 # context doesn't name one.
 _agent: str = ""
+# init(tenant=…): the tenant every run belongs to, for a process that serves exactly one.
+_tenant: str = ""
 # The `service_name` placeholder. A caller who chose a service name has named their agent; the
 # untouched default has not — filing those under an agent literally called "agent" would be worse
 # than the backend's `default`.
@@ -126,6 +128,12 @@ class TracelyContextSpanProcessor(SpanProcessor):
         agent = ctx.get("agent") or _agent
         if agent:
             span.set_attribute("tracely.agent.id", str(agent))
+        # The tenant is the conversation's identity — the Agent Tracely gates, clusters and tests —
+        # while `agent` above stays the per-span label. Both go on every span so a framework's own
+        # spans carry them too.
+        tenant = ctx.get("tenant") or _tenant
+        if tenant:
+            span.set_attribute("tracely.tenant.id", str(tenant))
         if not ctx:
             return
         if ctx.get("conversation"):
@@ -260,6 +268,7 @@ def init(
     api_key: str = "tracely_dev_key",
     service_name: str = _DEFAULT_SERVICE_NAME,
     agent: str = "",
+    tenant: str = "",
     env: str = "prod",
     instrument: str | list[str] | bool = "auto",
     redact: bool | list[str] | Callable[[str, str], str] | None = None,
@@ -276,6 +285,9 @@ def init(
     agents nobody chose — so pass it here only when the agent's name differs from the service's;
     `tracely.trace(agent=…)` still wins per run. Name neither and every trace lands under a single
     `default` agent.
+
+    `tenant` — for a process that serves exactly one customer / workspace / bot: the same as passing
+    `tracely.trace(tenant=…)` on every run. See `trace()` for what a tenant is.
 
     `instrument`:
       - "auto" (default) — activate instrumentors for whatever provider SDKs are importable.
@@ -302,9 +314,10 @@ def init(
 
     Call once at startup; idempotent (provider built once; instrumentor activation de-duped, R7).
     Streaming token usage requires `stream_options={"include_usage": True}` on OpenAI calls (R3)."""
-    global _tracer, _provider, _env, _agent, _initialized
+    global _tracer, _provider, _env, _agent, _tenant, _initialized
     _env = env
     _agent = agent or (service_name if service_name != _DEFAULT_SERVICE_NAME else "") or _agent
+    _tenant = tenant or _tenant
     # The read path (`export_conversations`) reuses this, so a process that traces can also export
     # without restating the endpoint. OUTSIDE the build-once guard below: the exporter is built once,
     # but an app that already called init() must still be able to point a later, explicit
@@ -632,6 +645,7 @@ class _Trace:
 def trace(
     agent: str | None = None,
     *,
+    tenant: str | None = None,
     conversation: str | None = None,
     turn: int | None = None,
     turn_id: str | None = None,
@@ -666,6 +680,15 @@ def trace(
     fatal; if your web framework already has OTel server instrumentation, the context is ambient and
     you can leave this unset.
 
+    `tenant` is which customer / workspace / bot this conversation belongs to, when one codebase
+    serves many. Tracely registers each tenant as its own Agent — the thing with an endpoint,
+    scenarios, a CI gate, failure clusters and regression cases — so a per-customer deployment gets
+    per-customer gating without touching `agent`, which stays the label on each span ("supervisor",
+    "billing") in the trace's Agent column. Filter the traces list by it; `tracely gate <tenant>`.
+
+        with tracely.trace(agent="supervisor", tenant=customer_id, conversation=thread_id):
+            run_agent(message)
+
     `turn` is the ordinal (0, 1, 2…); `turn_id` is your own id for one exchange, and unlike the
     `turn()` span helper it lands on EVERY span of the turn, which is what the `turn_id` column
     groups on.
@@ -694,6 +717,7 @@ def trace(
     return _Trace(
         {
             "agent": agent,
+            "tenant": tenant,
             "conversation": conversation,
             "turn": turn,
             "turn_id": turn_id,

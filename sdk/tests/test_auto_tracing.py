@@ -48,6 +48,7 @@ def test_trace_stamps_context_onto_every_span(exporter: InMemorySpanExporter) ->
         trace_name="demo",
         env="staging",
         tenant="acme",
+        plan="pro",
     ):
         with tr.start_as_current_span("auto-ish-span"):  # a span our code didn't author
             pass
@@ -56,7 +57,8 @@ def test_trace_stamps_context_onto_every_span(exporter: InMemorySpanExporter) ->
     assert a["tracely.conversation.id"] == "c1" and a["session.id"] == "c1"
     assert a["tracely.turn.index"] == 2 and a["tracely.user.id"] == "u_7"
     assert a["tracely.trace.name"] == "demo" and a["tracely.env"] == "staging"
-    assert a["tracely.metadata.tenant"] == "acme"
+    assert a["tracely.tenant.id"] == "acme"  # first-class since 0.4: the Agent this run belongs to
+    assert a["tracely.metadata.plan"] == "pro"
 
 
 def test_env_default_outside_trace(exporter: InMemorySpanExporter) -> None:
@@ -81,6 +83,26 @@ def test_service_name_names_the_agent_unless_overridden() -> None:
     assert resolve("checkout-bot", "support-agent") == "checkout-bot"
     assert resolve("", _DEFAULT_SERVICE_NAME) == ""
     assert resolve("", _DEFAULT_SERVICE_NAME, previous="earlier") == "earlier"
+
+
+def test_tenant_rides_on_every_span_beside_the_agent_label(exporter: InMemorySpanExporter) -> None:
+    """`trace(agent=…, tenant=…)`: two attributes, two meanings — the tenant is the Agent Tracely
+    gates and clusters (every span carries it), `agent` stays the per-span label."""
+    tr = tracely._t()
+    with tracely.trace(agent="supervisor", tenant="cust-1"):
+        with tr.start_as_current_span("auto-ish"):
+            pass
+    a = _attrs(exporter, "auto-ish")
+    assert a["tracely.agent.id"] == "supervisor"
+    assert a["tracely.tenant.id"] == "cust-1"
+
+    tracely._tenant = "cust-9"  # init(tenant=…): a process that serves one tenant
+    try:
+        with tr.start_as_current_span("bare-tenant"):
+            pass
+    finally:
+        tracely._tenant = ""
+    assert _attrs(exporter, "bare-tenant")["tracely.tenant.id"] == "cust-9"
 
 
 def test_init_agent_is_the_default_for_every_span(exporter: InMemorySpanExporter) -> None:

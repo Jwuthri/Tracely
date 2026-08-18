@@ -83,6 +83,7 @@ export const KNOWN_SPAN_TYPES = [
 // memo. Order matters — it's the left-to-right order in the rendered table.
 export const COLUMNS: Col[] = [
   { key: "conversation", label: "Conversation", group: "C", width: 260 },
+  { key: "cagent",       label: "Agent",        group: "C", width: 140 },
   { key: "ctime",        label: "Datetime",     group: "C", width: 160 },
   { key: "cdur",         label: "Duration",     group: "C", width: 96 },
   { key: "crsummary", label: "Rolling summary", group: "C", width: 280 },

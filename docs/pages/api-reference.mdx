@@ -38,7 +38,7 @@ with tracely.trace(agent="support-agent", conversation="conv-1", user="u_42"):
 def plan(goal): ...
 ```
 
-Your agent's **name is what you declare** — `service_name` names it by default, `agent=` on `init()` overrides that for the app, `agent=` on `trace()` for one run. It is never guessed from framework attributes: a harness stamps its own `gen_ai.agent.name` on every sub-agent it spins up, which would fill your workspace with agents you never chose. Everything Tracely groups, clusters and gates on hangs off this name; name neither and every trace lands under one `default` agent.
+Your agent's **name is what you declare** — `service_name` names it by default, `agent=` on `init()` overrides that for the app, `agent=` on `trace()` for one run. It is never guessed from framework attributes: a harness stamps its own `gen_ai.agent.name` on every sub-agent it spins up, which would fill your workspace with agents you never chose. Name neither and every trace lands under one `default` agent. **One codebase, many customers?** Add `trace(tenant=customer_id)`: each tenant becomes its own Agent — endpoint, scenarios, CI gate, failure clusters and regression cases are per-tenant, the traces list shows and filters by it — while `agent=` stays the per-span label ("supervisor", "billing") in the trace's Agent column.
 
 `instrument` is `"auto"` (probes for **openai / anthropic / google / mistral / langchain** and
 activates what's installed — everything else, e.g. `crewai`, `llama-index`, `litellm`, `bedrock`,

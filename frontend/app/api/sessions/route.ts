@@ -24,6 +24,9 @@ export async function GET(req: NextRequest) {
   const order = sp.get("order");
   if (sort) qs.set("sort", sort);
   if (order) qs.set("order", order);
+  // The Agent select: a registry agent id, forwarded as-is.
+  const agent = sp.get("agent");
+  if (agent) qs.set("agent", agent);
   const r = await fetch(`${API}/api/sessions?${qs.toString()}`, {
     headers: await authHeaders(),
     cache: "no-store",
