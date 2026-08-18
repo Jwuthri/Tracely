@@ -239,6 +239,22 @@ def agents_list(s: Session, project_id: str) -> list[Agent]:
     )
 
 
+def agent_ids_with_work(s: Session, project_id: str) -> set[str]:
+    """Agents that already carry authored/derived work — a scenario or a regression case.
+
+    Paired with the trace-owner set in the agent pickers: an agent whose traces aged out or were
+    deleted must not disappear from the Scenario / CI-gate selectors, or its scenarios and cases
+    become unreachable from the UI while still being there.
+    """
+    scen = s.execute(
+        select(Scenario.agent_id).where(Scenario.project_id == project_id).distinct()
+    ).scalars()
+    cases = s.execute(
+        select(EvaluationCase.agent_id).where(EvaluationCase.project_id == project_id).distinct()
+    ).scalars()
+    return {a for a in [*scen, *cases] if a}
+
+
 def agents_prune(s: Session, project_id: str, keep_ids: set[str]) -> list[str]:
     """Delete the project's agents that have no spans left and nothing pointing at them; returns
     the slugs removed.

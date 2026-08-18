@@ -45,6 +45,20 @@ _SCORE_COLS = (
 # traces list's "Evals" toggle asks for.
 _REAL = "internal_kind = ''"
 
+# A TRACE's agent — the SQL twin of `domain.traces.spans.root_span`, and what the traces list's
+# conversation-level Agent column, the per-agent reads below and every agent-scoped feature key off.
+# The `is_app_root` half is load-bearing, not tidiness: a run Tracely drove through `traceparent`
+# (a scenario, `simulate`, any customer honouring the header) has NO parent-less span, so keying on
+# `parent_span_id = ''` alone left those traces with a BLANK agent — invisible in the Agent column
+# and skipped by every per-agent read, while Python's `root_span` happily found one. Same rule both
+# sides or the two disagree about which agent a conversation belongs to.
+# Assumes a GROUP BY over one trace's spans.
+_TRACE_AGENT = (
+    "if(anyIf(agent_id, parent_span_id = '' OR is_app_root) != '', "
+    "anyIf(agent_id, parent_span_id = '' OR is_app_root), "
+    "anyIf(agent_id, agent_id != ''))"
+)
+
 
 # ── traces ────────────────────────────────────────────────────────────────────
 
@@ -53,20 +67,20 @@ async def traces_overview(project_id: str, limit: int, advisory: Sequence[str] =
     """Newest traces with span counts + the per-trace online-eval verdict (advisory FAILs excluded)."""
     client = await get_async_client()
     res = await client.query(
-        """
+        f"""
         SELECT trace_id,
                min(start_time)                       AS ts,
                count()                               AS spans,
                anyIf(name, parent_span_id = '')      AS root_name,
-               anyIf(agent_id, parent_span_id = '')  AS agent_id,
+               {_TRACE_AGENT}                        AS agent_id,
                maxIf(1, level = 'ERROR')             AS has_error
         -- FINAL, like every other read: without it a span re-delivered by a retrying exporter is
         -- still two unmerged rows here, and `count()` reports a span total nothing else agrees with.
         FROM events FINAL
-        WHERE project_id = {p:String} AND internal_kind = ''
+        WHERE project_id = {{p:String}} AND internal_kind = ''
         GROUP BY trace_id
         ORDER BY ts DESC
-        LIMIT {n:UInt32}
+        LIMIT {{n:UInt32}}
         """,
         parameters={"p": project_id, "n": limit},
     )
@@ -252,7 +266,7 @@ async def trace_failure_samples_in_window(
     client = await get_async_client()
     sql = (
         "WITH trace_meta AS ( "
-        "  SELECT trace_id, anyIf(agent_id, parent_span_id = '') AS root_agent "
+        f"  SELECT trace_id, {_TRACE_AGENT} AS root_agent "
         "  FROM events FINAL "
         # `_REAL` is load-bearing here, not tidiness. Tracely records its own evaluations as
         # traces, at `env='prod'`, roughly ONE PER GRADED TRACE. Without this they land in the
@@ -468,7 +482,7 @@ async def sessions_overview(
             max(internal_kind)                                            AS t_internal,
             max(subject_id)                                               AS t_subject,
             anyIf(name, parent_span_id = '')                              AS t_root_name,
-            anyIf(agent_id, parent_span_id = '')                          AS t_agent,
+            {_TRACE_AGENT}                                                AS t_agent,
             CAST(
               (groupArrayArray(mapKeys(mapFilter((k, v) -> startsWith(k, 'tracely.metadata.'), CAST(metadata, 'Map(String, String)')))),
                groupArrayArray(mapValues(mapFilter((k, v) -> startsWith(k, 'tracely.metadata.'), CAST(metadata, 'Map(String, String)'))))),
@@ -654,11 +668,11 @@ async def conversation_scores(project_id: str, thread_id: str) -> list[dict]:
 
 async def agent_trace_ids(project_id: str, agent_id: str, limit: int = 2000) -> list[dict]:
     """`[{trace_id, thread}]` for an agent's traces (newest first, capped). A trace is attributed
-    to the agent of its ROOT span (matching how evaluation/failure-intel attribute runs); a trace
+    by `_TRACE_AGENT` (matching how evaluation/failure-intel attribute runs); a trace
     with a conversation belongs to that thread, otherwise it is its own 1-turn thread. `agent_id`
     blank → every trace in the project (whole-project analysis)."""
     client = await get_async_client()
-    having = "HAVING anyIf(agent_id, parent_span_id = '') = {a:String}" if agent_id else ""
+    having = f"HAVING {_TRACE_AGENT} = {{a:String}}" if agent_id else ""
     params: dict = {"p": project_id, "n": max(1, limit)}
     if agent_id:
         params["a"] = agent_id
@@ -677,6 +691,23 @@ async def agent_trace_ids(project_id: str, agent_id: str, limit: int = 2000) -> 
         parameters=params,
     )
     return [{"trace_id": r[0], "thread": r[1]} for r in res.result_rows]
+
+
+async def trace_agent_ids(project_id: str) -> set[str]:
+    """Agent ids that are some real trace's agent — i.e. exactly the values the traces list's
+    conversation-level Agent column can show.
+
+    This is NOT "every agent with a span": a sub-agent label that older ingest registered
+    (`billing`, `store_locations_team`) has thousands of spans and owns no conversation. Offering
+    those in the Scenario / CI-gate pickers is offering to gate an agent that can never have a run.
+    """
+    client = await get_async_client()
+    res = await client.query(
+        f"SELECT DISTINCT agent FROM (SELECT {_TRACE_AGENT} AS agent FROM events FINAL "
+        f"WHERE project_id = {{p:String}} AND {_REAL} GROUP BY trace_id) WHERE agent != ''",
+        parameters={"p": project_id},
+    )
+    return {r[0] for r in res.result_rows}
 
 
 async def agent_ids_with_spans(project_id: str) -> set[str]:

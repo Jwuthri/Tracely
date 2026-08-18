@@ -53,6 +53,34 @@ def test_events_reads_are_final():
     assert _offenders("events") == []
 
 
+# ── which agent a trace belongs to ────────────────────────────────────────────
+# Python (`domain.traces.spans.root_span`) and SQL (`async_reader._TRACE_AGENT`) must agree, or the
+# traces list's Agent column and the features scoped by that agent point at different agents. The
+# case that bit: a run Tracely drove through `traceparent` has no parent-less span at all.
+
+
+def test_sql_trace_agent_honours_is_app_root_like_python_root_span():
+    from tracely.domain.traces.spans import root_span
+    from tracely.infrastructure.clickhouse.async_reader import _TRACE_AGENT
+
+    spans = [
+        {"span_id": "child", "parent_span_id": "remote", "agent_id": "a1"},
+        {"span_id": "root", "parent_span_id": "remote", "is_app_root": True, "agent_id": "a2"},
+    ]
+    assert root_span(spans)["agent_id"] == "a2"      # Python already handles it
+    assert "is_app_root" in _TRACE_AGENT             # …and so must the SQL twin
+    assert "agent_id != ''" in _TRACE_AGENT          # plus the any-span fallback
+
+
+def test_every_root_agent_read_uses_the_shared_expression():
+    """A hand-rolled `anyIf(agent_id, parent_span_id = '')` is the drift this prevents: it silently
+    attributes traceparent-joined runs to no agent, in whichever read forgot the rule."""
+    src = (_CH_DIR / "async_reader.py").read_text()
+    body = re.sub(r"_TRACE_AGENT = \([\s\S]*?\n\)\n", "", src, count=1)  # minus the definition
+    assert body != src, "the _TRACE_AGENT definition moved — fix this guard"
+    assert "anyIf(agent_id, parent_span_id" not in body
+
+
 # ── the threads list's sortable headers ───────────────────────────────────────
 # ORDER BY cannot be parameterized, so the sort key is the one piece of this query built by string
 # interpolation. These pin the whitelist that keeps it safe, and the tie-break that keeps

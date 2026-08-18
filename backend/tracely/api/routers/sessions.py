@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from tracely.api.advisory import advisory_score_names
+from tracely.config import settings
 from tracely.api.auth import get_project_id
 from tracely.domain.traces.replay import build_replay
 from tracely.domain.evaluation.verdict import rollup_verdict
@@ -79,7 +80,13 @@ async def list_sessions(
     slug_of = await run_in_threadpool(slugs) if rows else {}
     for r in rows:
         r["scores"] = conv_scores.get(r["thread"], [])
-        r["agent"] = slug_of.get(r.get("agent_id") or "", "")
+        # Never blank: a conversation Tracely can't name an agent for still belongs to the
+        # fallback agent — that IS how ingest files it, and a blank cell reads as "no data" when
+        # the real answer is `default`. The exception is Tracely's own runs (the Evals toggle):
+        # they were produced by no agent, and `default` there would claim a customer agent
+        # produced the product's work.
+        slug = slug_of.get(r.get("agent_id") or "", "")
+        r["agent"] = slug or ("" if r.get("internal_kind") else settings.default_agent_slug)
     return rows
 
 

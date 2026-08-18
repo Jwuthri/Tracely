@@ -36,13 +36,28 @@ def _norm_agent(agent_id: str | None) -> str:
 
 @router.get("/meta-analyses/agents")
 async def list_analysis_agents(project_id: str = Depends(get_project_id)) -> list[dict]:
-    """The project's agents, for the meta-analysis selector ([{id, slug, display_name}])."""
+    """The project's agents ([{id, slug, display_name}]) — the Scenario / CI-gate / Traces /
+    meta-analysis pickers.
+
+    Only agents that OWN at least one conversation, i.e. that can appear in the traces list's
+    Agent column. The registry also holds sub-agent labels that older ingest registered from
+    framework attributes (`billing`, `store_locations_team`); they have spans but never a run of
+    their own, so offering them here is offering to write a scenario, or gate, an agent that can
+    never produce a trace.
+
+    Agents that already have a scenario or a regression case stay listed even with no traces left
+    — hiding one would strand the work attached to it. Everything else drops out; Settings → Data
+    → Remove unused agents clears the rows themselves.
+    """
+    owners = await async_reader.trace_agent_ids(project_id)
 
     def work() -> list[dict]:
         with SyncSessionLocal() as s:
+            keep = owners | repo.agent_ids_with_work(s, project_id)
             return [
                 {"id": a.id, "slug": a.slug, "display_name": a.display_name or a.slug}
                 for a in repo.agents_list(s, project_id)
+                if a.id in keep
             ]
 
     return await run_in_threadpool(work)

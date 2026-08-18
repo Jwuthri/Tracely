@@ -271,7 +271,7 @@ Three Celery tasks, each a thin dispatch into a service class: `ingest_otlp_blob
 | `POST /api/evaluators/resolve` | `evaluators.py` | resolve an advanced `@VARIABLE` prompt against a real trace/thread (live preview, no LLM). |
 | `POST /api/evaluators/generate` | `evaluators.py` | AI-generate evaluator config from a natural-language prompt. |
 | `POST /api/evaluations/run` | `evaluations.py` | on-demand SSE run of an evaluator — streams one score dict per event. |
-| `GET /api/meta-analyses/agents` · `POST …/run` · `GET …/agent/{id}` · `GET/DELETE …/{id}` | `meta_analysis.py` | per-agent meta-analysis: analyzable agents, run, latest-for-agent, fetch/delete. |
+| `GET /api/meta-analyses/agents` · `POST …/run` · `GET …/agent/{id}` · `GET/DELETE …/{id}` | `meta_analysis.py` | per-agent meta-analysis: run, latest-for-agent, fetch/delete. `…/agents` is the shared agent picker (Scenarios, CI gates, Traces, meta-analysis) — only agents that OWN a conversation (`async_reader._TRACE_AGENT`) or already have a scenario/case, never the sub-agent labels older ingest registered. |
 | `GET /auth/me` · `POST /auth/logout` · `POST /auth/projects` | `auth.py` | current user + logout + project switch (all modes). |
 | `POST /auth/register` · `/login` · `/change-password` · `POST/GET /auth/invitations` · `DELETE /auth/invitations/{id}` · `POST /auth/invitations/accept` | `auth.py` | local-mode auth + invitations. |
 | `POST /auth/sync` | `auth.py` | Clerk-mode user sync. |
