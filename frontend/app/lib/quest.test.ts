@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  DAILIES_PER_DAY,
   EMPTY_LOCAL,
   EMPTY_STATUS,
+  deriveDailies,
   deriveSteps,
   questRank,
+  settleDaily,
   stepComplete,
   visitMarker,
   type QuestStatus,
@@ -15,12 +18,17 @@ describe("visitMarker", () => {
   it("maps routes to the step they tick — most specific first", () => {
     expect(visitMarker("/trends")).toBe("trends");
     expect(visitMarker("/settings/api-keys")).toBe("keys");
+    expect(visitMarker("/calibration")).toBe("calibration");
     expect(visitMarker("/sessions/th-1/fleet")).toBe("fleet");
-    expect(visitMarker("/sessions/th-1/replay")).toBe("fleet");
+    expect(visitMarker("/sessions/th-1/replay")).toBe("replay");
     expect(visitMarker("/sessions/th-1")).toBe("trace");
     expect(visitMarker("/traces/abc123")).toBe("trace");
-    // the LIST pages tick nothing — only opening a trace counts
+    expect(visitMarker("/clusters/c-1")).toBe("cluster");
+    expect(visitMarker("/cases/case-1")).toBe("case");
+    // the LIST pages tick nothing — only opening a thing counts
     expect(visitMarker("/traces")).toBeNull();
+    expect(visitMarker("/clusters")).toBeNull();
+    expect(visitMarker("/cases")).toBeNull();
     expect(visitMarker("/dashboard")).toBeNull();
   });
 });
@@ -28,14 +36,14 @@ describe("visitMarker", () => {
 describe("deriveSteps", () => {
   it("a fresh workspace has everything to do", () => {
     const steps = deriveSteps(status(), EMPTY_LOCAL);
-    expect(steps).toHaveLength(10);
+    expect(steps).toHaveLength(12);
     expect(steps.filter(stepComplete)).toHaveLength(0);
   });
 
-  it("data-derived steps read real counts, visit steps read markers", () => {
+  it("data-derived steps read real counts, visit steps read markers, theme reads the toggle flag", () => {
     const steps = deriveSteps(
       status({ traces: 12, evaluators: 2, clusters: 1, llm_key: true }),
-      { visited: ["trace", "trends"] },
+      { visited: ["trace", "trends", "replay"], theme_touched: true },
     );
     const done = Object.fromEntries(steps.map((s) => [s.id, stepComplete(s)]));
     expect(done).toEqual({
@@ -45,11 +53,21 @@ describe("deriveSteps", () => {
       open: true,
       eval: true,
       trends: true,
+      replay: true,
       fleet: false,
+      theme: true,
       fail: true, // a cluster counts as a caught failure, same as Activation
       case: false,
       gate: false,
     });
+  });
+
+  it("replay/fleet deep-link into the latest conversation when one exists", () => {
+    const withThread = deriveSteps(status({ thread_id: "th-9" }), EMPTY_LOCAL);
+    expect(withThread.find((s) => s.id === "replay")?.href).toBe("/sessions/th-9/replay");
+    expect(withThread.find((s) => s.id === "fleet")?.href).toBe("/sessions/th-9/fleet");
+    const without = deriveSteps(status(), EMPTY_LOCAL);
+    expect(without.find((s) => s.id === "replay")?.href).toBe("/traces");
   });
 
   it("skipping the OpenRouter key completes the step without marking it done", () => {
@@ -63,19 +81,78 @@ describe("deriveSteps", () => {
     expect(llm2.done).toBe(true);
     expect(llm2.skipped).toBe(false);
   });
+});
 
-  it("copying the key or visiting the keys page both tick the key step", () => {
-    expect(deriveSteps(status(), { visited: [], key_copied: true })[0].done).toBe(true);
-    expect(deriveSteps(status(), { visited: ["keys"] })[0].done).toBe(true);
+describe("deriveDailies", () => {
+  it("picks the same three distinct challenges for the same date, different for another", () => {
+    const a = deriveDailies(status(), [], "2026-08-18");
+    const b = deriveDailies(status(), [], "2026-08-18");
+    expect(a.map((d) => d.id)).toEqual(b.map((d) => d.id));
+    expect(new Set(a.map((d) => d.id)).size).toBe(DAILIES_PER_DAY);
+    const c = deriveDailies(status(), [], "2026-08-19");
+    expect(c.map((d) => d.id)).not.toEqual(a.map((d) => d.id));
+  });
+
+  it("visit challenges read TODAY's markers; data challenges read the today-bucket", () => {
+    const byId = (key: string, s: QuestStatus, visited: string[]) =>
+      Object.fromEntries(deriveDailies(s, visited, key).map((d) => [d.id, d.done]));
+    // find a date whose picks include "clean" to pin the interesting one
+    let key = "2026-01-01";
+    for (let i = 1; i <= 31; i++) {
+      key = `2026-01-${String(i).padStart(2, "0")}`;
+      if (deriveDailies(status(), [], key).some((d) => d.id === "clean")) break;
+    }
+    expect(byId(key, status({ traces_today: 5, failures_today: 0 }), []).clean).toBe(true);
+    expect(byId(key, status({ traces_today: 5, failures_today: 2 }), []).clean).toBe(false);
+    expect(byId(key, status({ traces_today: 0, failures_today: 0 }), []).clean).toBe(false); // no traces ≠ clean
+  });
+});
+
+describe("settleDaily", () => {
+  const day = "2026-08-18";
+  const dailies = (doneIds: string[]) =>
+    deriveDailies(status(), [], day).map((d) => ({ ...d, done: doneIds.includes(d.id) }));
+
+  it("credits a completion once, then settles to null", () => {
+    const picks = deriveDailies(status(), [], day);
+    const first = picks[0];
+    const l1 = settleDaily({ visited: [] }, dailies([first.id]), day)!;
+    expect(l1.score).toBe(first.points);
+    expect(l1.streak).toEqual({ count: 1, date: day });
+    expect(l1.daily?.credited).toEqual([first.id]);
+    // same completion again: nothing to bank
+    expect(settleDaily(l1, dailies([first.id]), day)).toBeNull();
+  });
+
+  it("streak increments on consecutive days and resets after a gap", () => {
+    const base = { visited: [], streak: { count: 3, date: "2026-08-17" } };
+    expect(settleDaily(base, dailies([deriveDailies(status(), [], day)[0].id]), day)!.streak).toEqual({
+      count: 4,
+      date: day,
+    });
+    const gapped = { visited: [], streak: { count: 3, date: "2026-08-10" } };
+    expect(settleDaily(gapped, dailies([deriveDailies(status(), [], day)[0].id]), day)!.streak).toEqual({
+      count: 1,
+      date: day,
+    });
+  });
+
+  it("rolls a stale day over (old visits/credits cleared) even with nothing new to credit", () => {
+    const stale = { visited: [], score: 25, daily: { date: "2026-08-17", visited: ["trace"], credited: ["view"] } };
+    const rolled = settleDaily(stale, dailies([]), day)!;
+    expect(rolled.daily).toEqual({ date: day, visited: [], credited: [] });
+    expect(rolled.score).toBe(25); // banked points survive the rollover
+    // and once current with nothing new, it settles
+    expect(settleDaily(rolled, dailies([]), day)).toBeNull();
   });
 });
 
 describe("questRank", () => {
   it("climbs from Rookie to Trace Master", () => {
-    expect(questRank(0, 10)).toBe("Rookie");
-    expect(questRank(1, 10)).toBe("Observer");
-    expect(questRank(4, 10)).toBe("Trace Detective");
-    expect(questRank(7, 10)).toBe("Gate Keeper");
-    expect(questRank(10, 10)).toBe("Trace Master");
+    expect(questRank(0, 12)).toBe("Rookie");
+    expect(questRank(1, 12)).toBe("Observer");
+    expect(questRank(5, 12)).toBe("Trace Detective");
+    expect(questRank(9, 12)).toBe("Gate Keeper");
+    expect(questRank(12, 12)).toBe("Trace Master");
   });
 });

@@ -9,9 +9,9 @@ export function ResetQuestPanel() {
       <h2 className="text-[15px] font-semibold text-fg">Onboarding quest</h2>
       <p className="mt-1.5 max-w-2xl text-[13px] leading-relaxed text-fg-muted">
         Bring back the guided tour — the floating checklist that walks through keys, traces,
-        evaluators, Trends, the Fleet and your first gate. Restarting clears the page-visit
-        progress saved in this browser; steps backed by real data (traces sent, evaluators
-        created, …) stay done.
+        evaluators, Trends, Replay, the Fleet and your first gate, plus the daily challenges.
+        Restarting clears the page-visit progress, daily score and streak saved in this browser;
+        steps backed by real data (traces sent, evaluators created, …) stay done.
       </p>
       <button
         type="button"

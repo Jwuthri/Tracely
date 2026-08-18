@@ -16,13 +16,18 @@ export async function GET() {
       return null;
     }
   };
-  const [stats, evaluators, gates, llm, me] = await Promise.all([
+  const [stats, evaluators, gates, llm, me, trends, sessions] = await Promise.all([
     get("/api/stats"),
     get("/api/evaluators"),
     get("/api/gates?limit=1"),
     get("/api/project/llm-key"),
     get("/auth/me"),
+    get("/api/trends?days=2"),
+    get("/api/sessions?limit=1"),
   ]);
+  // UTC day-key, matching the backend's trends buckets — the client uses the same convention
+  const today = new Date().toISOString().slice(0, 10);
+  const todayRow = trends?.daily?.find((d: { date: string }) => d.date === today);
   return NextResponse.json({
     traces: stats?.traces ?? 0,
     failures: stats?.auto_failures ?? 0,
@@ -34,5 +39,9 @@ export async function GET() {
     // the user's own ingest key (already shown to them on /settings/api-keys) — NOT TRACELY_KEY
     ingest_key: me?.ingest_keys?.[0] ?? null,
     endpoint: process.env.NEXT_PUBLIC_TRACELY_PUBLIC_API ?? "http://localhost:8000",
+    traces_today: todayRow?.traces ?? 0,
+    failures_today: todayRow?.failures ?? 0,
+    gate_today: Boolean(gates?.items?.[0]?.created_at?.startsWith(today)),
+    thread_id: sessions?.[0]?.thread ?? null,
   });
 }
