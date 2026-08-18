@@ -53,10 +53,14 @@ _REAL = "internal_kind = ''"
 # and skipped by every per-agent read, while Python's `root_span` happily found one. Same rule both
 # sides or the two disagree about which agent a conversation belongs to.
 # Assumes a GROUP BY over one trace's spans.
+# Ordered, not OR'd: `is_app_root` is also set by a *marked* span (`tracely.is_app_root`,
+# langfuse's `as_root`), which a framework can stamp on a child. OR-ing the two would leave
+# `anyIf` free to pick that child's agent over the real root's — a trace filed under its
+# sub-agent, non-deterministically.
 _TRACE_AGENT = (
-    "if(anyIf(agent_id, parent_span_id = '' OR is_app_root) != '', "
-    "anyIf(agent_id, parent_span_id = '' OR is_app_root), "
-    "anyIf(agent_id, agent_id != ''))"
+    "if(anyIf(agent_id, parent_span_id = '') != '', anyIf(agent_id, parent_span_id = ''), "
+    "if(anyIf(agent_id, is_app_root) != '', anyIf(agent_id, is_app_root), "
+    "anyIf(agent_id, agent_id != '')))"
 )
 
 
