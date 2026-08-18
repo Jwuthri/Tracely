@@ -74,7 +74,7 @@ Then in the Tracely UI, under **Scenarios**:
 3. **Run** it — Tracely POSTs each turn to the server and the conversation fills in under a fresh
    thread, graded by your evaluators.
 
-The demos use the published [`tracely-ai`](https://pypi.org/project/tracely-ai/) package (≥ 0.3.3)
+The demos use the published [`tracely-ai`](https://pypi.org/project/tracely-ai/) package (≥ 0.4.1)
 — exactly what your own app would install.
 
 ## The integration, in full
@@ -100,7 +100,7 @@ That's the whole thing for the framework demos: `init()` activates the auto-inst
 turns into conversations, grade them, and gate PRs on them.
 
 **The agent name is yours to declare.** `trace(agent="supervisor")` names it per run; without one
-it falls back to `init(service_name=…)` (SDK ≥ 0.4.0), and with neither every trace lands under a single
+it falls back to `init(service_name=…)`, and with neither every trace lands under a single
 `default` agent. Tracely deliberately ignores the framework's own `gen_ai.agent.name` — LangGraph,
 the OpenAI Agents SDK and CrewAI each stamp it on every sub-agent and tool-agent they spin up, so
 reading it registered a dozen agents per demo run. Sub-agents still show up in full: as the trace

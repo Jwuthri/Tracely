@@ -287,7 +287,7 @@ the failure this catches), and uploads via PyPI **Trusted Publishing** — no to
 # 1. bump `version` in sdk/pyproject.toml, then
 uv lock && git commit -am "chore(sdk): x.y.z" && git push
 # 2. tag it — the workflow refuses a tag that disagrees with pyproject
-git tag sdk-v0.4.0 && git push origin sdk-v0.4.0
+git tag sdk-v0.4.1 && git push origin sdk-v0.4.1
 ```
 
 `workflow_dispatch` runs everything except the upload, for a dry run.
