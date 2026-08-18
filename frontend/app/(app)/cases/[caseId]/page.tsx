@@ -37,7 +37,11 @@ export default async function CasePage({ params }: { params: Promise<{ caseId: s
       </header>
 
       {/* meta strip */}
-      <div className="reveal card grid grid-cols-2 divide-x divide-line/60 sm:grid-cols-4" style={{ animationDelay: "60ms" }}>
+      <div className="reveal card grid grid-cols-2 divide-x divide-line/60 sm:grid-cols-5" style={{ animationDelay: "60ms" }}>
+        <Meta
+          k="Gated with"
+          v={c.agent ? <a href="/gates" className="text-signal">{c.agent}</a> : "—"}
+        />
         <Meta k="Level" v={c.level} />
         <Meta k="Match mode" v={c.match_mode} />
         <Meta k="Origin" v={c.origin} />

@@ -299,22 +299,29 @@ async def evaluator_catalog(project_id: str) -> list[dict]:
 
 
 async def evaluator_score_queue(
-    project_id: str, name: str, limit: int = 25, offset: int = 0
+    project_id: str, name: str, limit: int = 25, offset: int = 0, verdict: str = ""
 ) -> list[dict]:
     """One page of verdict-bearing online scores for one evaluator — the labeling queue. Each row
-    is a judge decision (its target identity + verdict + rationale comment) a reviewer can
-    agree/disagree with. Newest first.
+    is a judge decision (its target identity + verdict + rationale comment) a reviewer labels.
+    Optionally narrowed to one verdict (`FAIL` — the ones that block a merge).
 
-    `id` breaks ties on created_at: scores written in the same batch share a timestamp, and without
-    a total order LIMIT/OFFSET would show the same verdict on two consecutive pages."""
+    Ordered by a hash of the score id, i.e. a *random sample*, not newest-first. Two reasons: an
+    agreement % is only an estimate of the judge's accuracy if the labeled rows are a random draw,
+    and newest-first serves the reviewer a screen of consecutive runs from the same batch — twenty
+    near-identical PASSes teach nobody anything. The hash is deterministic, so the sample is stable
+    across pages (a random ORDER BY would repeat some rows on page 2 and drop others)."""
     client = await get_async_client()
     res = await client.query(
         "SELECT trace_id, observation_id, session_id, evaluation_level, verdict, value, comment, "
         "toString(created_at) AS created_at "
         f"FROM scores FINAL WHERE project_id = {{p:String}} AND {_ONLINE} "
         "AND name = {n:String} AND verdict != '' "
-        "ORDER BY created_at DESC, id LIMIT {lim:UInt32} OFFSET {off:UInt32}",
-        parameters={"p": project_id, "n": name, "lim": limit, "off": max(offset, 0)},
+        "AND ({v:String} = '' OR verdict = {v:String}) "
+        "ORDER BY cityHash64(id) LIMIT {lim:UInt32} OFFSET {off:UInt32}",
+        parameters={
+            "p": project_id, "n": name, "lim": limit, "off": max(offset, 0),
+            "v": verdict.upper(),
+        },
     )
     return [
         {
@@ -658,6 +665,18 @@ async def agent_trace_ids(project_id: str, agent_id: str, limit: int = 2000) -> 
         parameters=params,
     )
     return [{"trace_id": r[0], "thread": r[1]} for r in res.result_rows]
+
+
+async def agent_ids_with_spans(project_id: str) -> set[str]:
+    """Every agent id that still has a span — the keep-list for `repositories.agents_prune`.
+    Includes internal recordings on purpose: any span at all means the agent is in use."""
+    client = await get_async_client()
+    res = await client.query(
+        "SELECT DISTINCT agent_id FROM events FINAL "
+        "WHERE project_id = {p:String} AND agent_id != ''",
+        parameters={"p": project_id},
+    )
+    return {r[0] for r in res.result_rows}
 
 
 async def agent_score_rows(project_id: str, agent_id: str, max_traces: int = 2000) -> list[dict]:

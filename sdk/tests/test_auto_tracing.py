@@ -67,6 +67,38 @@ def test_env_default_outside_trace(exporter: InMemorySpanExporter) -> None:
     assert "tracely.agent.id" not in a
 
 
+def test_service_name_names_the_agent_unless_overridden() -> None:
+    """The backend never guesses an agent from framework attributes, so the name has to come from
+    init: `service_name` is it, `agent=` overrides. The untouched `service_name` placeholder names
+    nothing — filing every unconfigured app under an agent called "agent" is worse than `default`."""
+    from tracely_sdk import _DEFAULT_SERVICE_NAME
+
+    def resolve(agent: str, service_name: str, previous: str = "") -> str:
+        # the one line of init() under test, without rebuilding the global provider
+        return agent or (service_name if service_name != _DEFAULT_SERVICE_NAME else "") or previous
+
+    assert resolve("", "support-agent") == "support-agent"
+    assert resolve("checkout-bot", "support-agent") == "checkout-bot"
+    assert resolve("", _DEFAULT_SERVICE_NAME) == ""
+    assert resolve("", _DEFAULT_SERVICE_NAME, previous="earlier") == "earlier"
+
+
+def test_init_agent_is_the_default_for_every_span(exporter: InMemorySpanExporter) -> None:
+    """That resolved name is stamped on every span the run context doesn't name — including the
+    auto-instrumentor's. A `trace(agent=…)` still wins."""
+    tracely._agent = "checkout-bot"
+    try:
+        with tracely._t().start_as_current_span("bare"):
+            pass
+        with tracely.trace(agent="planner"):
+            with tracely._t().start_as_current_span("named"):
+                pass
+    finally:
+        tracely._agent = ""
+    assert _attrs(exporter, "bare")["tracely.agent.id"] == "checkout-bot"
+    assert _attrs(exporter, "named")["tracely.agent.id"] == "planner"
+
+
 def test_trace_decorator_and_nested_merge(exporter: InMemorySpanExporter) -> None:
     @tracely.trace(agent="outer", conversation="C")
     def handler() -> None:

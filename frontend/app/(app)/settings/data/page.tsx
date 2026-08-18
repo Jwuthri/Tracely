@@ -3,6 +3,7 @@ import { DeleteWorkspacePanel } from "@/app/components/DeleteWorkspacePanel";
 import { ResetQuestPanel } from "@/app/components/ResetQuestPanel";
 import { SeedDataPanel } from "@/app/components/SeedDataPanel";
 import { WipeDataPanel } from "@/app/components/WipeDataPanel";
+import { PruneAgentsPanel } from "@/app/components/PruneAgentsPanel";
 import { getMe } from "@/app/lib/auth";
 
 export default async function DataSettingsPage() {
@@ -33,6 +34,8 @@ export default async function DataSettingsPage() {
       <SeedDataPanel empty={stats.traces === 0} />
 
       <ResetQuestPanel />
+
+      <PruneAgentsPanel />
 
       <WipeDataPanel />
 

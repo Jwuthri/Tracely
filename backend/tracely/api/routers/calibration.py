@@ -46,16 +46,23 @@ async def calibration_summary(principal: Principal = Depends(get_principal)) -> 
     pid = principal.project_id
     catalog = await async_reader.evaluator_catalog(pid)
 
-    def fetch() -> list[dict]:
+    def fetch() -> tuple[list[dict], dict[str, str]]:
         with SyncSessionLocal() as s:
-            return [
+            annotations = [
                 {"score_name": a.score_name, "judge_verdict": a.judge_verdict,
                  "human_verdict": a.human_verdict}
                 for a in repo.score_annotations_for_project(s, pid)
             ]
+            kinds = {e.score_name: e.kind for e in repo.evaluators_list(s, pid)}
+        return annotations, kinds
 
-    annotations = await run_in_threadpool(fetch)
-    return merge_catalog_with_agreement(catalog, annotations)
+    annotations, kinds = await run_in_threadpool(fetch)
+    rows = merge_catalog_with_agreement(catalog, annotations)
+    # `kind` sorts the UI: a structural evaluator is deterministic code, so labeling its verdicts
+    # measures nothing — only llm_judge rows are worth a reviewer's attention.
+    for r in rows:
+        r["kind"] = kinds.get(r["name"], "")
+    return rows
 
 
 @router.get("/calibration/{score_name}/queue")
@@ -63,6 +70,7 @@ async def calibration_queue(
     score_name: str,
     limit: int = 25,
     offset: int = 0,
+    verdict: str = "",
     principal: Principal = Depends(get_principal),
 ) -> list[dict]:
     """One page of the evaluator's recent judge decisions, each annotated with THIS reviewer's
@@ -72,7 +80,7 @@ async def calibration_queue(
     its comment) to the browser, and labeling is a one-at-a-time activity — nobody reads past the
     first screen. Callers derive "has more" from `len(rows) == limit`, as `/api/sessions` does."""
     pid, me = principal.project_id, _labeler(principal)
-    queue = await async_reader.evaluator_score_queue(pid, score_name, limit, offset)
+    queue = await async_reader.evaluator_score_queue(pid, score_name, limit, offset, verdict)
 
     def fetch() -> dict[tuple, object]:
         with SyncSessionLocal() as s:

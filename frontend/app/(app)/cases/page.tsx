@@ -18,7 +18,9 @@ export default async function CasesPage({
         <div>
           <h1 className="font-display text-[26px] font-extrabold tracking-tight">Regression cases</h1>
           <p className="mt-1.5 text-[14px] text-fg-muted">
-            Each case is a production trace promoted into a forever-running regression test.
+            Each case is a production trace promoted into a forever-running regression test,
+            attached to the agent it came from — <a href="/gates" className="text-signal">the gate</a>{" "}
+            replays one agent&apos;s cases at a time.
           </p>
         </div>
         {/* the project-wide count, not this page's — a COUNT(*), so it stays true as the list pages */}
@@ -47,6 +49,9 @@ export default async function CasesPage({
               <span className="flex min-w-0 flex-col gap-0.5">
                 <span className="truncate text-[13.5px] text-fg">{c.title || "case"}</span>
                 <span className="flex items-center gap-1.5 font-mono text-[10.5px] text-fg-faint">
+                  {c.agent && (
+                    <span className="rounded bg-ink-700 px-1.5 py-0.5 text-fg-muted">{c.agent}</span>
+                  )}
                   src <CopyId value={c.source_trace_id} label="source trace" />
                 </span>
               </span>

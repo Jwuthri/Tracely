@@ -2,8 +2,9 @@
 
 import clsx from "clsx";
 import { useRouter } from "next/navigation";
-import { useCallback, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import type { AgentRow, Scenario, ScenarioTurn } from "@/app/lib/api";
+import { listJudgeModels, type JudgeModelOption } from "@/app/lib/evaluators";
 import { EndpointPanel } from "./EndpointPanel";
 import { TurnEditor, emptyTurn } from "./TurnEditor";
 import { Toggle } from "./Toggle";
@@ -332,6 +333,13 @@ function ScenarioForm({
   const [goal, setGoal] = useState(scenario?.goal ?? "");
   const [maxTurns, setMaxTurns] = useState(scenario?.max_turns ?? 6);
   const [attackerModel, setAttackerModel] = useState(scenario?.attacker_model ?? "");
+  // Same curated list the evaluator columns pick their judge from — one source for "models this
+  // project can actually call". Fetched only once the adversarial half is on screen.
+  const [models, setModels] = useState<JudgeModelOption[]>([]);
+  useEffect(() => {
+    if (kind !== "ADVERSARIAL" || models.length) return;
+    void listJudgeModels().then((m) => setModels(m.models)).catch(() => {});
+  }, [kind, models.length]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -450,13 +458,25 @@ function ScenarioForm({
               <label className={LABEL} htmlFor={`${uid}-model`}>
                 Attacker model
               </label>
-              <input
+              <select
                 id={`${uid}-model`}
                 value={attackerModel}
                 onChange={(e) => setAttackerModel(e.target.value)}
-                placeholder="server default — e.g. anthropic/claude-opus-5"
                 className={`${FIELD} mt-1`}
-              />
+              >
+                <option value="">Server default</option>
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+                {/* A model saved earlier (or set by hand) that the curated list no longer
+                    carries — keep it selectable so editing a scenario can't silently retarget
+                    the attacker. */}
+                {attackerModel && !models.some((m) => m.id === attackerModel) && (
+                  <option value={attackerModel}>{attackerModel}</option>
+                )}
+              </select>
             </div>
           </div>
           <p className="text-[12px] text-fg-faint">

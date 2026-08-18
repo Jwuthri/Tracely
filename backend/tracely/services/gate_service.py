@@ -178,6 +178,8 @@ class GateService:
         min_pass_rate: float | None = None,
         gate_run_id: str | None = None,
         finalize: bool = True,
+        case_ids: Sequence[str] | None = None,
+        scenario_ids: Sequence[str] | None = None,
     ) -> GateRun:
         """Replay an agent's PROMOTED cases -> PASS/FAIL. Two pairing modes:
         - `candidates` given: explicit `{case_id: trace_id}` map (as `tracely replay` produces).
@@ -189,8 +191,12 @@ class GateService:
 
         `finalize=False` leaves the run RUNNING with no `finished_at`, for the two-phase simulated
         path where the verdict isn't known yet.
+
+        `case_ids` / `scenario_ids` narrow the run to a subset the caller picked (the launcher's
+        checkboxes, `--case`/`--scenario` in CI). `None` = the whole suite, which is what every
+        existing caller means; `[]` = deliberately none of that half.
         """
-        cases = self._promoted_cases(project_id, agent_id)
+        cases = self._promoted_cases(project_id, agent_id, case_ids)
         case_to_trace = self._pair_candidates(project_id, agent_id, env, cases, candidates)
 
         total_lat, total_tok, per_trace = self.trace_reader.candidate_metrics(
@@ -222,7 +228,7 @@ class GateService:
         passed, failed, skipped = self._record_gate_cases(gate, cases, case_to_trace, per_trace)
         case_status = self._final_status(passed, failed, skipped, len(cases), [])
 
-        driven = self._drive_scenarios(gate, env) if with_scenarios else 0
+        driven = self._drive_scenarios(gate, env, scenario_ids) if with_scenarios else 0
         # -1 = enabled scenarios with no endpoint configured. Record it on the run so BOTH the
         # single-phase path and phase-2 grading block, instead of a suite that never ran going green.
         misconfigured = driven < 0
@@ -256,6 +262,7 @@ class GateService:
         gate_run_id: str,
         min_pass_rate: float | None = None,
         project_id: str | None = None,
+        scenario_ids: Sequence[str] | None = None,
     ) -> GateRun | None:
         """Phase 2: grade the conversations phase 1 drove, then finalize the run.
 
@@ -323,7 +330,7 @@ class GateService:
         # Phase 2 recomputes the verdict from scratch, so the misconfiguration phase 1 detected has
         # to be re-checked here too — otherwise an unrunnable suite finishes green.
         if not outcomes and self._endpoint_missing_for_enabled_scenarios(
-            gate.project_id, gate.agent_id
+            gate.project_id, gate.agent_id, scenario_ids
         ):
             scenario_status = "NO_COVERAGE"
             # Merge, don't replace: phase 1 may have left delta/stateless warnings on the row.
@@ -386,22 +393,37 @@ class GateService:
 
     # ── emulated conversations ────────────────────────────────────────────────
 
-    def _endpoint_missing_for_enabled_scenarios(self, project_id: str, agent_id: str) -> bool:
+    @staticmethod
+    def _scenario_query(project_id: str, agent_id: str, scenario_ids: Sequence[str] | None):
+        """The scenarios a gate should drive. An explicit selection beats the `enabled` flag —
+        picking a scenario by hand IS enabling it for that run."""
+        q = select(Scenario).where(
+            Scenario.project_id == project_id, Scenario.agent_id == agent_id
+        )
+        return (
+            q.where(Scenario.id.in_(list(scenario_ids)))
+            if scenario_ids is not None
+            else q.where(Scenario.enabled.is_(True))
+        )
+
+    def _endpoint_missing_for_enabled_scenarios(
+        self, project_id: str, agent_id: str, scenario_ids: Sequence[str] | None = None
+    ) -> bool:
         """True when this agent has scenarios switched on but nowhere to send them.
 
         A blocking misconfiguration rather than an absent feature — checked by both gate phases,
-        since phase 2 recomputes the verdict independently of phase 1.
+        since phase 2 recomputes the verdict independently of phase 1. Takes the same selection
+        phase 1 drove, or a run that deliberately skipped the scenario half would block on an
+        endpoint it never needed.
         """
         has_scenarios = self.session.execute(
-            select(Scenario.id).where(
-                Scenario.project_id == project_id,
-                Scenario.agent_id == agent_id,
-                Scenario.enabled.is_(True),
-            )
+            self._scenario_query(project_id, agent_id, scenario_ids).with_only_columns(Scenario.id)
         ).first()
         return bool(has_scenarios) and self.session.get(AgentEndpoint, agent_id) is None
 
-    def _drive_scenarios(self, gate: GateRun, env: str) -> int:
+    def _drive_scenarios(
+        self, gate: GateRun, env: str, scenario_ids: Sequence[str] | None = None
+    ) -> int:
         """Phase 1: drive every enabled scenario against the agent's endpoint and record a PENDING
         GateCase each. Returns how many ran. Grading is deliberately NOT done here — see
         `grade_scenarios` for why the worker has to be released first.
@@ -414,11 +436,7 @@ class GateService:
         project_id, agent_id = gate.project_id, gate.agent_id
         scenarios = list(
             self.session.execute(
-                select(Scenario).where(
-                    Scenario.project_id == project_id,
-                    Scenario.agent_id == agent_id,
-                    Scenario.enabled.is_(True),
-                )
+                self._scenario_query(project_id, agent_id, scenario_ids)
             ).scalars()
         )
         if not scenarios:
@@ -806,16 +824,17 @@ class GateService:
 
     # ── internals ─────────────────────────────────────────────────────────────
 
-    def _promoted_cases(self, project_id: str, agent_id: str) -> list[EvaluationCase]:
-        return list(
-            self.session.execute(
-                select(EvaluationCase).where(
-                    EvaluationCase.project_id == project_id,
-                    EvaluationCase.agent_id == agent_id,
-                    EvaluationCase.status == "PROMOTED",
-                )
-            ).scalars()
+    def _promoted_cases(
+        self, project_id: str, agent_id: str, case_ids: Sequence[str] | None = None
+    ) -> list[EvaluationCase]:
+        q = select(EvaluationCase).where(
+            EvaluationCase.project_id == project_id,
+            EvaluationCase.agent_id == agent_id,
+            EvaluationCase.status == "PROMOTED",
         )
+        if case_ids is not None:
+            q = q.where(EvaluationCase.id.in_(list(case_ids)))
+        return list(self.session.execute(q).scalars())
 
     def _pair_candidates(
         self,

@@ -38,6 +38,8 @@ with tracely.trace(agent="support-agent", conversation="conv-1", user="u_42"):
 def plan(goal): ...
 ```
 
+Your agent's **name is what you declare** — `service_name` names it by default, `agent=` on `init()` overrides that for the app, `agent=` on `trace()` for one run. It is never guessed from framework attributes: a harness stamps its own `gen_ai.agent.name` on every sub-agent it spins up, which would fill your workspace with agents you never chose. Everything Tracely groups, clusters and gates on hangs off this name; name neither and every trace lands under one `default` agent.
+
 `instrument` is `"auto"` (probes for **openai / anthropic / google / mistral / langchain** and
 activates what's installed — everything else, e.g. `crewai`, `llama-index`, `litellm`, `bedrock`,
 is opt-in), an explicit list (`["openai", "anthropic"]`, honored as-is), or `False`. The

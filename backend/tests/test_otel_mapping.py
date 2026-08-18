@@ -464,13 +464,20 @@ def test_litellm_usage_survives_python_literals_in_the_repr():
     assert e["usage_details"] == {"input": 120, "output": 18}
 
 
-def test_gen_ai_agent_name_identifies_the_agent():
-    """Multi-agent harnesses that speak native semconv (OpenAI Agents, ADK, CrewAI, Pydantic AI)
-    name their agents here. Without it every one of their spans collapsed into `default` — the
-    dimension the product groups, gates and clusters on."""
+def test_a_framework_agent_name_never_registers_an_agent():
+    """The agent is DECLARED, not inferred. A harness (OpenAI Agents, ADK, CrewAI, Pydantic AI)
+    stamps `gen_ai.agent.name` on every sub-agent it spins up — reading it registered dozens of
+    agents nobody chose. The span still classifies as an AGENT and keeps the name in metadata; it
+    just falls back to the trace's declared agent (else `default`)."""
     e = _event({"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "billing-specialist"})
     assert e["type"] == "AGENT"
-    assert e["agent_slug"] == "billing-specialist"
+    assert e["agent_slug"] == ""
+    assert e["metadata"]["gen_ai.agent.name"] == "billing-specialist"
+
+
+def test_a_declared_agent_name_wins():
+    e = _event({"gen_ai.agent.name": "billing-specialist", "tracely.agent.id": "support"})
+    assert e["agent_slug"] == "support"
 
 
 def test_gen_ai_conversation_id_threads_a_run():

@@ -8,8 +8,9 @@ export default function CalibrationPage() {
       <header className="reveal">
         <h1 className="font-display text-[26px] font-extrabold tracking-tight">Judge calibration</h1>
         <p className="mt-1.5 max-w-2xl text-[14px] text-fg-muted">
-          Before you let an LLM judge block your CI, check it against yourself. Agree or disagree with each
-          verdict — Tracely tracks how often the judge matches you, and which way it errs.
+          Before you let an LLM judge block your CI, check it against yourself. Grade a random sample
+          of runs — you first, the judge revealed after — and Tracely tracks how often it matches you
+          and which way it errs: missed failures, or good PRs it would have blocked.
         </p>
       </header>
       <CalibrationView />

@@ -62,6 +62,16 @@ def _cases(session, gate_id: str) -> list[dict]:
     ]
 
 
+def _ids(body: dict, key: str) -> list[str] | None:
+    """`None` (key absent) = run the whole half; a list = run exactly these, `[]` included."""
+    v = body.get(key)
+    if v is None:
+        return None
+    if not isinstance(v, list):
+        raise HTTPException(status_code=400, detail=f"{key} must be a list of ids")
+    return [str(x) for x in v]
+
+
 @router.post("/gate")
 async def run_gate(
     project_id: str = Depends(get_project_id), body: dict = Body(default={})
@@ -71,6 +81,7 @@ async def run_gate(
     git_ref = body.get("git_ref") or ""
     pr_number = body.get("pr_number")
     candidates = body.get("candidates") or None  # {case_id: trace_id} from `tracely replay`
+    case_ids = _ids(body, "case_ids")
     if not agent_ref:
         raise HTTPException(status_code=400, detail="agent required")
 
@@ -82,7 +93,7 @@ async def run_gate(
                 return ("err", f"agent '{agent_ref}' not found")
             g = gate_svc.run_gate(
                 project_id, aid, env=env, git_ref=git_ref, pr_number=pr_number,
-                candidates=candidates,
+                candidates=candidates, case_ids=case_ids,
             )
             agent = s.get(Agent, aid)
             return ("ok", _gate_dict(g, agent.slug if agent else None, _cases(s, g.id)))
@@ -106,6 +117,8 @@ async def run_simulated_gate(
     agent_ref = body.get("agent")
     if not agent_ref:
         raise HTTPException(status_code=400, detail="agent required")
+    case_ids = _ids(body, "case_ids")
+    scenario_ids = _ids(body, "scenario_ids")
     min_pass_rate = body.get("min_pass_rate")
     if min_pass_rate is not None:
         try:
@@ -136,6 +149,7 @@ async def run_simulated_gate(
     gate_id, aid, env, git_ref, pr_number = payload
     run_scenario_gate_task.delay(
         project_id, aid, gate_id, env, git_ref, pr_number, min_pass_rate,
+        case_ids, scenario_ids,
     )
     return {"id": gate_id, "status": "RUNNING", "agent": agent_ref, "env": env}
 

@@ -74,8 +74,8 @@ def _extract_usage(result: dict, model: str | None) -> dict:
 # The judge-model choices offered in the column UI. Curated (a 367-model dropdown is not a
 # selector) and verified against the live OpenRouter catalog when a key is configured —
 # unavailable ids are dropped, labels upgraded to OpenRouter's display names (so these labels are
-# only what you see when the catalog is unreachable). Ordered cheap/fast → expensive within each
-# provider, since a judge runs per trace and cost/latency is the real selection axis.
+# only what you see when the catalog is unreachable). Grouped cheap/fast → expensive per provider
+# for reading, but `list_models` sorts by label before serving — the pickers show it alphabetically.
 _CURATED_MODELS: list[tuple[str, str]] = [
     # OpenAI
     ("openai/gpt-5.6-luna", "OpenAI GPT-5.6 Luna"),
@@ -502,8 +502,14 @@ def list_models() -> list[dict[str, str]]:
             if mid in available
         ]
         if out:
-            return out
-    return [{"id": mid, "label": label} for mid, label in curated]
+            return _by_label(out)
+    return _by_label([{"id": mid, "label": label} for mid, label in curated])
+
+
+def _by_label(models: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Alphabetical by label, which groups the pickers by provider. Sorted here rather than in
+    each `<select>` so every caller shows the same order."""
+    return sorted(models, key=lambda m: m["label"].lower())
 
 
 def get_chat_model(model: str | None = None, temperature: float = 0.0):

@@ -239,6 +239,31 @@ def agents_list(s: Session, project_id: str) -> list[Agent]:
     )
 
 
+def agents_prune(s: Session, project_id: str, keep_ids: set[str]) -> list[str]:
+    """Delete the project's agents that have no spans left and nothing pointing at them; returns
+    the slugs removed.
+
+    Agent rows are derived data — ingest upserts one per DECLARED agent name — so a row whose spans
+    are gone (or that an older, name-inferring attribution rule invented) is junk. Anything still
+    referenced (a scenario, a regression case, a configured endpoint) raises a ForeignKeyViolation
+    on delete and is kept instead: one SAVEPOINT per agent turns that into "skip", so this never
+    needs a hand-maintained list of the tables that point at `agents`.
+    """
+    pruned: list[str] = []
+    for a in s.execute(select(Agent).where(Agent.project_id == project_id)).scalars().all():
+        if a.id in keep_ids:
+            continue
+        try:
+            with s.begin_nested():
+                s.execute(delete(AgentVersion).where(AgentVersion.agent_id == a.id))
+                s.execute(delete(Agent).where(Agent.id == a.id))
+            pruned.append(a.slug)
+        except IntegrityError:
+            continue
+    s.commit()
+    return pruned
+
+
 def agent_in_project(s: Session, project_id: str, agent_id: str) -> Agent | None:
     """An agent by id, scoped to the project (None if unknown / cross-tenant)."""
     a = s.get(Agent, agent_id)
@@ -468,13 +493,17 @@ def cases_count(s: Session, project_id: str) -> int:
 
 
 def cases_count_by_agent(s: Session, project_id: str) -> dict[str, int]:
-    """`{agent_id: cases}` — what the gate launcher ranks agents by. A GROUP BY rather than a
-    tally over the case list, so it stays correct once that list is paginated."""
+    """`{agent_id: promoted cases}` — what the gate launcher ranks agents by and labels its
+    picker with. A GROUP BY rather than a tally over the case list, so it stays correct once that
+    list is paginated. PROMOTED only: those are the cases a gate actually replays."""
     return {
         aid: int(n)
         for aid, n in s.execute(
             select(EvaluationCase.agent_id, func.count())
-            .where(EvaluationCase.project_id == project_id)
+            .where(
+                EvaluationCase.project_id == project_id,
+                EvaluationCase.status == "PROMOTED",
+            )
             .group_by(EvaluationCase.agent_id)
         ).all()
     }

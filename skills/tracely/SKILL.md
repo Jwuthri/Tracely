@@ -60,22 +60,28 @@ with tracely.trace(agent="support-agent", conversation="conv-1", user="u_42"):
 arbitrary metadata) onto **every** span inside it, including the ones the instrumentor created.
 It also works as a decorator on sync or async functions.
 
-## Five rules that decide whether Tracely actually works
+## Six rules that decide whether Tracely actually works
 
 Getting these wrong doesn't error — it silently produces a useless workspace. Check them in every
 review of someone's instrumentation.
 
-1. **`conversation=` is what makes a conversation.** Each turn is its own trace; passing the same
+1. **The agent name is declared, never inferred.** It's the dimension gates, clusters, scenarios
+   and trends group by, and Tracely reads exactly one attribute for it: `tracely.agent.id` — set by
+   `init(service_name=…)`, overridden by `init(agent=…)` for the app or `trace(agent=…)`/`agent(...)`
+   per run. A framework's own `gen_ai.agent.name` is deliberately ignored: a harness stamps one on
+   every sub-agent it spins up, which would register dozens of agents nobody chose. Name neither and
+   every trace in the workspace lands under a single `default` agent.
+2. **`conversation=` is what makes a conversation.** Each turn is its own trace; passing the same
    conversation id to every turn is the only thing that threads them. Without it, a 12-turn support
    thread is 12 unrelated rows, and every conversation-level evaluator has nothing to grade.
-2. **`env` is the gating axis.** `prod` failures become regression cases; `ci` traces are what the
+3. **`env` is the gating axis.** `prod` failures become regression cases; `ci` traces are what the
    gate grades. Tagging CI runs as `prod` poisons the case pool with test data.
-3. **Errors are the failure signal.** A failed tool must be marked — `tracely.error(span, msg)`, an
+4. **Errors are the failure signal.** A failed tool must be marked — `tracely.error(span, msg)`, an
    exception inside `@observe`, or an OTel `ERROR` status. Detection, clustering and the gate all key
    off it. A tool that returns `{"error": "..."}` as a *successful* span is invisible.
-4. **`flush()` before the process exits.** Scripts, Lambdas, CLI runs and tests lose their last
+5. **`flush()` before the process exits.** Scripts, Lambdas, CLI runs and tests lose their last
    spans otherwise. Long-lived servers don't need it.
-5. **If Tracely calls your agent, honour the `traceparent` header.** Scenarios and `simulate` mint
+6. **If Tracely calls your agent, honour the `traceparent` header.** Scenarios and `simulate` mint
    the trace id and send it. Ignore it and the gate sees only text in / text out — blind to your
    tool calls, so tool expectations report `SKIP` instead of grading. See `references/ci-gate.md`.
 

@@ -15,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 from tracely.api.auth import get_project_id, require_role
 from tracely.auth import Principal
 from tracely.infrastructure.blob import s3
-from tracely.infrastructure.clickhouse import deletes
+from tracely.infrastructure.clickhouse import async_reader, deletes
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.llm import provider
@@ -55,6 +55,26 @@ async def wipe_project_data(body: WipeBody, project_id: str = Depends(get_projec
 
     registry = await run_in_threadpool(work)
     return {"deleted": {**events, **registry}}
+
+
+@router.post("/project/agents/prune")
+async def prune_unused_agents(project_id: str = Depends(get_project_id)) -> dict:
+    """Delete registered agents that have no spans and nothing referencing them.
+
+    Agents are derived from what traces DECLARE (`tracely.agent.id`), so this clears out the ones
+    an earlier attribution rule invented from framework attributes — every sub-agent an OpenAI
+    Agents / CrewAI / ADK harness spins up used to land in the registry. Safe and idempotent: an
+    agent still referenced by a scenario, case, gate or endpoint is kept.
+    """
+    live = await async_reader.agent_ids_with_spans(project_id)
+
+    def work() -> list[str]:
+        with SyncSessionLocal() as s:
+            return repo.agents_prune(s, project_id, live)
+
+    pruned = await run_in_threadpool(work)
+    log.info("agents_pruned", project_id=project_id, count=len(pruned))
+    return {"pruned": pruned, "kept": len(live)}
 
 
 @router.delete("/project")

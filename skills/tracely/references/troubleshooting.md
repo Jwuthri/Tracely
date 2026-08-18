@@ -19,7 +19,7 @@ Work top-down: most "Tracely is broken" reports are one of the first four rows.
 | Every span is its own root | The call isn't inside `trace()` / an `@observe` span | Wrap the run; nesting is OTel-context-based |
 | Spans from a worker thread float free | Auto-nesting is contextvar-based, in-process | `tracely.run_in_thread(fn, arg)` copies the context |
 | Turns don't group into a conversation | Missing or per-turn-different `conversation` id | Pass the **same** `conversation=` to every turn. Raw OTLP: set `tracely.conversation.id` (or `gen_ai.conversation.id`) |
-| Traces show no agent | No `tracely.agent.id` | Pass `agent=` to `trace()`/`agent()`. Raw OTLP: set `tracely.agent.id` or `gen_ai.agent.name` |
+| Everything is under one `default` agent | Nothing declared `tracely.agent.id` — framework attributes like `gen_ai.agent.name` are ignored on purpose | Set `init(service_name="…")` (it names the agent), `init(agent="…")` to override, or `agent=` per run on `trace()`/`agent()`. Raw OTLP: set `tracely.agent.id` |
 | Every LLM call appears twice | Two instrumentors on the same call | LangChain + provider, or LiteLLM + provider. Under `"auto"` LangChain wins automatically; otherwise name one path, or disable the overlap with `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS` |
 | Google ADK produces nothing | ADK patches at import time | `init(instrument=["google-adk"])` **before** `import google.adk` |
 | I/O renders as a half-text/half-JSON smush | Payload isn't in a recognised shape | Use a message array, a `{role, content}` object, or typed content blocks (`manual.md` § structured I/O) |

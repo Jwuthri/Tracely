@@ -33,10 +33,15 @@ async def stats(project_id: str = Depends(get_project_id)) -> dict:
     return {**counters, **await run_in_threadpool(registry)}
 
 
-def _case_dict(c: EvaluationCase, replays: list | None = None) -> dict[str, Any]:
+def _case_dict(
+    c: EvaluationCase, replays: list | None = None, agent_slug: str | None = None
+) -> dict[str, Any]:
     d = {
         "id": c.id,
         "agent_id": c.agent_id,
+        # The case's only real binding: the gate replays a suite *per agent*, so the UI has to
+        # say which one, or "why didn't my case run?" has no visible answer.
+        "agent": agent_slug,
         "level": c.level,
         "title": c.title,
         "status": c.status,
@@ -89,10 +94,11 @@ async def list_cases(
     many exist without shipping them all."""
     def work():
         with SyncSessionLocal() as s:
+            slugs = {a.id: a.slug for a in repo.agents_list(s, project_id)}
             items = []
             for c in repo.cases_list(s, project_id, limit=limit, offset=offset):
                 last = repo.case_last_replay(s, c.id)
-                d = _case_dict(c)
+                d = _case_dict(c, agent_slug=slugs.get(c.agent_id))
                 d["last_verdict"] = last.verdict if last else None
                 items.append(d)
             return {
@@ -113,7 +119,8 @@ async def get_case(case_id: str, project_id: str = Depends(get_project_id)) -> d
             c = repo.case_get(s, project_id, case_id)
             if not c:
                 return None
-            return _case_dict(c, repo.case_replays(s, case_id))
+            a = repo.agent_in_project(s, project_id, c.agent_id)
+            return _case_dict(c, repo.case_replays(s, case_id), a.slug if a else None)
 
     res = await run_in_threadpool(work)
     if res is None:

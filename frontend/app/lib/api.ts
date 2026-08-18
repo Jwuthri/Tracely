@@ -216,6 +216,8 @@ export type Replay = {
 export type EvalCase = {
   id: string;
   agent_id: string;
+  /** Agent slug — the case is gated as part of THIS agent's suite, nothing else. */
+  agent: string | null;
   level: string;
   title: string;
   status: string;

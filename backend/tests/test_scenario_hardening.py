@@ -9,6 +9,7 @@ router-level harness (same shape as `test_clusters_promote`) for the endpoint PU
 - `grade_scenarios` is idempotent under `task_acks_late` redelivery,
 - one raising scenario doesn't discard the other scenarios' driven conversations,
 - a redelivered drive never re-POSTs a conversation that already went over the wire,
+- a gate launched for a SUBSET runs exactly that subset, and doesn't block on the rest,
 - `PUT /agents/{ref}/endpoint` only touches the keys present in the body.
 """
 
@@ -36,6 +37,7 @@ _SYNC_TABLES = [
     models.Agent.__table__,
     models.AgentEndpoint.__table__,
     models.Scenario.__table__,
+    models.EvaluationCase.__table__,
     models.GateRun.__table__,
     models.GateCase.__table__,
 ]
@@ -306,6 +308,66 @@ def test_deleted_scenario_case_is_swept_to_skip(db, monkeypatch):
     assert gc.verdict == "SKIP"
     assert "deleted" in gc.detail["reason"]
     assert gate.skipped == 1 and gate.finished_at is not None
+
+
+# ── running a subset (the launcher's checkboxes / --case, --scenario) ─────────
+
+
+def _spy_runs(monkeypatch) -> list[str]:
+    driven: list[str] = []
+
+    def fake_run(self, project_id, slug, scenario, endpoint, env="ci", weaknesses=None, **kw):
+        driven.append(scenario.id)
+        return {"conversation_id": f"c-{scenario.id}", "trace_ids": [], "turns": [], "error": ""}
+
+    monkeypatch.setattr("tracely.services.gate_service.SimulationService.run_scenario", fake_run)
+    return driven
+
+
+def test_only_the_picked_scenarios_are_driven(db, monkeypatch):
+    g = _drive_setup(db)
+    driven = _spy_runs(monkeypatch)
+    assert _svc(db)._drive_scenarios(g, "ci", ["sc2"]) == 1
+    assert driven == ["sc2"]
+
+
+def test_an_explicit_pick_beats_the_enabled_flag(db, monkeypatch):
+    """Ticking a scenario IS enabling it for that run — otherwise the picker silently drops the
+    box you just checked and the gate reports on a suite you didn't ask for."""
+    g = _drive_setup(db, scenario_ids=("sc1",))
+    _scenario(db, "sc9", turns=[{"message": "hi"}], enabled=False)
+    driven = _spy_runs(monkeypatch)
+    assert _svc(db)._drive_scenarios(g, "ci", ["sc9"]) == 1
+    assert driven == ["sc9"]
+
+
+def test_a_cases_only_run_does_not_demand_an_endpoint(db):
+    """Enabled scenarios + no endpoint is a blocking misconfiguration — but not for a run that
+    deliberately picked no scenario, which would otherwise finish NO_COVERAGE for nothing."""
+    _scenario(db, "sc1", enabled=True)
+    svc = _svc(db)
+    assert svc._endpoint_missing_for_enabled_scenarios(PROJECT, "a1") is True
+    assert svc._endpoint_missing_for_enabled_scenarios(PROJECT, "a1", []) is False
+
+
+def test_only_the_picked_cases_are_replayed(db):
+    for cid in ("ca1", "ca2"):
+        db.add(models.EvaluationCase(
+            id=cid, project_id=PROJECT, agent_id="a1", title=cid,
+            input_digest=cid, status="PROMOTED",
+        ))
+    db.add(models.EvaluationCase(
+        id="ca3", project_id=PROJECT, agent_id="a1", title="draft",
+        input_digest="ca3", status="DRAFT",
+    ))
+    db.commit()
+    svc = _svc(db)
+    assert sorted(c.id for c in svc._promoted_cases(PROJECT, "a1")) == ["ca1", "ca2"]
+    assert [c.id for c in svc._promoted_cases(PROJECT, "a1", ["ca2"])] == ["ca2"]
+    # An unpromoted case can't be smuggled in by id.
+    assert svc._promoted_cases(PROJECT, "a1", ["ca3"]) == []
+    # `[]` means none — NOT "no filter", which is what `or None` would have made of it.
+    assert svc._promoted_cases(PROJECT, "a1", []) == []
 
 
 # ── PUT /agents/{ref}/endpoint is partial ────────────────────────────────────

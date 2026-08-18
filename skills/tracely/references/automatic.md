@@ -233,7 +233,10 @@ const result = await generateText({
 conversation:
 
 - `tracely.conversation.id` (or semconv `gen_ai.conversation.id`) — threads turns together.
-- `tracely.agent.id` (or `gen_ai.agent.name`) — names the agent that gates and clusters group by.
+- `tracely.agent.id` — names the agent that gates and clusters group by. This one exactly: a
+  framework's `gen_ai.agent.name` is NOT read (it names every sub-agent a harness spins up). The
+  Python SDK sets it from `init(service_name=…)`; raw OTLP has to send it, or every trace lands
+  under the workspace's single `default` agent.
 
 Everything else is inferred. Failures need no special handling: an ERROR span status, a recorded
 `exception` event, or an `error.type` attribute all mark the span failed.

@@ -304,8 +304,12 @@ const result = await generateText({
 
 Two attributes are worth adding by hand whichever stack you're on, because they are what turns a
 pile of spans into a *conversation*: `tracely.conversation.id` (or the semconv
-`gen_ai.conversation.id`) to thread turns together, and `tracely.agent.id` (or `gen_ai.agent.name`)
-to name the agent the gate and the failure clusters group by. Everything else is inferred.
+`gen_ai.conversation.id`) to thread turns together, and `tracely.agent.id` to name the agent the
+gate and the failure clusters group by (the Python SDK sets it from `service_name` / `agent=`; raw
+OTLP must send it). The agent is the one thing Tracely never infers — a framework's own
+`gen_ai.agent.name` names every sub-agent it spins up, so reading it would fill your registry with
+agents you never chose. Unnamed traces land under a single `default` agent. Everything else is
+inferred.
 
 Failures need no special handling: an ERROR span status, a recorded `exception` event, or an
 `error.type` attribute all mark the span failed — which is the signal detection, clustering and

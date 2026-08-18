@@ -93,6 +93,13 @@ class ToolError(RuntimeError):
 _tracer: otel_trace.Tracer | None = None
 _provider: TracerProvider | None = None
 _env: str = "prod"
+# init(agent=…) / init(service_name=…): the agent name every span falls back to when the run
+# context doesn't name one.
+_agent: str = ""
+# The `service_name` placeholder. A caller who chose a service name has named their agent; the
+# untouched default has not — filing those under an agent literally called "agent" would be worse
+# than the backend's `default`.
+_DEFAULT_SERVICE_NAME = "agent"
 _initialized: bool = False
 # the active tracely.trace() run context (agent/conversation/turn/user/trace_name/env/metadata),
 # stamped onto every span by TracelyContextSpanProcessor — including auto-instrumentor spans.
@@ -110,14 +117,17 @@ class TracelyContextSpanProcessor(SpanProcessor):
     conflict; `tracely.env` is owned here (run-ctx value, else the init() default)."""
 
     def on_start(self, span: Span, parent_context: Any = None) -> None:  # noqa: ARG002
-        ctx = _run_ctx.get()
-        env = (ctx or {}).get("env") or _env
+        ctx = _run_ctx.get() or {}
+        env = ctx.get("env") or _env
         if env:
             span.set_attribute("tracely.env", str(env))
+        # The agent is never inferred backend-side, so `init(agent=…)` is what saves a whole app
+        # from landing under `default` without naming the agent on every trace().
+        agent = ctx.get("agent") or _agent
+        if agent:
+            span.set_attribute("tracely.agent.id", str(agent))
         if not ctx:
             return
-        if ctx.get("agent"):
-            span.set_attribute("tracely.agent.id", str(ctx["agent"]))
         if ctx.get("conversation"):
             span.set_attribute("tracely.conversation.id", str(ctx["conversation"]))
             span.set_attribute("session.id", str(ctx["conversation"]))
@@ -248,7 +258,8 @@ class _ScopeFilteredBatchProcessor(BatchSpanProcessor):
 def init(
     endpoint: str = "http://localhost:8000",
     api_key: str = "tracely_dev_key",
-    service_name: str = "agent",
+    service_name: str = _DEFAULT_SERVICE_NAME,
+    agent: str = "",
     env: str = "prod",
     instrument: str | list[str] | bool = "auto",
     redact: bool | list[str] | Callable[[str, str], str] | None = None,
@@ -258,6 +269,13 @@ def init(
     """One-call setup (R1). Configures the OTel provider + OTLP exporter pointing at Tracely,
     registers the context-stamping processor, and activates the matching auto-instrumentors so your
     existing OpenAI/Anthropic/… code is traced with zero span code.
+
+    `agent` — the agent name every trace is filed under (the dimension Tracely groups, clusters
+    and gates on), defaulting to `service_name`. Tracely never guesses it from framework
+    attributes — a harness names every sub-agent it spins up, and reading that registered dozens of
+    agents nobody chose — so pass it here only when the agent's name differs from the service's;
+    `tracely.trace(agent=…)` still wins per run. Name neither and every trace lands under a single
+    `default` agent.
 
     `instrument`:
       - "auto" (default) — activate instrumentors for whatever provider SDKs are importable.
@@ -284,8 +302,9 @@ def init(
 
     Call once at startup; idempotent (provider built once; instrumentor activation de-duped, R7).
     Streaming token usage requires `stream_options={"include_usage": True}` on OpenAI calls (R3)."""
-    global _tracer, _provider, _env, _initialized
+    global _tracer, _provider, _env, _agent, _initialized
     _env = env
+    _agent = agent or (service_name if service_name != _DEFAULT_SERVICE_NAME else "") or _agent
     # The read path (`export_conversations`) reuses this, so a process that traces can also export
     # without restating the endpoint. OUTSIDE the build-once guard below: the exporter is built once,
     # but an app that already called init() must still be able to point a later, explicit

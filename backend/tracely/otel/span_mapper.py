@@ -126,15 +126,13 @@ def _map_span(
         "session_id": str(
             _first(a, ["session.id", "tracely.session.id", "langfuse.session.id"]) or ""
         ),
-        # `gen_ai.agent.*` is how every multi-agent harness that speaks native semconv (OpenAI
-        # Agents, ADK, CrewAI, Pydantic AI, Semantic Kernel) names its agents. Without it their
-        # spans all collapsed into the single fallback `default` agent, which is precisely the
-        # dimension the product groups, gates and clusters on.
-        "agent_slug": str(
-            _first(a, [
-                "tracely.agent.id", "langfuse.agent.id", "gen_ai.agent.name", "gen_ai.agent.id",
-            ]) or ""
-        ),
+        # The agent is DECLARED, never inferred. Only what the user set — SDK `agent=` /
+        # `init(agent=)` / the raw attribute — names an agent; a trace that declares nothing gets
+        # the single `default` agent (ingestion_service._attribute_default_agent). Framework keys
+        # like `gen_ai.agent.name` are deliberately NOT read here: a harness stamps one on every
+        # sub-agent it spins up, which registered dozens of agents nobody chose and shredded the
+        # dimension the product groups, gates and clusters on. They stay visible in metadata.
+        "agent_slug": str(_first(a, ["tracely.agent.id", "langfuse.agent.id"]) or ""),
         "agent_version_ref": str(
             _first(a, ["tracely.agent.version", "tracely.agent.version_id"]) or ""
         ),

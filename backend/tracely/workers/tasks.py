@@ -143,6 +143,8 @@ def run_scenario_gate_task(
     git_ref: str = "",
     pr_number: int | None = None,
     min_pass_rate: float | None = None,
+    case_ids: list[str] | None = None,
+    scenario_ids: list[str] | None = None,
 ) -> dict:
     """Phase 1 of a simulated gate: replay the regression cases, then drive the conversations.
 
@@ -170,7 +172,7 @@ def run_scenario_gate_task(
             gate = GateService(s).run_gate(
                 project_id, agent_id, env=env, git_ref=git_ref, pr_number=pr_number,
                 with_scenarios=True, min_pass_rate=min_pass_rate, gate_run_id=gate_run_id,
-                finalize=False,
+                finalize=False, case_ids=case_ids, scenario_ids=scenario_ids,
             )
         except Exception:
             s.rollback()
@@ -180,7 +182,7 @@ def run_scenario_gate_task(
 
     try:
         grade_scenario_gate_task.apply_async(
-            (project_id, gate_run_id, min_pass_rate),
+            (project_id, gate_run_id, min_pass_rate, scenario_ids),
             countdown=settings.gate_scenario_span_grace_s,
         )
     except Exception:
@@ -194,7 +196,11 @@ def run_scenario_gate_task(
 
 @celery_app.task(name="tracely.grade_scenario_gate", bind=True, max_retries=0)
 def grade_scenario_gate_task(
-    self, project_id: str, gate_run_id: str, min_pass_rate: float | None = None
+    self,
+    project_id: str,
+    gate_run_id: str,
+    min_pass_rate: float | None = None,
+    scenario_ids: list[str] | None = None,
 ) -> dict:
     """Phase 2: grade the driven conversations and finalize the run.
 
@@ -206,7 +212,9 @@ def grade_scenario_gate_task(
 
     with SyncSessionLocal() as s:
         try:
-            gate = GateService(s).grade_scenarios(gate_run_id, min_pass_rate, project_id=project_id)
+            gate = GateService(s).grade_scenarios(
+                gate_run_id, min_pass_rate, project_id=project_id, scenario_ids=scenario_ids
+            )
         except Exception:
             s.rollback()
             log.exception("scenario_gate_grade_failed", gate_run_id=gate_run_id)

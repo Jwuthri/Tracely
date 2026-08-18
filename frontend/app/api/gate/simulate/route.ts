@@ -7,11 +7,18 @@ const API = process.env.TRACELY_API ?? "http://localhost:8000";
  *  a RUNNING gate id — real HTTP calls plus grading take minutes, so the caller polls
  *  `/api/gates/{id}` until `finished_at` is set. */
 export async function POST(req: NextRequest) {
-  const { agent, env, min_pass_rate } = await req.json();
+  const { agent, env, min_pass_rate, case_ids, scenario_ids } = await req.json();
   const r = await fetch(`${API}/api/gate/simulate`, {
     method: "POST",
     headers: { ...(await authHeaders()), "content-type": "application/json" },
-    body: JSON.stringify({ agent, env: env ?? "ci", min_pass_rate }),
+    // Either id list is omitted unless the launcher picked a subset — see the note in ../route.ts.
+    body: JSON.stringify({
+      agent,
+      env: env ?? "ci",
+      min_pass_rate,
+      ...(case_ids ? { case_ids } : {}),
+      ...(scenario_ids ? { scenario_ids } : {}),
+    }),
   });
   return NextResponse.json(await r.json(), { status: r.status });
 }
