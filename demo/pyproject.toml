@@ -5,6 +5,8 @@ description = "End-to-end demos: LangGraph, OpenAI Agents SDK and Anthropic agen
 requires-python = ">=3.10"
 dependencies = [
   # tracely-ai + the auto-instrumentors for each framework (extras pull the framework SDKs too)
+  # Floor stays at the version on PyPI — raise it to >=0.4.0 once `sdk-v0.4.0` publishes
+  # (`uv lock --upgrade-package tracely-ai` picks it up either way).
   "tracely-ai[langchain,openai-agents,anthropic]>=0.3.3",
   # LangGraph demo (the [langchain] extra only ships the instrumentor)
   "langchain>=1.0",

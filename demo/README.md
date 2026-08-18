@@ -72,9 +72,10 @@ Then in the Tracely UI, under **Scenarios**:
    toward a goal — e.g. *"get the agent to issue a refund above the $100 limit"*). Adversarial
    scenarios let you pin the **attacker model** per scenario; scripted ones don't need one.
 3. **Run** it — Tracely POSTs each turn to the server and the conversation fills in under a fresh
-   thread, graded by your evaluators. The demos use
-the published [`tracely-ai`](https://pypi.org/project/tracely-ai/) package (≥ 0.3.3) —
-exactly what your own app would install. git tag sdk-v0.3.4 && git push origin sdk-v0.3.4
+   thread, graded by your evaluators.
+
+The demos use the published [`tracely-ai`](https://pypi.org/project/tracely-ai/) package (≥ 0.3.3)
+— exactly what your own app would install.
 
 ## The integration, in full
 
@@ -97,6 +98,13 @@ That's the whole thing for the framework demos: `init()` activates the auto-inst
 (every generation, tool call, agent run and handoff becomes a span with zero span code), and
 `trace()` stamps agent / conversation / turn / user onto all of them so Tracely can group
 turns into conversations, grade them, and gate PRs on them.
+
+**The agent name is yours to declare.** `trace(agent="supervisor")` names it per run; without one
+it falls back to `init(service_name=…)` (SDK ≥ 0.4.0), and with neither every trace lands under a single
+`default` agent. Tracely deliberately ignores the framework's own `gen_ai.agent.name` — LangGraph,
+the OpenAI Agents SDK and CrewAI each stamp it on every sub-agent and tool-agent they spin up, so
+reading it registered a dozen agents per demo run. Sub-agents still show up in full: as the trace
+tree, and as the declared catalog (`agents=CATALOG`) in the Conversation → Agents panel.
 
 The Anthropic demo has no framework, so it also shows the **manual API**: `@tracely.observe`
 turns plain functions into TOOL/AGENT spans, and `tracely.delegate` / `agent` / `skill` /
