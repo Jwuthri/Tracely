@@ -307,3 +307,18 @@ def test_conn_treats_empty_env_as_unset(monkeypatch):
     assert api == "http://localhost:8000"
     assert key == "tracely_dev_key"
     assert agent == "planner"
+
+
+def test_auth_hint_separates_a_missing_key_from_a_stale_one():
+    """A 401 is `invalid ingest key` either way, and the two causes need opposite fixes: set the
+    secret, or refresh it. Getting this wrong cost a real CI session — the log read like the key
+    was bad when the gate had simply never been given one."""
+    from tracely_sdk.cli import DEV_KEY, _auth_hint
+
+    missing = _auth_hint("https://api.example.com", DEV_KEY)
+    assert "unset" in missing
+    assert "https://api.example.com" in missing
+
+    stale = _auth_hint("https://api.example.com", "tk_rotated")
+    assert "rotated" in stale
+    assert "unset" not in stale, "a key that IS set must not be reported as missing"

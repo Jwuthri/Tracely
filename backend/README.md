@@ -218,6 +218,8 @@ The package is layered: **domain** (pure logic, no I/O), **infrastructure** (DB 
 ### `tracely/workers/tasks.py`
 Three Celery tasks, each a thin dispatch into a service class: `ingest_otlp_blob` → `IngestionService` (then debounce-enqueues evaluation), `evaluate_run` → `EvaluationService` (then folds the turn into the thread's `RollingSummaryService`, best-effort), `rebuild_clusters` → `FailureIntelService`.
 
+On Celery beat: `evaluate_monitors` and `selfcheck` every 5 min, and `prune_chats` nightly — the last drops judge-conversation checkpoints nothing can read again. LangGraph writes one checkpoint per step and each re-serializes the whole transcript, so a long sequential column grows its storage quadratically and never gives it back; left alone it becomes the largest table in the deployment by an order of magnitude. It keeps every conversation's latest checkpoint and holds an hour's grace on live ones, so it is safe against a running worker (`infrastructure/llm/checkpointer.py`).
+
 ### `tracely/otel/` — OTLP → event mapper
 | Module | Purpose |
 |---|---|

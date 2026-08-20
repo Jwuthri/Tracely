@@ -47,5 +47,11 @@ jobs:
           TRACELY_WEB_URL: ${{ secrets.TRACELY_WEB_URL }}
           PYTHONPATH: sdk/examples
         run: |
+          # Same reason as the composite action: Dependabot and fork PRs get no secrets, so this
+          # job cannot run there and must not paint them red.
+          if [ -z "$TRACELY_API" ] || [ -z "$TRACELY_KEY" ]; then
+            echo "::notice title=Tracely gate skipped::No TRACELY_API/TRACELY_KEY available (fork or Dependabot pull request)."
+            exit 0
+          fi
           pip install ./sdk
           tracely replay planner --entrypoint weather_agent:run

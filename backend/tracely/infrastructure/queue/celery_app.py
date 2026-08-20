@@ -46,6 +46,12 @@ celery_app.conf.update(
             "task": "tracely.selfcheck",
             "schedule": crontab(minute="*/5"),
         },
+        # Judge-conversation checkpoints grow quadratically and are never re-read. Nightly is
+        # plenty — this reclaims space, it does not keep anything correct.
+        "tracely.prune_chats-nightly": {
+            "task": "tracely.prune_chats",
+            "schedule": crontab(hour="4", minute="17"),
+        },
     },
     timezone="UTC",
 )
