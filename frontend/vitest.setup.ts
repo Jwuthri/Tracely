@@ -14,3 +14,20 @@ if (typeof window !== "undefined" && !window.matchMedia) {
     dispatchEvent: () => false,
   })) as typeof window.matchMedia;
 }
+
+// jsdom 29 leaves `localStorage` to Node's own global, which is undefined without
+// --experimental-webstorage. Components (and tests seeding prefs) expect a real Storage.
+// ponytail: Map-backed stub, drop it once jsdom ships its own again.
+if (typeof window !== "undefined" && !window.localStorage) {
+  const store = new Map<string, string>();
+  const localStorage: Storage = {
+    get length() { return store.size; },
+    key: (i) => [...store.keys()][i] ?? null,
+    getItem: (k) => store.get(String(k)) ?? null,
+    setItem: (k, v) => void store.set(String(k), String(v)),
+    removeItem: (k) => void store.delete(String(k)),
+    clear: () => store.clear(),
+  };
+  Object.defineProperty(window, "localStorage", { value: localStorage, configurable: true });
+  Object.defineProperty(globalThis, "localStorage", { value: localStorage, configurable: true });
+}
