@@ -397,6 +397,31 @@ def post_pr_check(
     )
 
 
+# The seeded local key. Handy as a default against localhost; never valid anywhere else — a
+# deployment refuses to boot with it (`TRACELY_ENV=prod`), so reaching a real API with it always
+# means "TRACELY_KEY was never set".
+DEV_KEY = "tracely_dev_key"
+
+
+def _auth_hint(api: str, key: str) -> str:
+    """Why a 401 happened, in the two ways it actually goes wrong.
+
+    Both arrive as the same `invalid ingest key`, and the difference is the whole fix: one is a
+    secret that was never set, the other one that no longer matches. Without this the CI log reads
+    like the key is bad when the common cause is that CI has no key at all."""
+    if key == DEV_KEY:
+        return (
+            f"\n  hint: TRACELY_KEY is unset, so the local dev key was sent to {api}."
+            "\n        In GitHub Actions that means the secret is missing or empty —"
+            "\n        set it from Settings → API keys in the workspace you want to gate."
+        )
+    return (
+        f"\n  hint: TRACELY_KEY is set but no key on {api} matches it — it was most likely"
+        "\n        rotated, or it belongs to a workspace that no longer exists."
+        "\n        Copy the current key from Settings → API keys."
+    )
+
+
 def _conn(args: argparse.Namespace) -> tuple[str, str, str, str]:
     # An unset GitHub secret still renders as an env var set to "" — treat empty as absent, or the
     # default never applies and the api base becomes "" (urllib: "unknown url type: '/api/…'").
@@ -404,7 +429,7 @@ def _conn(args: argparse.Namespace) -> tuple[str, str, str, str]:
         return (os.environ.get(name) or "").strip() or default
 
     api = (args.api or "").strip() or env("TRACELY_API", "http://localhost:8000")
-    key = (args.key or "").strip() or env("TRACELY_KEY", "tracely_dev_key")
+    key = (args.key or "").strip() or env("TRACELY_KEY", DEV_KEY)
     web_url = (args.web_url or "").strip() or env("TRACELY_WEB_URL")
     agent = (args.agent or "").strip() or env("TRACELY_AGENT")
     return api, key, web_url, agent
@@ -425,7 +450,8 @@ def cmd_gate(args: argparse.Namespace) -> int:
     try:
         data = trigger_gate(api, key, agent, args.env, git_ref, pr)
     except urllib.error.HTTPError as e:
-        print(f"gate error: {e.code} {e.read().decode()[:300]}")
+        detail = e.read().decode()[:300]
+        print(f"gate error: {e.code} {detail}{_auth_hint(api, key) if e.code == 401 else ''}")
         return 2
     except urllib.error.URLError as e:
         print(f"gate error: cannot reach Tracely at {api}: {e.reason}")
@@ -550,7 +576,10 @@ def cmd_simulate(args: argparse.Namespace) -> int:
             print(f"driving scenarios for {agent} (gate {gate['id'][:8]}…)")
             started.append((agent, gate["id"]))
         except urllib.error.HTTPError as e:
-            results.append(_errored(agent, f"{e.code} {e.read().decode()[:200]}"))
+            detail = e.read().decode()[:200]
+            results.append(
+                _errored(agent, f"{detail}{_auth_hint(api, key)}" if e.code == 401 else f"{e.code} {detail}")
+            )
         except urllib.error.URLError as e:
             results.append(_errored(agent, f"cannot reach Tracely at {api}: {e.reason}"))
 
@@ -627,7 +656,8 @@ def cmd_replay(args: argparse.Namespace) -> int:
     try:
         suite = _get_json(f"{api.rstrip('/')}/api/gate/suite?agent={agent}", key)
     except urllib.error.HTTPError as e:
-        print(f"replay error: {e.code} {e.read().decode()[:200]}")
+        detail = e.read().decode()[:200]
+        print(f"replay error: {e.code} {detail}{_auth_hint(api, key) if e.code == 401 else ''}")
         return 2
     cases = suite.get("cases", [])
     if not cases:

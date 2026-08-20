@@ -82,6 +82,13 @@ runs:
       # the CLI auto-detects GitHub Actions and posts the status + comment; exit code gates the job
       run: |
         set -euo pipefail
+        # GitHub does not give secrets to fork or Dependabot pull requests, so `api`/`key` arrive
+        # empty there and no gate is possible. Skip rather than fail: a check that CANNOT run must
+        # not report a red X on every dependency bump. A key that IS set but wrong still fails.
+        if [ -z "$TRACELY_API" ] || [ -z "$TRACELY_KEY" ]; then
+          echo "::notice title=Tracely gate skipped::No TRACELY_API/TRACELY_KEY available. GitHub withholds secrets from fork and Dependabot pull requests; the gate will run on branches in the base repository."
+          exit 0
+        fi
         if [ "$MODE" = "simulate" ]; then
           # `simulate` returns as soon as the run is queued and then polls, because driving real
           # conversations against your agent takes minutes. A timeout exits non-zero.
