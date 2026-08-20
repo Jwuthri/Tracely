@@ -1,0 +1,584 @@
+"use client";
+
+import clsx from "clsx";
+import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  IconArrowLeft,
+  IconChat,
+  IconClip,
+  IconPlus,
+  IconSend,
+  IconStack,
+  IconTrash,
+  IconX,
+} from "./icons";
+import { Markdown } from "./Markdown";
+import { TimeAgo } from "./TimeAgo";
+
+/* The in-app assistant — a launcher in the bottom-right corner opening a chat panel, mounted
+   once in the (app) layout so it survives navigation and knows which page you are on.
+
+   Conversations live in Postgres (`assistant_chats`), not in this browser: the panel has two
+   views — the current chat, and the history you can go back into — and coming back tomorrow
+   reopens where you left off. All this component keeps locally is WHICH conversation was last
+   open. Attachments are uploaded on pick (so the composer can show them, and a slow upload
+   doesn't stall the send) and referenced by id from the message. */
+
+const LAST_CHAT = "tracely_chat_last";
+const MAX_ATTACHMENTS = 5;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const ACCEPT =
+  "image/*,text/*,.json,.jsonl,.ndjson,.csv,.tsv,.log,.md,.yaml,.yml,.toml,.py,.ts,.tsx,.js,.jsx,.sql,.sh,.xml,.pdf";
+
+export type Attachment = { id: string; name: string; mime: string; size: number };
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  attachments?: Attachment[];
+  error?: boolean;
+};
+type ChatSummary = { id: string; title: string; messages: number; updated_at: string | null };
+
+/** Exported for the test: the two pure decisions this widget makes about a file. */
+export const isImage = (a: { mime?: string }) => (a.mime ?? "").startsWith("image/");
+
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Which of `files` may still be attached, and why the rest may not. */
+export function admitFiles(
+  files: { name: string; size: number }[],
+  alreadyAttached: number,
+): { ok: { name: string; size: number }[]; error: string } {
+  const room = MAX_ATTACHMENTS - alreadyAttached;
+  const tooBig = files.filter((f) => f.size > MAX_FILE_BYTES);
+  const fitting = files.filter((f) => f.size <= MAX_FILE_BYTES);
+  const ok = fitting.slice(0, Math.max(0, room));
+  if (tooBig.length)
+    return { ok, error: `${tooBig[0].name} is over ${formatBytes(MAX_FILE_BYTES)}` };
+  if (fitting.length > ok.length)
+    return { ok, error: `${MAX_ATTACHMENTS} files per message` };
+  return { ok, error: "" };
+}
+
+function FileChip({ att, onRemove }: { att: Attachment; onRemove?: () => void }) {
+  const body = (
+    <>
+      <IconClip className="h-3 w-3 shrink-0 text-fg-faint" />
+      <span className="max-w-[140px] truncate">{att.name}</span>
+      <span className="shrink-0 font-mono text-[10px] text-fg-faint">{formatBytes(att.size)}</span>
+    </>
+  );
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-ink-800 px-2 py-1 text-[11px] text-fg-muted">
+      {onRemove ? (
+        body
+      ) : (
+        <a
+          href={`/api/assistant/files/${att.id}`}
+          download={att.name}
+          className="inline-flex items-center gap-1.5 transition-colors hover:text-fg"
+        >
+          {body}
+        </a>
+      )}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove ${att.name}`}
+          className="text-fg-faint transition-colors hover:text-fail"
+        >
+          <IconX className="h-3 w-3" />
+        </button>
+      )}
+    </span>
+  );
+}
+
+function Attachments({ list }: { list: Attachment[] }) {
+  const images = list.filter(isImage);
+  const files = list.filter((a) => !isImage(a));
+  return (
+    <div className="mt-2 space-y-1.5">
+      {images.map((a) => (
+        // eslint-disable-next-line @next/next/no-img-element -- a proxied blob, not a known-size asset
+        <img
+          key={a.id}
+          src={`/api/assistant/files/${a.id}`}
+          alt={a.name}
+          className="max-h-40 w-auto rounded-lg border border-line"
+        />
+      ))}
+      {files.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {files.map((a) => (
+            <FileChip key={a.id} att={a} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Bubble({ message }: { message: ChatMessage }) {
+  const mine = message.role === "user";
+  // One branch, not stacked utilities: `text-fail` and `text-fg-muted` are both single-class
+  // rules, so which one wins is Tailwind's emit order, not the order they appear in here.
+  const skin = message.error
+    ? "rounded-bl-sm border-fail/30 bg-fail/10 font-mono text-[11px] text-fail"
+    : mine
+      ? "ml-auto rounded-br-sm border-signal/25 bg-signal/10 text-fg"
+      : "rounded-bl-sm border-line bg-ink-800 text-fg-muted";
+  return (
+    <div
+      className={clsx(
+        "animate-fadeup max-w-[88%] rounded-xl border px-3 py-2 text-[13px] leading-relaxed",
+        skin,
+        // a provider's error body can be a paragraph of JSON — let it scroll, not eat the panel
+        message.error && "max-h-[150px] overflow-y-auto",
+      )}
+    >
+      {mine || message.error ? (
+        <span className="whitespace-pre-wrap">{message.content}</span>
+      ) : (
+        <Markdown content={message.content} className="assistant-md" />
+      )}
+      {!!message.attachments?.length && <Attachments list={message.attachments} />}
+    </div>
+  );
+}
+
+function Thinking() {
+  return (
+    <div className="flex w-fit items-center gap-1 rounded-xl rounded-bl-sm border border-line bg-ink-800 px-3 py-2.5">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="h-1.5 w-1.5 rounded-full bg-fg-faint"
+          style={{ animation: `chat-dot 1.2s ease-in-out ${i * 0.16}s infinite` }}
+        />
+      ))}
+      <style>{`@keyframes chat-dot{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:1;transform:translateY(-2px)}}
+        @media (prefers-reduced-motion: reduce){@keyframes chat-dot{0%,100%{opacity:.6}50%{opacity:1}}}`}</style>
+    </div>
+  );
+}
+
+const SUGGESTIONS = [
+  "What is a regression case?",
+  "How do I gate a pull request?",
+  "What should I look at first?",
+];
+
+const ctrl =
+  "grid h-6 w-6 place-items-center rounded-md text-fg-faint transition-colors hover:bg-hilite/5 hover:text-fg";
+
+export function Assistant() {
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState<"chat" | "history">("chat");
+  const [chatId, setChatId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [draft, setDraft] = useState("");
+  const [pending, setPending] = useState<Attachment[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(0);
+  const [notice, setNotice] = useState("");
+  const [noKey, setNoKey] = useState(false);
+  const booted = useRef(false);
+  const scroller = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+  const filePicker = useRef<HTMLInputElement>(null);
+
+  const loadChats = useCallback(async (): Promise<ChatSummary[]> => {
+    const r = await fetch("/api/assistant/chats");
+    const list = r.ok ? await r.json().catch(() => []) : [];
+    const rows: ChatSummary[] = Array.isArray(list) ? list : [];
+    setChats(rows);
+    return rows;
+  }, []);
+
+  const openChat = useCallback(async (id: string) => {
+    const r = await fetch(`/api/assistant/chats/${id}`);
+    if (!r.ok) return;
+    const data = await r.json().catch(() => null);
+    if (!data) return;
+    setMessages(data.messages ?? []);
+    setChatId(id);
+    setView("chat");
+    try {
+      localStorage.setItem(LAST_CHAT, id);
+    } catch {
+      // private mode: we just won't remember which conversation was open
+    }
+  }, []);
+
+  // First open loads the history and reopens where you left off. Deferred until then on
+  // purpose — someone who never opens the widget should never pay for its round trips.
+  useEffect(() => {
+    if (!open || booted.current) return;
+    booted.current = true;
+    (async () => {
+      const rows = await loadChats();
+      let last: string | null = null;
+      try {
+        last = localStorage.getItem(LAST_CHAT);
+        localStorage.removeItem("tracely_chat_v1"); // the pre-Postgres transcript
+      } catch {
+        // no storage: fall through to the newest conversation
+      }
+      const pick = rows.find((c) => c.id === last) ?? rows[0];
+      if (pick) await openChat(pick.id);
+    })();
+  }, [open, loadChats, openChat]);
+
+  // ⌘J / Ctrl-J opens the assistant, Esc closes it — the same idiom as the ⌘K palette.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === "j" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setOpen((o) => !o);
+      } else if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
+    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
+  }, [messages, busy, view]);
+  useEffect(() => {
+    if (open && view === "chat") box.current?.focus();
+  }, [open, view]);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [draft]);
+
+  async function attach(files: File[]) {
+    const { ok, error } = admitFiles(files, pending.length);
+    setNotice(error);
+    if (!ok.length) return;
+    setUploading((n) => n + ok.length);
+    for (const file of ok as File[]) {
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const r = await fetch("/api/assistant/upload", { method: "POST", body: form });
+        const data = await r.json().catch(() => null);
+        if (r.ok && data?.id) setPending((p) => [...p, data as Attachment]);
+        else setNotice(data?.detail ?? `couldn't upload ${file.name}`);
+      } catch {
+        setNotice(`couldn't upload ${file.name}`);
+      } finally {
+        setUploading((n) => n - 1);
+      }
+    }
+  }
+
+  async function send(text: string) {
+    const question = text.trim();
+    if ((!question && !pending.length) || busy) return;
+    const attachments = pending;
+    setMessages((m) => [...m, { role: "user", content: question, attachments }]);
+    setDraft("");
+    setPending([]);
+    setNotice("");
+    setBusy(true);
+    setNoKey(false);
+    try {
+      const r = await fetch("/api/assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: question || "(see the attached file)",
+          chat_id: chatId,
+          attachments,
+          path: pathname ?? "",
+        }),
+      });
+      const data = await r.json().catch(() => null);
+      if (data?.disabled) setNoKey(true);
+      else if (!r.ok || !data?.reply)
+        setMessages((m) => [
+          ...m,
+          { role: "assistant", content: data?.detail ?? "I couldn't reach the model.", error: true },
+        ]);
+      else {
+        setMessages((m) => [...m, { role: "assistant", content: data.reply }]);
+        setChatId(data.chat_id);
+        try {
+          localStorage.setItem(LAST_CHAT, data.chat_id);
+        } catch {
+          // private mode: the conversation is still saved server-side, just not remembered here
+        }
+        loadChats();
+      }
+    } catch {
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", content: "I couldn't reach the model.", error: true },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function newChat() {
+    setMessages([]);
+    setChatId(null);
+    setPending([]);
+    setNotice("");
+    setView("chat");
+    try {
+      localStorage.removeItem(LAST_CHAT);
+    } catch {
+      // nothing to forget
+    }
+    box.current?.focus();
+  }
+
+  async function removeChat(id: string) {
+    await fetch(`/api/assistant/chats/${id}`, { method: "DELETE" });
+    const rows = await loadChats();
+    if (id === chatId) {
+      if (rows[0]) await openChat(rows[0].id);
+      else newChat();
+    }
+  }
+
+  const empty = messages.length === 0;
+  const canSend = !busy && !uploading && (!!draft.trim() || pending.length > 0);
+
+  return (
+    <>
+      {open && (
+        <div className="animate-fadeup fixed bottom-[84px] right-5 z-40 flex max-h-[min(620px,calc(100vh-130px))] w-[380px] flex-col overflow-hidden rounded-xl border border-line bg-ink-900 shadow-2xl">
+          <div className="flex items-center justify-between border-b border-line px-3 py-3">
+            <div className="flex min-w-0 items-center gap-2">
+              {view === "chat" ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setView("history");
+                    loadChats();
+                  }}
+                  title="Past conversations"
+                  aria-label="Past conversations"
+                  className={ctrl}
+                >
+                  <IconStack className="h-3.5 w-3.5" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setView("chat")}
+                  title="Back to the conversation"
+                  aria-label="Back to the conversation"
+                  className={ctrl}
+                >
+                  <IconArrowLeft className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <h2 className="truncate text-[13.5px] font-semibold text-fg">
+                {view === "history" ? "Conversations" : "Assistant"}
+              </h2>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {view === "chat" && !empty && (
+                <button
+                  type="button"
+                  onClick={newChat}
+                  title="New conversation"
+                  aria-label="New conversation"
+                  className={ctrl}
+                >
+                  <IconPlus className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <span className="h-3.5 w-px bg-line" aria-hidden />
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                title="Close"
+                aria-label="Close assistant"
+                className={ctrl}
+              >
+                <IconX className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {view === "history" ? (
+            <div className="flex-1 overflow-y-auto py-1">
+              {chats.length === 0 ? (
+                <p className="px-4 py-8 text-center text-[12px] text-fg-muted">
+                  No conversations yet.
+                </p>
+              ) : (
+                <ul>
+                  {chats.map((c) => (
+                    <li key={c.id} className="group flex items-center gap-1 px-2">
+                      <button
+                        type="button"
+                        onClick={() => openChat(c.id)}
+                        className={clsx(
+                          "min-w-0 flex-1 rounded-md px-2 py-2 text-left transition-colors hover:bg-hilite/5",
+                          c.id === chatId && "bg-signal/10",
+                        )}
+                      >
+                        <span className="block truncate text-[13px] text-fg">{c.title}</span>
+                        <span className="mt-0.5 block font-mono text-[10px] text-fg-faint">
+                          {c.messages} messages · <TimeAgo ts={c.updated_at} />
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeChat(c.id)}
+                        title={`Delete "${c.title}"`}
+                        aria-label={`Delete conversation: ${c.title}`}
+                        className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-fg-faint opacity-0 transition-all hover:bg-fail/10 hover:text-fail focus:opacity-100 group-hover:opacity-100"
+                      >
+                        <IconTrash className="h-3.5 w-3.5" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : (
+            <>
+              <div ref={scroller} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+                {empty ? (
+                  <div className="py-6 text-center">
+                    <p className="text-[13px] text-fg">Ask me about Tracely.</p>
+                    <p className="mx-auto mt-1 max-w-[260px] text-[12px] leading-relaxed text-fg-muted">
+                      Traces, evaluators, failure clusters, regression cases, CI gates — how the
+                      loop fits together and what to do next. Drop in a screenshot or a log and
+                      I&apos;ll read it.
+                    </p>
+                    <div className="mt-4 flex flex-col items-center gap-1.5">
+                      {SUGGESTIONS.map((s) => (
+                        <button key={s} type="button" onClick={() => send(s)} className="btn-ghost">
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  messages.map((m, i) => <Bubble key={i} message={m} />)
+                )}
+                {busy && <Thinking />}
+                {noKey && (
+                  <div className="animate-fadeup rounded-xl border border-warn/30 bg-warn/10 px-3 py-2 text-[12px] leading-relaxed text-warn">
+                    The assistant has no model configured on this deployment — set
+                    <code className="mx-1 font-mono text-[11px]">OPENROUTER_API_KEY</code>
+                    on the backend and ask again.
+                  </div>
+                )}
+              </div>
+
+              <div
+                className="border-t border-line p-2.5"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  attach([...e.dataTransfer.files]);
+                }}
+              >
+                {(pending.length > 0 || uploading > 0 || notice) && (
+                  <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                    {pending.map((a) => (
+                      <FileChip
+                        key={a.id}
+                        att={a}
+                        onRemove={() => setPending((p) => p.filter((x) => x.id !== a.id))}
+                      />
+                    ))}
+                    {uploading > 0 && (
+                      <span className="font-mono text-[10px] text-fg-faint">
+                        uploading {uploading}…
+                      </span>
+                    )}
+                    {notice && <span className="font-mono text-[10px] text-fail">{notice}</span>}
+                  </div>
+                )}
+                <div className="flex items-end gap-1.5">
+                  <input
+                    ref={filePicker}
+                    type="file"
+                    multiple
+                    accept={ACCEPT}
+                    className="hidden"
+                    onChange={(e) => {
+                      attach([...(e.target.files ?? [])]);
+                      e.target.value = ""; // so picking the same file twice still fires
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => filePicker.current?.click()}
+                    title="Attach a file or image"
+                    aria-label="Attach a file or image"
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-fg-faint transition-colors hover:bg-hilite/5 hover:text-fg"
+                  >
+                    <IconClip className="h-4 w-4" />
+                  </button>
+                  <textarea
+                    ref={box}
+                    rows={1}
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onPaste={(e) => {
+                      const files = [...e.clipboardData.files];
+                      if (files.length) {
+                        e.preventDefault();
+                        attach(files);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        send(draft);
+                      }
+                    }}
+                    placeholder="Ask anything…"
+                    aria-label="Message the assistant"
+                    className="max-h-[120px] flex-1 resize-none bg-transparent px-1 py-1.5 text-[13px] leading-relaxed text-fg placeholder:text-fg-faint focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => send(draft)}
+                    disabled={!canSend}
+                    aria-label="Send"
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-signal/40 bg-signal/15 text-signal transition-all hover:bg-signal/25 hover:shadow-glow disabled:opacity-40 disabled:hover:shadow-none"
+                  >
+                    <IconSend className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label={open ? "Close assistant" : "Open assistant (⌘J)"}
+        title="Assistant — ⌘J"
+        className="group fixed bottom-5 right-5 z-40 grid h-[52px] w-[52px] place-items-center rounded-full border border-line bg-ink-800/90 text-signal shadow-lg backdrop-blur-md transition-transform hover:scale-105"
+      >
+        {open ? <IconX className="h-5 w-5" /> : <IconChat className="h-5 w-5" />}
+      </button>
+    </>
+  );
+}

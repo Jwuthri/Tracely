@@ -132,6 +132,16 @@ class Settings(BaseSettings):
     llm_judge_api_key: str = ""
     llm_judge_base_url: str = "https://api.openai.com/v1"
 
+    # The in-app assistant (the dashboard's chat widget). Unlike every other LLM call, this one
+    # runs on OUR OpenRouter key — it answers questions about Tracely, so it must work in a
+    # workspace that has configured no key of its own (`provider.use_server_key`). A Gemini flash
+    # model: cheap output (reasoning tokens bill at the completion rate), a 1M context, and image
+    # input for when the assistant learns to look at the user's screen.
+    assistant_model: str = "google/gemini-3.7-flash"
+    # "" disables thinking; otherwise minimal|low|medium|high. Medium costs latency and reasoning
+    # tokens on every turn — drop to "low" if replies feel slow for what they are.
+    assistant_reasoning_effort: str = "medium"
+
     # failure intelligence (embeddings + agents) — embeddings ride the OpenRouter key too
     # (OpenAI-compatible /embeddings); this key is only the direct-OpenAI fallback.
     openai_api_key: str = ""

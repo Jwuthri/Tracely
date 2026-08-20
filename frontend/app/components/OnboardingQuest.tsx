@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   EMPTY_LOCAL,
   EMPTY_STATUS,
@@ -18,12 +19,13 @@ import {
 } from "@/app/lib/quest";
 import { THEME_KEY } from "@/app/components/ThemeToggle";
 
-/* The gamified onboarding quest — a floating launcher (bottom-right, progress ring) opening a
+/* The gamified onboarding quest — a progress-ring launcher in the topbar opening a
    checklist that walks a new user through EVERY feature: API key → OpenRouter key → first trace
    → traces / evaluators / trends / replay / fleet / theme → failure → case → gate. On top of the
    one-time quest sit three DAILY challenges (rotated deterministically by date) that feed a
    lifetime score and a day streak. Counts come from /api/onboarding; page-visit steps tick via
-   usePathname. Mounted once in the (app) layout, so it survives navigation and sees every route. */
+   usePathname. Mounted once inside the Topbar — which the (app) layout renders once — so it
+   survives navigation and sees every route. */
 
 const STORE = "tracely_quest_v1";
 
@@ -65,17 +67,17 @@ function Confetti() {
 }
 
 function Ring({ fraction }: { fraction: number }) {
-  const r = 16;
+  const r = 11;
   const c = 2 * Math.PI * r;
   return (
-    <svg width="44" height="44" viewBox="0 0 44 44" className="-rotate-90">
-      <circle cx="22" cy="22" r={r} fill="none" strokeWidth="3" className="stroke-line" />
+    <svg width="26" height="26" viewBox="0 0 26 26" className="-rotate-90">
+      <circle cx="13" cy="13" r={r} fill="none" strokeWidth="2.2" className="stroke-line" />
       <circle
-        cx="22"
-        cy="22"
+        cx="13"
+        cy="13"
         r={r}
         fill="none"
-        strokeWidth="3"
+        strokeWidth="2.2"
         strokeLinecap="round"
         strokeDasharray={c}
         strokeDashoffset={c * (1 - fraction)}
@@ -150,6 +152,8 @@ export function OnboardingQuest() {
   const [openRow, setOpenRow] = useState<string | null>(null);
   const [confetti, setConfetti] = useState(false);
   const autoOpened = useRef(false);
+  const panel = useRef<HTMLDivElement>(null);
+  const launcher = useRef<HTMLButtonElement>(null);
 
   useEffect(() => setLocal(loadLocal()), []);
   useEffect(() => {
@@ -171,6 +175,24 @@ export function OnboardingQuest() {
       return next;
     });
   }, [pathname]);
+
+  // A topbar dropdown closes when you click past it or hit Escape — the quest used to be a
+  // corner FAB, where neither applied. It also keeps this panel from overlapping the assistant,
+  // which hangs in the same right-hand column.
+  useEffect(() => {
+    if (!open) return;
+    const outside = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!panel.current?.contains(t) && !launcher.current?.contains(t)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
 
   // re-check the theme flag when the panel opens: toggling the theme causes no navigation
   useEffect(() => {
@@ -240,12 +262,12 @@ export function OnboardingQuest() {
       }
     : null;
 
-  return (
+  const overlay = (
     <>
       {confetti && <Confetti />}
 
       {open && (
-        <div className="fixed bottom-20 right-5 z-40 flex max-h-[min(680px,calc(100vh-120px))] w-[360px] flex-col overflow-hidden rounded-xl border border-line bg-ink-900 shadow-2xl">
+        <div ref={panel} className="animate-fadeup fixed right-8 top-[64px] z-40 flex max-h-[min(680px,calc(100vh-80px))] w-[360px] flex-col overflow-hidden rounded-xl border border-line bg-ink-900 shadow-2xl">
           <div className="border-b border-line px-4 py-3">
             <div className="flex items-center justify-between">
               <h2 className="text-[13.5px] font-semibold text-fg">
@@ -354,17 +376,28 @@ export function OnboardingQuest() {
           </div>
         </div>
       )}
+    </>
+  );
+
+  return (
+    <>
+      {/* The panel escapes to <body>: the Topbar this button lives in is a `sticky z-20` header,
+          which is its own stacking context — a panel rendered inside it would slide under the
+          app's portalled overlays (score popovers, drawers, the ⌘K palette). */}
+      {typeof document !== "undefined" && createPortal(overlay, document.body)}
 
       <button
+        ref={launcher}
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label={`Onboarding quest — ${complete} of ${total} steps done`}
-        className="group fixed bottom-5 right-5 z-40 grid h-[52px] w-[52px] place-items-center rounded-full border border-line bg-ink-800/90 shadow-lg backdrop-blur-md transition-transform hover:scale-105"
+        title={allDone ? "Quest complete" : `Tracely quest — ${complete}/${total}`}
+        className="relative grid h-8 w-8 place-items-center rounded-lg border border-line bg-ink-800 transition-colors hover:border-signal/40"
       >
-        <span className="absolute inset-1">
+        <span className="absolute inset-[2px]">
           <Ring fraction={total ? complete / total : 0} />
         </span>
-        <span className={clsx("font-mono text-[11px] font-semibold", allDone ? "text-ok" : "text-signal")}>
+        <span className={clsx("font-mono text-[10px] font-semibold", allDone ? "text-ok" : "text-signal")}>
           {allDone ? (streak > 1 ? `🔥${streak}` : "✓") : complete}
         </span>
       </button>

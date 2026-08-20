@@ -60,6 +60,19 @@ def event_blob_key(project_id: str, batch_id: str, content_type: str) -> str:
     return f"{settings.s3_event_prefix}{project_id}/otlp/{batch_id}.{ext}"
 
 
+def assistant_blob_key(project_id: str, attachment_id: str) -> str:
+    """Where a file dropped into the chat widget lives. Under the project's own prefix on
+    purpose: `delete_project_blobs` then takes attachments with the workspace, with no second
+    list of places customer bytes hide."""
+    return f"{settings.s3_event_prefix}{project_id}/assistant/{attachment_id}"
+
+
+def get_blob_typed(key: str) -> tuple[bytes, str]:
+    """Bytes plus the content type they were stored with — what serving a file back needs."""
+    obj = _s3().get_object(Bucket=settings.s3_bucket, Key=key)
+    return obj["Body"].read(), obj.get("ContentType") or "application/octet-stream"
+
+
 def delete_project_blobs(project_id: str) -> int:
     """Delete every raw OTLP body this project ever uploaded. Used when a workspace is deleted —
     the blobs are the source of truth, so leaving them behind means the customer's payloads
