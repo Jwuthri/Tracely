@@ -18,12 +18,12 @@ trap — span ids are base64, and a wrong one silently vanishes instead of error
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-import httpx
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+
+from tracely.api.internal_client import api_call, auth_headers_from
 
 INSTRUCTIONS = """Tracely is trace-native CI/CD for AI agents: production traces are graded by
 evaluators (the columns of the traces table), failures are clustered, and clusters become
@@ -56,28 +56,14 @@ async def _call(ctx: Context, method: str, path: str, ndjson: bool = False, **kw
     forwarded verbatim — the router's own `get_project_id` dependency is what resolves the
     project, so an MCP caller can never reach a workspace its key doesn't own.
     """
-    from tracely.api.main import app  # late: main imports this module to mount it
-
     request = getattr(ctx.request_context, "request", None)
-    headers = {
-        k: v
-        for k, v in (request.headers if request is not None else {}).items()
-        if k.lower() in ("authorization", "x-tracely-key", "x-tracely-project")
-    }
+    headers = auth_headers_from(request.headers if request is not None else {})
     if not headers:
         raise ValueError(
             "missing credentials: pass your Tracely ingest key as an Authorization: Bearer header "
             "when configuring this MCP server"
         )
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://tracely.internal", headers=headers
-    ) as client:
-        r = await client.request(method, path, timeout=60.0, **kw)
-    if r.status_code >= 400:
-        raise ValueError(f"Tracely API {r.status_code}: {r.text[:500]}")
-    if ndjson:  # /api/export streams one JSON object per line, so `r.json()` would choke
-        return [json.loads(line) for line in r.text.splitlines() if line.strip()]
-    return r.json()
+    return await api_call(headers, method, path, ndjson=ndjson, **kw)
 
 
 # ── traces ───────────────────────────────────────────────────────────────────

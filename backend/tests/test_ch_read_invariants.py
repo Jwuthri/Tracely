@@ -81,6 +81,21 @@ def test_every_root_agent_read_uses_the_shared_expression():
     assert "anyIf(agent_id, parent_span_id" not in body
 
 
+def test_the_agent_picker_counts_only_declared_turn_owners():
+    """The Agent select must list only agents a turn/conversation was declared under.
+
+    `_TRACE_AGENT`'s last resort is "any span's agent", which files an ORPHAN fragment — a tool or
+    chain span whose turn root never reached us — under whatever sub-agent label it carried. The
+    threads list drops those as content-less 1-turn threads, so building the picker on
+    `_TRACE_AGENT` offered `supervisor`/`agent_faq`-style sub-agents that own nothing selecting
+    them can show. Only `is_app_root` is a declaration of ownership."""
+    src = (_CH_DIR / "async_reader.py").read_text()
+    body = src[src.index("async def trace_agent_ids") :]
+    body = body[: body.index("async def", 10)]
+    assert "anyIf(agent_id, is_app_root)" in body
+    assert "{_TRACE_AGENT}" not in body  # the interpolation, not the prose above it
+
+
 # ── the threads list's sortable headers ───────────────────────────────────────
 # ORDER BY cannot be parameterized, so the sort key is the one piece of this query built by string
 # interpolation. These pin the whitelist that keeps it safe, and the tie-break that keeps

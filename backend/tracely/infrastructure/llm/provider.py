@@ -24,7 +24,7 @@ import contextlib
 import contextvars
 import json
 import time
-from typing import Any, Callable, Iterator, TypeVar
+from typing import Any, AsyncIterator, Callable, Iterator, TypeVar
 
 import structlog
 
@@ -594,14 +594,28 @@ def _invoke(agent, prompt: str | list[dict], thread_id: str | None = None) -> di
     try:
         return agent.invoke({"messages": [{"role": "user", "content": prompt}]}, config)
     except TypeError as exc:
-        if "NoneType" in str(exc):
-            raise RuntimeError(
-                "LLM provider returned an error body instead of a completion (no `choices`). "
-                "Most often OpenRouter credit exhaustion — check the balance at "
-                "https://openrouter.ai/settings/credits. Lowering LLM_MAX_OUTPUT_TOKENS also "
-                f"reduces the credit OpenRouter reserves per call. [{exc}]"
-            ) from exc
-        raise
+        raise _provider_error(exc) from exc
+
+
+def _provider_error(exc: TypeError) -> Exception:
+    """The exception to raise for a `TypeError` out of a model call — shared by the blocking and
+    the streaming path, which fail identically here."""
+    if "NoneType" not in str(exc):
+        return exc
+    return RuntimeError(
+        "LLM provider returned an error body instead of a completion (no `choices`). "
+        "Most often OpenRouter credit exhaustion — check the balance at "
+        "https://openrouter.ai/settings/credits. Lowering LLM_MAX_OUTPUT_TOKENS also "
+        f"reduces the credit OpenRouter reserves per call. [{exc}]"
+    )
+
+
+def _message_text(msg: Any) -> str:
+    """A message's text, whether the provider sent a plain string or content blocks."""
+    content = getattr(msg, "content", "")
+    if isinstance(content, str):
+        return content
+    return "".join(p.get("text", "") for p in content if isinstance(p, dict))
 
 
 @contextlib.contextmanager
@@ -743,12 +757,89 @@ def run_text_agent(
     with _recorded(_blocks_text(prompt), system_prompt, model) as sink:
         result = _invoke(agent, prompt)
         usage = _extract_usage(result, model)
-        content = result["messages"][-1].content
-        text = content if isinstance(content, str) else "".join(
-            # content blocks ([{type:"text", text}, …]) — join the text parts
-            part.get("text", "") for part in content if isinstance(part, dict)
-        )
+        text = _message_text(result["messages"][-1])
         sink.append((text, usage))
     if on_usage is not None:
         on_usage(usage)
     return text
+
+
+def stream_agent(
+    prompt: str | list[dict],
+    *,
+    tools: list,
+    system_prompt: str | None = None,
+    model: str | None = None,
+    temperature: float = 0.0,
+    reasoning_effort: str | None = None,
+    on_usage: UsageSink | None = None,
+) -> AsyncIterator[dict]:
+    """A tool-using agent, streamed. The in-app assistant's primitive.
+
+    Yields plain dicts, ready to be forwarded to a browser as SSE frames:
+
+        {"type": "tool",      "name": str, "args": dict}   the agent is calling a tool
+        {"type": "tool_done", "name": str, "ok": bool}     that tool came back
+        {"type": "delta",     "text": str}                 a piece of the final answer
+        {"type": "final",     "text": str, "usage": dict}  the whole answer, once
+
+    NOT an `async def`, deliberately: an async generator's body doesn't run until the first
+    `__anext__`, which would build the model AFTER the caller's `use_server_key()` /
+    `use_project_key()` block had closed — reading the wrong key, or none. `get_chat_model` reads
+    the scope contextvar and bakes the key into the client, so constructing eagerly here, inside
+    the caller's `with`, is what lets the rest of the stream run outside it. Keep the split.
+
+    A tool that raises kills the whole stream (langgraph re-raises anything that isn't a bad-args
+    error), so tools are expected to return their failures as text — see `assistant_tools`.
+    """
+    from langchain.agents import create_agent
+
+    agent = create_agent(
+        get_chat_model(model, temperature, reasoning_effort),
+        tools=tools,
+        system_prompt=system_prompt,
+    )
+
+    async def _run() -> AsyncIterator[dict]:
+        ai_messages: list = []  # every model turn, for the token roll-up: a tool loop is N calls
+        text = ""
+        with _recorded(_blocks_text(prompt), system_prompt, model) as sink:
+            try:
+                async for mode, payload in agent.astream(
+                    {"messages": [{"role": "user", "content": prompt}]},
+                    # `messages` carries token chunks, `updates` complete messages per node — the
+                    # first is what streams, the second is what's reliable to read tool calls and
+                    # usage off. Asking for both costs nothing and saves reassembling either.
+                    stream_mode=["updates", "messages"],
+                ):
+                    if mode == "messages":
+                        chunk, meta = payload
+                        if meta.get("langgraph_node") == "model" and getattr(chunk, "text", ""):
+                            yield {"type": "delta", "text": chunk.text}
+                        continue
+                    for node, update in (payload or {}).items():
+                        for msg in (update or {}).get("messages", []) or []:
+                            if node == "tools":
+                                yield {
+                                    "type": "tool_done",
+                                    "name": getattr(msg, "name", "") or "",
+                                    "ok": getattr(msg, "status", "success") != "error",
+                                }
+                                continue
+                            ai_messages.append(msg)
+                            text = _message_text(msg) or text
+                            for call in getattr(msg, "tool_calls", None) or []:
+                                yield {
+                                    "type": "tool",
+                                    "name": call.get("name") or "",
+                                    "args": call.get("args") or {},
+                                }
+            except TypeError as exc:
+                raise _provider_error(exc) from exc
+            usage = _extract_usage({"messages": ai_messages}, model)
+            sink.append((text, usage))
+        if on_usage is not None:
+            on_usage(usage)
+        yield {"type": "final", "text": text, "usage": usage}
+
+    return _run()

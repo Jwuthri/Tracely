@@ -15,6 +15,7 @@ import {
 } from "./icons";
 import { Markdown } from "./Markdown";
 import { TimeAgo } from "./TimeAgo";
+import { streamAssistantTurn, toolLabel } from "@/app/lib/assistant";
 
 /* The in-app assistant — a launcher in the bottom-right corner opening a chat panel, mounted
    once in the (app) layout so it survives navigation and knows which page you are on.
@@ -23,7 +24,11 @@ import { TimeAgo } from "./TimeAgo";
    views — the current chat, and the history you can go back into — and coming back tomorrow
    reopens where you left off. All this component keeps locally is WHICH conversation was last
    open. Attachments are uploaded on pick (so the composer can show them, and a slow upload
-   doesn't stall the send) and referenced by id from the message. */
+   doesn't stall the send) and referenced by id from the message.
+
+   A turn streams. The assistant reads traces and writes evaluators to answer, so a question can
+   take the better part of a minute — the panel names the tool it is running and types the answer
+   out as it arrives, because a minute of three bouncing dots reads as broken. */
 
 const LAST_CHAT = "tracely_chat_last";
 const MAX_ATTACHMENTS = 5;
@@ -188,6 +193,7 @@ export function Assistant() {
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
+  const [activity, setActivity] = useState(""); // the tool running right now, if any
   const [uploading, setUploading] = useState(0);
   const [notice, setNotice] = useState("");
   const [noKey, setNoKey] = useState(false);
@@ -294,41 +300,58 @@ export function Assistant() {
     setNotice("");
     setBusy(true);
     setNoKey(false);
+    setActivity("");
+    // Whether the answer bubble exists yet: the first delta appends it, every later one grows it.
+    // A ref, not state, because the frames arrive faster than a re-render.
+    let started = false;
+    const fail = (content: string) =>
+      setMessages((m) => [...m, { role: "assistant", content, error: true }]);
     try {
-      const r = await fetch("/api/assistant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      await streamAssistantTurn(
+        {
           message: question || "(see the attached file)",
           chat_id: chatId,
           attachments,
           path: pathname ?? "",
-        }),
-      });
-      const data = await r.json().catch(() => null);
-      if (data?.disabled) setNoKey(true);
-      else if (!r.ok || !data?.reply)
-        setMessages((m) => [
-          ...m,
-          { role: "assistant", content: data?.detail ?? "I couldn't reach the model.", error: true },
-        ]);
-      else {
-        setMessages((m) => [...m, { role: "assistant", content: data.reply }]);
-        setChatId(data.chat_id);
-        try {
-          localStorage.setItem(LAST_CHAT, data.chat_id);
-        } catch {
-          // private mode: the conversation is still saved server-side, just not remembered here
-        }
-        loadChats();
-      }
+        },
+        (e) => {
+          if (e.type === "tool") return setActivity(toolLabel(e.name));
+          if (e.type === "delta") {
+            setActivity("");
+            const first = !started;
+            started = true;
+            return setMessages((m) =>
+              first
+                ? [...m, { role: "assistant", content: e.text }]
+                : m.map((msg, i) =>
+                    i === m.length - 1 ? { ...msg, content: msg.content + e.text } : msg,
+                  ),
+            );
+          }
+          if (e.type === "disabled") return setNoKey(true);
+          if (e.type === "error") return fail(e.detail || "I couldn't reach the model.");
+          if (e.type === "done") {
+            // `reply` is authoritative — the deltas are a preview of it, not the record.
+            setMessages((m) =>
+              started
+                ? m.map((msg, i) => (i === m.length - 1 ? { ...msg, content: e.reply } : msg))
+                : [...m, { role: "assistant", content: e.reply }],
+            );
+            setChatId(e.chat_id);
+            try {
+              localStorage.setItem(LAST_CHAT, e.chat_id);
+            } catch {
+              // private mode: the conversation is still saved server-side, just not remembered here
+            }
+            loadChats();
+          }
+        },
+      );
     } catch {
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", content: "I couldn't reach the model.", error: true },
-      ]);
+      fail("I couldn't reach the model.");
     } finally {
       setBusy(false);
+      setActivity("");
     }
   }
 
@@ -479,7 +502,14 @@ export function Assistant() {
                 ) : (
                   messages.map((m, i) => <Bubble key={i} message={m} />)
                 )}
-                {busy && <Thinking />}
+                {busy && (
+                  <div className="flex flex-col gap-1.5">
+                    <Thinking />
+                    {activity && (
+                      <span className="pl-1 font-mono text-[10px] text-fg-faint">{activity}</span>
+                    )}
+                  </div>
+                )}
                 {noKey && (
                   <div className="animate-fadeup rounded-xl border border-warn/30 bg-warn/10 px-3 py-2 text-[12px] leading-relaxed text-warn">
                     The assistant has no model configured on this deployment — set

@@ -698,16 +698,21 @@ async def agent_trace_ids(project_id: str, agent_id: str, limit: int = 2000) -> 
 
 
 async def trace_agent_ids(project_id: str) -> set[str]:
-    """Agent ids that are some real trace's agent — i.e. exactly the values the traces list's
-    conversation-level Agent column can show.
+    """Agent ids the USER declared as a turn/conversation owner — the Scenario / CI-gate / Traces
+    agent pickers.
 
-    This is NOT "every agent with a span": a sub-agent label that older ingest registered
-    (`billing`, `store_locations_team`) has thousands of spans and owns no conversation. Offering
-    those in the Scenario / CI-gate pickers is offering to gate an agent that can never have a run.
+    Deliberately NOT `_TRACE_AGENT`: its last resort is "any span's agent", which files an ORPHAN
+    fragment (a tool/chain span whose turn root was never exported — real production exporters
+    drop them constantly) under whichever sub-agent label that span carried. `sessions_overview`
+    hides those fragments as content-less 1-turn threads, so a picker built on `_TRACE_AGENT`
+    offers sub-agents (`supervisor`, `agent_faq`) that own nothing the list can even show.
+    Only the app-root span — `parent_span_id = ''` or an explicit `tracely.is_app_root` — is a
+    declaration of "this agent owns this turn", so that is the only thing counted here.
     """
     client = await get_async_client()
     res = await client.query(
-        f"SELECT DISTINCT agent FROM (SELECT {_TRACE_AGENT} AS agent FROM events FINAL "
+        "SELECT DISTINCT agent FROM "
+        "(SELECT anyIf(agent_id, is_app_root) AS agent FROM events FINAL "
         f"WHERE project_id = {{p:String}} AND {_REAL} GROUP BY trace_id) WHERE agent != ''",
         parameters={"p": project_id},
     )

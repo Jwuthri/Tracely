@@ -2,23 +2,39 @@
 
 Thin by the book — validate, call `assistant_service`, shape the reply. Conversations are scoped
 to the project AND to the caller (`Principal.user_id`; None for ingest keys and dev mode, which
-then share the project's chats). The LLM call is synchronous (LangChain `create_agent`), so it
-runs in a threadpool rather than blocking the event loop for the whole round trip.
+then share the project's chats).
+
+A turn streams. The assistant is an agent now: it reads traces, writes evaluators, runs scenarios,
+and a turn that does three of those takes the better part of a minute. `POST /assistant/chat`
+answers `text/event-stream` (the same `data: <json>` / `[DONE]` protocol as `/evaluations/run`)
+so the widget can show the work as it happens:
+
+    {"type": "tool",      "name": str, "args": {...}}   the agent is calling a tool
+    {"type": "tool_done", "name": str, "ok": bool}      that tool came back
+    {"type": "delta",     "text": str}                  a piece of the answer
+    {"type": "done",      "chat_id", "title", "reply"}  saved; `reply` is authoritative
+    {"type": "disabled"}                                no LLM key on this deployment
+    {"type": "error",     "detail": str}                the turn failed; nothing was stored
+
+The tools run as the CALLER: the request's own credential headers are forwarded into them
+(`internal_client.auth_headers_from`), so the agent's reach is the user's reach.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from typing import Literal
 
 import structlog
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from tracely.api.auth import get_principal
+from tracely.api.internal_client import auth_headers_from
 from tracely.auth import Principal
 from tracely.infrastructure.blob import s3
 from tracely.infrastructure.db import repositories as repo
@@ -65,22 +81,41 @@ def _summary(row) -> dict:
     }
 
 
+def _sse(obj: dict) -> str:
+    return f"data: {json.dumps(obj)}\n\n"
+
+
 @router.post("/assistant/chat")
-async def chat(body: ChatBody, principal: Principal = Depends(get_principal)) -> dict:
-    """One assistant reply. `{chat_id, title, reply}`, or `{disabled: true}` with no LLM key."""
-    try:
-        return await run_in_threadpool(
-            assistant_service.answer,
-            principal.project_id,
-            principal.user_id,
-            chat_id=body.chat_id,
-            message=body.message,
-            attachments=[a.model_dump() for a in body.attachments],
-            path=body.path,
-        )
-    except Exception as exc:  # a dead provider is a chat bubble, not a 500 in the console
-        log.warning("assistant_chat_failed", project_id=principal.project_id, error=str(exc))
-        raise HTTPException(status_code=502, detail=f"the model call failed: {exc}"[:300]) from exc
+async def chat(
+    body: ChatBody, request: Request, principal: Principal = Depends(get_principal)
+) -> StreamingResponse:
+    """One assistant turn, streamed. See the module docstring for the frame protocol."""
+    stream = assistant_service.answer_stream(
+        principal.project_id,
+        principal.user_id,
+        chat_id=body.chat_id,
+        message=body.message,
+        attachments=[a.model_dump() for a in body.attachments],
+        path=body.path,
+        headers=auth_headers_from(request.headers),
+    )
+
+    async def gen():
+        try:
+            async for event in stream:
+                yield _sse(event)
+        except Exception as exc:
+            # A dead provider is a chat bubble, not a 500 in the console — and once the first
+            # frame is out the status code is already 200, so a failure has to BE a frame.
+            log.warning("assistant_chat_failed", project_id=principal.project_id, error=str(exc))
+            yield _sse({"type": "error", "detail": f"the model call failed: {exc}"[:300]})
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/assistant/chats")
