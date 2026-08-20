@@ -136,6 +136,41 @@ def reset_chat(chat_id: str) -> None:
         log.warning("chat_reset_failed", chat_id=chat_id, error=str(exc))
 
 
+def delete_project_chats(project_id: str) -> int:
+    """Delete every judge conversation belonging to a workspace. Returns rows removed.
+
+    The companion to `repositories.project_data_delete`, which clears the chain-progress records
+    these conversations are paired with. Two reasons this cannot wait for `prune()` to age them
+    out: the blobs hold the transcript verbatim — the customer's own messages, quoted to the judge
+    — so "delete all my data" leaving them for 90 days is not a delete; and a workspace that has
+    been deleted outright will never re-grade anything, so nothing would ever call `reset_chat`
+    for it again.
+
+    Every thread id this module mints is `chat_id()` = `<project>:<column>:<subject>`, which is
+    what makes a workspace's conversations addressable at all — matched with `starts_with` rather
+    than LIKE so nothing in a project id has to be escaped.
+    """
+    saver = get_checkpointer()
+    if saver is None:
+        return 0
+    deleted = 0
+    try:
+        with saver.conn.connection() as conn, conn.cursor() as cur:
+            # Children first: blobs and writes are keyed by thread too, but dropping the
+            # checkpoints first would leave nothing to prove the rest belonged to this workspace.
+            for table in ("checkpoint_blobs", "checkpoint_writes", "checkpoints"):
+                cur.execute(
+                    f"DELETE FROM {table} WHERE starts_with(thread_id, %(prefix)s)",
+                    {"prefix": f"{project_id}:"},
+                )
+                deleted += cur.rowcount
+    except Exception as exc:  # noqa: BLE001 — the wipe's other halves must still report
+        log.warning("chat_delete_failed", project_id=project_id, error=str(exc))
+        return deleted
+    log.info("chats_deleted", project_id=project_id, rows=deleted)
+    return deleted
+
+
 def chat_id(project_id: str, score_name: str, subject: str) -> str:
     """The thread a metric's conversation lives on: one per (workspace, column, subject).
 

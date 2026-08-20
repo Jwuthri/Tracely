@@ -18,7 +18,7 @@ from tracely.infrastructure.blob import s3
 from tracely.infrastructure.clickhouse import async_reader, deletes
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
-from tracely.infrastructure.llm import provider
+from tracely.infrastructure.llm import checkpointer, provider
 from tracely.services import demo_seed
 
 log = structlog.get_logger()
@@ -54,7 +54,12 @@ async def wipe_project_data(body: WipeBody, project_id: str = Depends(get_projec
             return repo.project_data_delete(s, project_id)
 
     registry = await run_in_threadpool(work)
-    return {"deleted": {**events, **registry}}
+    # The judge's own conversations: LangGraph's tables, so not reachable from the registry
+    # session above. They quote the customer's messages verbatim, and `project_data_delete` has
+    # just removed the chain-progress rows they pair with — leaving them would keep a copy of the
+    # very data this endpoint promises to delete.
+    chats = await run_in_threadpool(checkpointer.delete_project_chats, project_id)
+    return {"deleted": {**events, **registry, **({"judge_chats": chats} if chats else {})}}
 
 
 @router.post("/project/agents/prune")
@@ -122,6 +127,10 @@ async def delete_workspace(
 
     deleted = await run_in_threadpool(work)
     deleted["blobs"] = await run_in_threadpool(s3.delete_project_blobs, project_id)
+    # A deleted workspace never grades again, so nothing would ever reset these conversations —
+    # without this they would sit until the 90-day retention sweep reached them.
+    if chats := await run_in_threadpool(checkpointer.delete_project_chats, project_id):
+        deleted["judge_chats"] = chats
     log.info("workspace_deleted", project_id=project_id, by=principal.user_id)
     # The caller's active-workspace cookie now points at a dead id; tell it where to go instead.
     return {"deleted": deleted, "switch_to": siblings[0]}

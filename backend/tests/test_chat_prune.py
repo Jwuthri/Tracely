@@ -161,3 +161,49 @@ def test_prune_leaves_an_in_flight_conversation_alone(saver):
         assert cur.fetchone()["n"] == 5, "grace window did not protect an in-flight conversation"
         cur.execute("DELETE FROM checkpoints WHERE thread_id = %s", (thread,))
         cur.execute("DELETE FROM checkpoint_blobs WHERE thread_id = %s", (thread,))
+
+
+@pytest.mark.skipif(os.getenv("CI_NO_PG") == "1", reason="explicitly disabled")
+def test_delete_project_chats_takes_one_workspace_only(saver):
+    """ "Delete all data" must take the judge's transcripts with it — they quote the customer's
+    messages verbatim — and must take only the calling workspace's."""
+    from tracely.infrastructure.llm.checkpointer import chat_id, delete_project_chats
+
+    mine, theirs = str(uuid4()), str(uuid4())
+    for project in (mine, theirs):
+        for column in ("answer_quality", "tool_choice"):
+            _write_turns(saver, chat_id(project, column, "conv-1"), 3)
+
+    def rows(project: str) -> int:
+        with saver.conn.connection() as c, c.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) n FROM checkpoints WHERE starts_with(thread_id, %s)",
+                (f"{project}:",),
+            )
+            return cur.fetchone()["n"]
+
+    assert rows(mine) and rows(theirs), "fixture did not write both workspaces"
+
+    assert delete_project_chats(mine) > 0
+
+    assert rows(mine) == 0, "the workspace's conversations survived its wipe"
+    assert rows(theirs) == 6, "another workspace's conversations were deleted"
+    with saver.conn.connection() as c, c.cursor() as cur:
+        for t in ("checkpoint_blobs", "checkpoint_writes"):
+            cur.execute(
+                f"SELECT count(*) n FROM {t} WHERE starts_with(thread_id, %s)", (f"{mine}:",)
+            )
+            assert cur.fetchone()["n"] == 0, f"{t} left behind after the wipe"
+        for t in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
+            cur.execute(f"DELETE FROM {t} WHERE starts_with(thread_id, %s)", (f"{theirs}:",))
+
+
+@pytest.mark.skipif(os.getenv("CI_NO_PG") == "1", reason="explicitly disabled")
+def test_delete_project_chats_is_a_noop_without_a_checkpointer(monkeypatch):
+    """Same contract as prune: with chat disabled there is nothing to delete, and the rest of the
+    wipe must still report its counts rather than 500."""
+    from tracely.infrastructure.llm import checkpointer
+
+    monkeypatch.setattr(settings, "eval_chat_enabled", False)
+    monkeypatch.setattr(checkpointer, "_saver", None)
+    assert checkpointer.delete_project_chats("whatever") == 0

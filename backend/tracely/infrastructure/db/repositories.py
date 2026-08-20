@@ -1289,8 +1289,10 @@ def project_data_delete(s: Session, project_id: str) -> dict[str, int]:
     ALSO kept, deliberately and forever: `usage_counters`. It looks trace-derived, but it is the
     billing record — wiping it here would make Data → wipe a self-serve monthly quota reset.
 
-    Returns per-table row counts. Caller is responsible for the ClickHouse half
-    (`infrastructure.clickhouse.deletes.delete_project_events`).
+    Returns per-table row counts. Caller is responsible for the two halves that do not live in
+    this session: ClickHouse (`infrastructure.clickhouse.deletes.delete_project_events`) and the
+    judge's conversations (`infrastructure.llm.checkpointer.delete_project_chats`) — the latter
+    pairs with the `eval_chain_progress` rows cleared here, and holds the same messages verbatim.
     """
     case_ids = list(
         s.execute(
