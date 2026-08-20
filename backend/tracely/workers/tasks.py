@@ -111,7 +111,9 @@ def evaluate_run_task(self, project_id: str, trace_id: str, gen: int = 0) -> dic
     return result
 
 
-@celery_app.task(name="tracely.evaluate_conversation", bind=True, max_retries=3, default_retry_delay=3)
+@celery_app.task(
+    name="tracely.evaluate_conversation", bind=True, max_retries=3, default_retry_delay=3
+)
 def evaluate_conversation_task(self, project_id: str, thread_id: str, gen: int = 0) -> dict:
     """Grade a settled thread's CONVERSATION columns and sequential message/step columns.
 
@@ -170,9 +172,17 @@ def run_scenario_gate_task(
             return {"gate_run_id": gate_run_id, "status": done.status}
         try:
             gate = GateService(s).run_gate(
-                project_id, agent_id, env=env, git_ref=git_ref, pr_number=pr_number,
-                with_scenarios=True, min_pass_rate=min_pass_rate, gate_run_id=gate_run_id,
-                finalize=False, case_ids=case_ids, scenario_ids=scenario_ids,
+                project_id,
+                agent_id,
+                env=env,
+                git_ref=git_ref,
+                pr_number=pr_number,
+                with_scenarios=True,
+                min_pass_rate=min_pass_rate,
+                gate_run_id=gate_run_id,
+                finalize=False,
+                case_ids=case_ids,
+                scenario_ids=scenario_ids,
             )
         except Exception:
             s.rollback()
@@ -254,6 +264,23 @@ def evaluate_monitors_task(self) -> dict:
         return {"monitors": 0, "fired": 0, "error": str(exc)}
 
 
+@celery_app.task(name="tracely.prune_chats", bind=True, max_retries=0)
+def prune_chats_task(self) -> dict:
+    """Drop judge-conversation checkpoints nothing can read again (beat, nightly).
+
+    LangGraph persists one checkpoint per step and each re-serializes the whole transcript, so a
+    long sequential column grows its storage quadratically and never gives it back. Left alone it
+    is the largest table in the deployment by an order of magnitude — a disk-full incident on the
+    store that also holds the registry. `infrastructure/llm/checkpointer.py` has the detail."""
+    from tracely.infrastructure.llm.checkpointer import prune
+
+    try:
+        return prune()
+    except Exception as exc:  # noqa: BLE001 — a missed sweep costs disk, never a grade
+        log.warning("prune_chats_failed", error=str(exc))
+        return {"error": str(exc)}
+
+
 @celery_app.task(name="tracely.selfcheck", bind=True, max_retries=0)
 def selfcheck_task(self) -> dict:
     """Watch our own deployment (beat, every 5 min). Tracely's failure modes are quiet — a dead
@@ -299,7 +326,11 @@ def run_scenario_task(
         agent_slug = repositories.agent_slug(s, project_id, scenario.agent_id)
         try:
             result = SimulationService().run_scenario(
-                project_id, agent_slug, scenario, endpoint, env=env,
+                project_id,
+                agent_slug,
+                scenario,
+                endpoint,
+                env=env,
                 conversation_id=conversation_id,
             )
         except Exception as exc:
@@ -314,13 +345,19 @@ def run_scenario_task(
 
     grade_scenario_turns_task.apply_async(
         (
-            project_id, conversation_id, scenario_id,
-            result.get("trace_ids") or [], result.get("error") or "",
+            project_id,
+            conversation_id,
+            scenario_id,
+            result.get("trace_ids") or [],
+            result.get("error") or "",
         ),
         countdown=settings.gate_scenario_span_grace_s,
     )
-    return {"conversation_id": conversation_id, "turns": len(result.get("turns") or []),
-            "error": result.get("error") or ""}
+    return {
+        "conversation_id": conversation_id,
+        "turns": len(result.get("turns") or []),
+        "error": result.get("error") or "",
+    }
 
 
 @celery_app.task(name="tracely.grade_scenario_turns", bind=True, max_retries=0)
