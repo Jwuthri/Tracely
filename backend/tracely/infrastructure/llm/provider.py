@@ -281,6 +281,29 @@ def use_project_key(project_id: str) -> Iterator[None]:
         _project_key_ctx.reset(token)
 
 
+@contextlib.contextmanager
+def use_server_key() -> Iterator[None]:
+    """Scope this block to TRACELY'S OWN OpenRouter key, deliberately.
+
+    The default for work done ON a customer's data is `use_project_key` — they pay for their own
+    eval spend. This is the explicit opposite, for features that are OURS rather than theirs: the
+    in-app assistant answers questions about the product, so billing it to the customer's key
+    (and going dark for every workspace that hasn't configured one) would be wrong.
+
+    It has to be an explicit scope rather than "just don't wrap it": under
+    `REQUIRE_PROJECT_LLM_KEY` an *unscoped* call is a path that FORGOT `use_project_key`, and
+    fails closed on purpose. "We pay for this one" must not look like that bug.
+    """
+    if not settings.openrouter_api_key:
+        yield  # nothing to pin — unscoped rules apply (legacy direct endpoint, or disabled)
+        return
+    token = _project_key_ctx.set(settings.openrouter_api_key)
+    try:
+        yield
+    finally:
+        _project_key_ctx.reset(token)
+
+
 def project_scoped() -> bool:
     """True inside `use_project_key()` — i.e. server-wide credentials do not apply here."""
     return _project_key_ctx.get() is not None
@@ -512,11 +535,18 @@ def _by_label(models: list[dict[str, str]]) -> list[dict[str, str]]:
     return sorted(models, key=lambda m: m["label"].lower())
 
 
-def get_chat_model(model: str | None = None, temperature: float = 0.0):
-    """A LangChain chat model on OpenRouter (or the legacy OpenAI-compatible fallback)."""
+def get_chat_model(
+    model: str | None = None, temperature: float = 0.0, reasoning_effort: str | None = None
+):
+    """A LangChain chat model on OpenRouter (or the legacy OpenAI-compatible fallback).
+
+    `reasoning_effort` ("minimal"/"low"/"medium"/"high") turns on a thinking model's internal
+    reasoning; OpenRouter bills those tokens at the completion rate. Leave it None for the
+    judges — a rubric grader wants a cheap, fast, deterministic answer, not deliberation."""
     from langchain_openai import ChatOpenAI
 
     name = (model or settings.llm_judge_model).strip()
+    extra = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
     key = effective_openrouter_key()
     if not key and (project_scoped() or settings.require_project_llm_key):
         # Scoped with no key = the workspace hasn't configured one. Unscoped under the hosted
@@ -535,6 +565,7 @@ def get_chat_model(model: str | None = None, temperature: float = 0.0):
             # Always bounded — see `Settings.llm_max_output_tokens`. Without it OpenRouter reserves
             # credit for the provider's default 64k and rejects the call outright.
             max_tokens=settings.llm_max_output_tokens,
+            **extra,
         )
     # Legacy direct endpoint: OpenAI-style bare model ids (strip an OpenRouter-style prefix).
     return ChatOpenAI(
@@ -543,10 +574,11 @@ def get_chat_model(model: str | None = None, temperature: float = 0.0):
         base_url=settings.llm_judge_base_url,
         temperature=temperature,
         max_tokens=settings.llm_max_output_tokens,
+        **extra,
     )
 
 
-def _invoke(agent, prompt: str, thread_id: str | None = None) -> dict[str, Any]:
+def _invoke(agent, prompt: str | list[dict], thread_id: str | None = None) -> dict[str, Any]:
     """Run the agent, translating one badly-disguised provider failure into a readable error.
 
     `thread_id` addresses a checkpointed conversation: LangGraph loads that thread's messages,
@@ -676,23 +708,39 @@ def _dump(value: Any) -> str:
     return str(value)
 
 
+def _blocks_text(prompt: str | list[dict]) -> str:
+    """A multimodal user message rendered as plain text, for the introspection recording — the
+    image bytes themselves would be megabytes of base64 in a trace nobody can read."""
+    if isinstance(prompt, str):
+        return prompt
+    return "\n".join(
+        str(b.get("text") or "") if b.get("type") == "text" else f"[{b.get('type')}]"
+        for b in prompt
+    )
+
+
 def run_text_agent(
-    prompt: str,
+    prompt: str | list[dict],
     *,
     system_prompt: str | None = None,
     model: str | None = None,
     temperature: float = 0.0,
+    reasoning_effort: str | None = None,
     on_usage: UsageSink | None = None,
 ) -> str:
     """One `create_agent` invocation returning the final message text — for free-form outputs
     (the `json` evaluator output type, where the rubric defines the object shape). `on_usage`
-    (optional) receives this call's token usage."""
+    (optional) receives this call's token usage.
+
+    `prompt` may also be a list of OpenAI-style content blocks (`{"type": "text", …}` /
+    `{"type": "image_url", …}`) for a multimodal turn — what the assistant sends when the user
+    attaches an image."""
     from langchain.agents import create_agent
 
     agent = create_agent(
-        get_chat_model(model, temperature), tools=[], system_prompt=system_prompt
+        get_chat_model(model, temperature, reasoning_effort), tools=[], system_prompt=system_prompt
     )
-    with _recorded(prompt, system_prompt, model) as sink:
+    with _recorded(_blocks_text(prompt), system_prompt, model) as sink:
         result = _invoke(agent, prompt)
         usage = _extract_usage(result, model)
         content = result["messages"][-1].content

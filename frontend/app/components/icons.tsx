@@ -173,3 +173,34 @@ export const IconTrash = (p: P) => (
     <path d="M4 7h16M10 11v6M14 11v6M5 7l1 13a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1l1-13M9 7V4h6v3" />
   </svg>
 );
+
+export const IconChat = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M20.5 11.5a7.5 7.5 0 0 1-10.9 6.7L4 19.5l1.4-4.3a7.5 7.5 0 1 1 15.1-3.7Z" />
+    <path d="M9 11h.01M12.5 11h.01M16 11h.01" strokeWidth="2.4" />
+  </svg>
+);
+
+export const IconSend = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M12 19V5M6 11l6-6 6 6" />
+  </svg>
+);
+
+export const IconClip = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M21 11.5 12.5 20a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7.5-7.5" />
+  </svg>
+);
+
+export const IconPlus = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+);
+
+export const IconStack = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M4 7h16M4 12h16M4 17h10" />
+  </svg>
+);

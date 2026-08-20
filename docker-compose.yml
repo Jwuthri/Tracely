@@ -45,6 +45,11 @@ x-app-env: &app-env
   # Meta-analysis ("Analyze") synthesis model + rolling-summary compression model. The heavy
   # lifting (correlations/outliers; verbatim short steps) is deterministic; these only set the
   # model for the prose/compression LLM calls (both via the OpenRouter provider).
+  # The dashboard's chat widget. Runs on OUR OpenRouter key (it explains the product, so it has
+  # to answer in a workspace that brought no key of its own) — the one LLM call customers don't
+  # pay for. ASSISTANT_REASONING_EFFORT: ""|minimal|low|medium|high.
+  ASSISTANT_MODEL: ${ASSISTANT_MODEL:-google/gemini-3.7-flash}
+  ASSISTANT_REASONING_EFFORT: ${ASSISTANT_REASONING_EFFORT:-medium}
   META_ANALYSIS_MODEL: ${META_ANALYSIS_MODEL:-openai/gpt-5-mini}
   ROLLING_SUMMARY_MODEL: ${ROLLING_SUMMARY_MODEL:-openai/gpt-5.4-nano}
   ROLLING_SUMMARY_STEP_MAX_TOKENS: ${ROLLING_SUMMARY_STEP_MAX_TOKENS:-512}

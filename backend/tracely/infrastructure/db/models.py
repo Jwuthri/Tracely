@@ -675,6 +675,34 @@ class ScoreAnnotation(Base):
     )
 
 
+class AssistantChat(Base):
+    """One conversation with the in-app assistant, owned by the person who had it.
+
+    The whole transcript is a single JSON column: a chat is always read and written whole, never
+    queried message-by-message, so a second table would buy nothing but joins. `messages` is a
+    list of `{role, content, attachments?, ts}`; each attachment is `{id, name, mime, size}` and
+    its bytes live in object storage under the project's prefix (so a workspace delete takes
+    them with it).
+
+    `user_id` is NULL for machine callers (an ingest key has no human identity) and in dev mode —
+    those share the project's chats, which is the only sensible reading of "whose is this" when
+    nobody signed in.
+    """
+
+    __tablename__ = "assistant_chats"
+    __table_args__ = (Index("ix_assistant_chats_owner", "project_id", "user_id", "updated_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    title: Mapped[str] = mapped_column(String(120), default="")
+    messages: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Monitor(Base):
     """A threshold rule over the regression-loop metrics already in ClickHouse — when its
     `condition` fires over a sliding window, it POSTs to each configured `channel`. Per-monitor

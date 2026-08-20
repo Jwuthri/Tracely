@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from tracely.infrastructure.db.models import (
     Agent,
+    AssistantChat,
     AgentEndpoint,
     AgentVersion,
     CaseReplay,
@@ -1289,8 +1290,10 @@ def project_data_delete(s: Session, project_id: str) -> dict[str, int]:
     ALSO kept, deliberately and forever: `usage_counters`. It looks trace-derived, but it is the
     billing record — wiping it here would make Data → wipe a self-serve monthly quota reset.
 
-    Returns per-table row counts. Caller is responsible for the ClickHouse half
-    (`infrastructure.clickhouse.deletes.delete_project_events`).
+    Returns per-table row counts. Caller is responsible for the two halves that do not live in
+    this session: ClickHouse (`infrastructure.clickhouse.deletes.delete_project_events`) and the
+    judge's conversations (`infrastructure.llm.checkpointer.delete_project_chats`) — the latter
+    pairs with the `eval_chain_progress` rows cleared here, and holds the same messages verbatim.
     """
     case_ids = list(
         s.execute(
@@ -1352,6 +1355,9 @@ def project_data_delete(s: Session, project_id: str) -> dict[str, int]:
     wipe(
         "score_annotations", delete(ScoreAnnotation).where(ScoreAnnotation.project_id == project_id)
     )
+    # The assistant's conversations quote this workspace's traces and can carry uploaded files;
+    # "delete all project data" that leaves them behind is not a delete.
+    wipe("assistant_chats", delete(AssistantChat).where(AssistantChat.project_id == project_id))
     # Everything that FKs to `agents` must go before it. Miss one and the whole wipe raises a
     # ForeignKeyViolation and rolls back — the button reports "internal server error" and NOTHING
     # is deleted, which reads as "the delete silently did nothing".
@@ -1365,3 +1371,76 @@ def project_data_delete(s: Session, project_id: str) -> dict[str, int]:
 
     s.commit()
     return {k: v for k, v in counts.items() if v}
+
+
+# --------------------------------------------------------------------------------------------
+# In-app assistant conversations
+# --------------------------------------------------------------------------------------------
+# Scoped to (project, owner). `user_id` is None for machine callers and dev mode, and NULL never
+# equals NULL in SQL — so the None case has to be an IS NULL, not an `== None` that silently
+# matches no row and hands every dev-mode caller a permanently empty history.
+
+
+def _chat_owned(project_id: str, user_id: str | None):
+    owner = AssistantChat.user_id.is_(None) if user_id is None else AssistantChat.user_id == user_id
+    return (AssistantChat.project_id == project_id) & owner
+
+
+def assistant_chat_list(
+    s: Session, project_id: str, user_id: str | None, limit: int = 50
+) -> list[AssistantChat]:
+    """Newest first — the order the history panel shows them in."""
+    return list(
+        s.execute(
+            select(AssistantChat)
+            .where(_chat_owned(project_id, user_id))
+            .order_by(AssistantChat.updated_at.desc())
+            .limit(limit)
+        ).scalars()
+    )
+
+
+def assistant_chat_get(
+    s: Session, project_id: str, user_id: str | None, chat_id: str
+) -> AssistantChat | None:
+    return s.execute(
+        select(AssistantChat).where(_chat_owned(project_id, user_id) & (AssistantChat.id == chat_id))
+    ).scalar_one_or_none()
+
+
+def assistant_chat_save(
+    s: Session,
+    project_id: str,
+    user_id: str | None,
+    *,
+    chat_id: str | None,
+    messages: list,
+    title: str,
+) -> AssistantChat:
+    """Create or overwrite a conversation. A `chat_id` that isn't this owner's starts a new chat
+    rather than raising — the alternative is one guessed id reading or overwriting someone
+    else's conversation."""
+    row = assistant_chat_get(s, project_id, user_id, chat_id) if chat_id else None
+    if row is None:
+        row = AssistantChat(
+            id=str(uuid4()), project_id=project_id, user_id=user_id, title=title[:120]
+        )
+        s.add(row)
+    row.messages = messages
+    if title and not row.title:
+        row.title = title[:120]
+    s.commit()
+    s.refresh(row)
+    return row
+
+
+def assistant_chat_delete(
+    s: Session, project_id: str, user_id: str | None, chat_id: str
+) -> bool:
+    row = assistant_chat_get(s, project_id, user_id, chat_id)
+    if row is None:
+        return False
+    s.delete(row)
+    s.commit()
+    return True
+

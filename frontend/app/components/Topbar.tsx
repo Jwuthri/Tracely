@@ -3,6 +3,7 @@
 import { Fragment } from "react";
 import { usePathname } from "next/navigation";
 import { IconChevron, IconSearch } from "./icons";
+import { OnboardingQuest } from "./OnboardingQuest";
 import { ThemeToggle } from "./ThemeToggle";
 
 const LABELS: Record<string, string> = {
@@ -63,6 +64,7 @@ export function Topbar() {
             ⌘K
           </kbd>
         </button>
+        <OnboardingQuest />
         <ThemeToggle />
       </div>
     </header>

@@ -240,6 +240,17 @@
   .btn-ghost {
     @apply inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-[12px] text-fg-muted transition-colors hover:border-signal/40 hover:text-fg disabled:opacity-60;
   }
+
+  /* Assistant replies reuse the shared Markdown renderer, which is sized for the small preview
+     panels (11px, muted). In a chat bubble that reads as a footnote next to the 13px question —
+     lift it here rather than reflowing the renderer's six other call sites. */
+  .assistant-md p,
+  .assistant-md li {
+    @apply text-[13px];
+  }
+  .assistant-md > * + * {
+    @apply mt-2;
+  }
   .text-balance {
     text-wrap: balance;
   }
