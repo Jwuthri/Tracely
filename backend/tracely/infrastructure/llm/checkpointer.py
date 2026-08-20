@@ -159,9 +159,19 @@ def chat_id(project_id: str, score_name: str, subject: str) -> str:
 # Match the events TTL: a conversation whose thread aged out of ClickHouse cannot be resumed.
 CHAT_RETENTION_DAYS = 90
 
-# Order matters: 1 and 2 leave at most one checkpoint per conversation, so 3 and 4 can then drop
-# everything no surviving checkpoint points at. Dangling `parent_checkpoint_id` pointers are fine
-# — they are followed only for history/time-travel, which nothing in Tracely does.
+# A conversation being graded right now must come through untouched, and that is not free:
+# `PostgresSaver.put` runs in psycopg PIPELINE mode, not a transaction, and our pool is
+# autocommit — so a step's blobs and its checkpoint row land as separate commits, blobs first.
+# For a moment the blobs of an in-flight step reference a checkpoint that does not exist yet, and
+# a naive "delete every blob no checkpoint points at" would take them. Hence the grace window:
+# nothing is reclaimed from a conversation whose surviving checkpoint was written in the last
+# hour. Expired conversations skip the guard — 90 days idle is nobody's in-flight write.
+_GRACE = "1 hour"
+
+# Order matters. 1 collapses each conversation to its latest step; 2 then drops whole expired
+# conversations, taking their payload with them BEFORE the checkpoint rows that identify them are
+# gone; 3 and 4 sweep what is left of the live ones. Dangling `parent_checkpoint_id` pointers are
+# fine — they are followed only for history/time-travel, which nothing in Tracely does.
 _PRUNE = (
     # 1. Superseded steps of a live conversation. This is the O(N^2) mass.
     (
@@ -173,7 +183,24 @@ _PRUNE = (
                 WHERE x.thread_id = c.thread_id AND x.checkpoint_ns = c.checkpoint_ns)
     """,
     ),
-    # 2. Whole conversations nobody will resume.
+    # 2. Conversations nobody will resume — payload first, then the checkpoints themselves, so
+    #    the blobs and writes are never left behind with nothing pointing at them.
+    (
+        "expired_blobs",
+        """
+        DELETE FROM checkpoint_blobs b USING checkpoints c
+         WHERE c.thread_id = b.thread_id AND c.checkpoint_ns = b.checkpoint_ns
+           AND (c.checkpoint ->> 'ts')::timestamptz < now() - make_interval(days => %(days)s)
+    """,
+    ),
+    (
+        "expired_writes",
+        """
+        DELETE FROM checkpoint_writes w USING checkpoints c
+         WHERE c.thread_id = w.thread_id AND c.checkpoint_ns = w.checkpoint_ns
+           AND (c.checkpoint ->> 'ts')::timestamptz < now() - make_interval(days => %(days)s)
+    """,
+    ),
     (
         "expired_checkpoints",
         """
@@ -181,29 +208,29 @@ _PRUNE = (
          WHERE (c.checkpoint ->> 'ts')::timestamptz < now() - make_interval(days => %(days)s)
     """,
     ),
-    # 3. Writes belonging to a checkpoint that no longer exists.
+    # 3. Writes from a step this conversation has moved past. Joined to the surviving checkpoint
+    #    rather than written as NOT EXISTS, so the grace window has something to test — and so a
+    #    thread mid-first-write, which has no checkpoint row at all yet, is simply not matched.
     (
         "orphan_writes",
         """
-        DELETE FROM checkpoint_writes w
-         WHERE NOT EXISTS (
-               SELECT 1 FROM checkpoints c
-                WHERE c.thread_id = w.thread_id AND c.checkpoint_ns = w.checkpoint_ns
-                  AND c.checkpoint_id = w.checkpoint_id)
+        DELETE FROM checkpoint_writes w USING checkpoints c
+         WHERE c.thread_id = w.thread_id AND c.checkpoint_ns = w.checkpoint_ns
+           AND (c.checkpoint ->> 'ts')::timestamptz < now() - %(grace)s::interval
+           AND w.checkpoint_id <> c.checkpoint_id
     """,
     ),
-    # 4. Blob versions no surviving checkpoint references. Keyed by (channel, version) rather than
-    #    by checkpoint_id, so "is it still referenced" has to read `channel_versions` — the
-    #    surviving checkpoint may well point at an older version of a channel it did not rewrite,
-    #    which is exactly why this cannot just keep the max version per channel.
+    # 4. Blob versions the surviving checkpoint does not reference. Keyed by (channel, version)
+    #    rather than by checkpoint_id, so "is it still referenced" has to read `channel_versions`:
+    #    the surviving checkpoint may well point at an OLDER version of a channel its last step
+    #    did not rewrite, which is exactly why this cannot just keep the max version per channel.
     (
         "orphan_blobs",
         """
-        DELETE FROM checkpoint_blobs b
-         WHERE NOT EXISTS (
-               SELECT 1 FROM checkpoints c
-                WHERE c.thread_id = b.thread_id AND c.checkpoint_ns = b.checkpoint_ns
-                  AND c.checkpoint -> 'channel_versions' ->> b.channel = b.version)
+        DELETE FROM checkpoint_blobs b USING checkpoints c
+         WHERE c.thread_id = b.thread_id AND c.checkpoint_ns = b.checkpoint_ns
+           AND (c.checkpoint ->> 'ts')::timestamptz < now() - %(grace)s::interval
+           AND c.checkpoint -> 'channel_versions' ->> b.channel IS DISTINCT FROM b.version
     """,
     ),
 )
@@ -223,7 +250,7 @@ def prune(retention_days: int = CHAT_RETENTION_DAYS) -> dict[str, int]:
     try:
         with saver.conn.connection() as conn, conn.cursor() as cur:
             for label, sql in _PRUNE:
-                cur.execute(sql, {"days": retention_days})
+                cur.execute(sql, {"days": retention_days, "grace": _GRACE})
                 deleted[label] = cur.rowcount
     except Exception as exc:  # noqa: BLE001 — disk is the only thing at stake
         log.warning("chat_prune_failed", error=str(exc))

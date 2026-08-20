@@ -87,7 +87,8 @@ def test_prune_keeps_the_conversation_resumable(saver):
     from tracely.infrastructure.llm.checkpointer import prune
 
     thread = f"test-prune-{uuid4()}"
-    _write_turns(saver, thread, 8)
+    settled = datetime.now(timezone.utc) - timedelta(hours=2)  # past the grace window
+    _write_turns(saver, thread, 8, ts=settled.isoformat())
 
     cfg = {"configurable": {"thread_id": thread, "checkpoint_ns": ""}}
     assert len(saver.get_tuple(cfg).checkpoint["channel_values"]["messages"]) == 16
@@ -137,3 +138,26 @@ def test_prune_is_a_noop_without_a_checkpointer(monkeypatch):
     monkeypatch.setattr(settings, "eval_chat_enabled", False)
     monkeypatch.setattr(checkpointer, "_saver", None)
     assert checkpointer.prune() == {}
+
+
+@pytest.mark.skipif(os.getenv("CI_NO_PG") == "1", reason="explicitly disabled")
+def test_prune_leaves_an_in_flight_conversation_alone(saver):
+    """The grace window, which is the whole reason this sweep is safe to run against a live
+    deployment. `PostgresSaver.put` is pipelined and our pool is autocommit, so a step's blobs
+    commit before its checkpoint row: for an instant they reference a checkpoint that does not
+    exist yet. Without the window the sweep would reclaim the transcript out from under a judge
+    that is mid-conversation."""
+    from tracely.infrastructure.llm.checkpointer import prune
+
+    thread = f"test-prune-live-{uuid4()}"
+    _write_turns(saver, thread, 5)  # ts defaults to now — i.e. still being graded
+
+    prune()
+
+    cfg = {"configurable": {"thread_id": thread, "checkpoint_ns": ""}}
+    assert len(saver.get_tuple(cfg).checkpoint["channel_values"]["messages"]) == 10
+    with saver.conn.connection() as c, c.cursor() as cur:
+        cur.execute("SELECT count(*) n FROM checkpoint_blobs WHERE thread_id = %s", (thread,))
+        assert cur.fetchone()["n"] == 5, "grace window did not protect an in-flight conversation"
+        cur.execute("DELETE FROM checkpoints WHERE thread_id = %s", (thread,))
+        cur.execute("DELETE FROM checkpoint_blobs WHERE thread_id = %s", (thread,))
