@@ -5,6 +5,7 @@ import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { FleetPeek } from "./_components/FleetPeek";
+import { ScramblePipeline } from "./_components/ScramblePipeline";
 import { PipelinePeek } from "@/app/components/PipelinePeek";
 
 gsap.registerPlugin(useGSAP, ScrollTrigger);
@@ -21,9 +22,9 @@ const API = "https://api.tracely-studio.xyz"; // the hosted backend — self-hos
 /* A flat pill of solid colour reads as 2021. The lift comes from three cheap things: a squarer
    radius, a top-edge inner highlight so the surface catches light, and a hairline ring. */
 const btnPrimary =
-  "group inline-flex items-center gap-2 rounded-xl bg-gradient-to-b from-signal-soft to-signal px-5 py-2.5 text-sm font-semibold text-ink-950 ring-1 ring-inset ring-white/25 shadow-[0_1px_0_rgba(255,255,255,0.35)_inset,0_6px_20px_-8px_rgb(var(--c-signal)/0.65)] transition duration-300 hover:brightness-[1.08] hover:shadow-[0_1px_0_rgba(255,255,255,0.4)_inset,0_8px_28px_-8px_rgb(var(--c-signal)/0.85)]";
+  "inline-flex items-center gap-2 whitespace-nowrap rounded-xl bg-gradient-to-b from-signal-soft to-signal px-5 py-2.5 text-sm font-semibold text-ink-950 ring-1 ring-inset ring-white/25 shadow-[0_1px_0_rgba(255,255,255,0.35)_inset,0_2px_8px_-3px_rgb(var(--c-signal)/0.4)] transition duration-300 hover:brightness-[1.07] hover:shadow-[0_1px_0_rgba(255,255,255,0.4)_inset,0_4px_14px_-4px_rgb(var(--c-signal)/0.55)]";
 const btnGhost =
-  "group inline-flex items-center gap-2 rounded-xl border border-line-bright/60 bg-ink-800/70 px-5 py-2.5 text-sm font-medium text-fg-muted shadow-[0_1px_0_rgba(255,255,255,0.05)_inset] backdrop-blur-sm transition duration-300 hover:border-line-bright hover:bg-ink-800 hover:text-fg";
+  "inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-line-bright/60 bg-ink-800/70 px-5 py-2.5 text-sm font-medium text-fg-muted shadow-[0_1px_0_rgba(255,255,255,0.05)_inset] backdrop-blur-sm transition duration-300 hover:border-line-bright hover:bg-ink-800 hover:text-fg";
 
 /** The install line, click to copy. Two call sites (hero, final CTA) — hence a component. */
 function CopyCmd({ cmd }: { cmd: string }) {
@@ -41,7 +42,7 @@ function CopyCmd({ cmd }: { cmd: string }) {
           /* no clipboard — nothing to do */
         }
       }}
-      className="inline-flex items-center gap-3 rounded-full border border-line bg-ink-900/70 px-4 py-2 font-mono text-[12.5px] text-fg-muted transition duration-300 hover:border-line-bright hover:text-fg"
+      className="inline-flex items-center gap-3 whitespace-nowrap rounded-xl border border-line bg-ink-900/70 px-4 py-2 font-mono text-[11px] text-fg-muted transition duration-300 hover:border-line-bright hover:text-fg sm:text-[12.5px]"
       aria-label={`Copy: ${cmd}`}
     >
       <span className="text-fg-faint">$</span>
@@ -585,21 +586,20 @@ export default function Landing() {
           <a href="#top" className="flex items-center gap-3">
             <Mark size={34} />
             <span className="leading-none">
-              <span className="block font-display text-lg font-bold tracking-tight">Tracely</span>
-              <span className="mt-1 block font-mono text-[9px] uppercase tracking-[0.22em] text-fg-faint">
+              <span className="block whitespace-nowrap font-display text-lg font-bold tracking-tight">Tracely</span>
+              <span className="mt-1 hidden whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.22em] text-fg-faint sm:block">
                 trace-native ci/cd
               </span>
             </span>
           </a>
-          <div className="hidden items-center gap-7 text-sm text-fg-muted md:flex">
-            <a className="transition hover:text-fg" href="#loop">How it works</a>
-            <a className="transition hover:text-fg" href="#replay">Replay</a>
-            <a className="transition hover:text-fg" href="#features">Features</a>
-            <a className="transition hover:text-fg" href="#gate">CI gate</a>
-            <a className="transition hover:text-fg" href="#sdk">SDK</a>
-            <a className="transition hover:text-fg" href="#mcp">MCP</a>
-            <a className="transition hover:text-fg" href="#pricing">Pricing</a>
-            <a className="transition hover:text-fg" href={DOCS} target="_blank" rel="noreferrer">Docs</a>
+          {/* Five, not eight. Replay/SDK/MCP still have their own sections and anchors — they were
+              costing the bar more width than they earned, which is what wrapped the CTA onto two lines. */}
+          <div className="hidden items-center gap-6 text-sm text-fg-muted lg:flex">
+            <a className="whitespace-nowrap transition hover:text-fg" href="#loop">How it works</a>
+            <a className="whitespace-nowrap transition hover:text-fg" href="#features">Features</a>
+            <a className="whitespace-nowrap transition hover:text-fg" href="#gate">CI gate</a>
+            <a className="whitespace-nowrap transition hover:text-fg" href="#pricing">Pricing</a>
+            <a className="whitespace-nowrap transition hover:text-fg" href={DOCS} target="_blank" rel="noreferrer">Docs</a>
           </div>
           <div className="flex items-center gap-3">
             <a className={`${btnGhost} hidden px-4 py-2 sm:inline-flex`} href={GITHUB} target="_blank" rel="noreferrer">
@@ -618,7 +618,6 @@ export default function Landing() {
           <div className="bg-blueprint pointer-events-none absolute inset-0" />
           <div className="pointer-events-none absolute inset-x-0 top-0 h-[760px] overflow-hidden [mask-image:radial-gradient(ellipse_78%_70%_at_50%_36%,#000_30%,transparent_76%)]">
             <div className="hero-dots absolute inset-0" />
-            <div className="hero-scanline absolute inset-x-0 top-0" />
           </div>
           <div
             className="pointer-events-none absolute inset-x-0 top-0 h-[520px]"
@@ -646,15 +645,11 @@ export default function Landing() {
               </h1>
 
               <p className="hero-stagger mx-auto mt-6 max-w-2xl text-balance text-lg leading-relaxed text-fg-muted">
-                LLM observability that closes the loop: Tracely grades every agent trace as it
-                lands, clusters the failures into issues, and freezes the bad runs into hermetic
-                tests that block the pull request shipping them again.
+                LLM observability that closes the loop: every agent trace graded as it lands,
+                failures clustered into issues, bad runs frozen into tests that block the PR.
               </p>
 
-              <p className="hero-stagger mt-5 font-mono text-[13px] tracking-tight text-fg-faint">
-                production trace <span className="text-signal">→</span> failure detection{" "}
-                <span className="text-signal">→</span> regression test <span className="text-signal">→</span> CI gate
-              </p>
+              <ScramblePipeline className="hero-stagger mt-5 block font-mono text-[13px] tracking-tight" />
 
               <div className="hero-stagger mt-8 flex flex-wrap items-center justify-center gap-4">
                 <a className={btnPrimary} href={APP}>
@@ -667,7 +662,6 @@ export default function Landing() {
 
               <div className="hero-stagger mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
                 <CopyCmd cmd={INSTALL} />
-                <span className="text-[13px] text-fg-faint">two lines of code · MIT · self-host or cloud</span>
               </div>
             </div>
 
@@ -817,7 +811,7 @@ export default function Landing() {
         </section>
 
         {/* ================================ the loop ================================ */}
-        <section id="loop" className="scroll-mt-24 px-6 py-28">
+        <section id="loop" className="scroll-mt-24 px-6 py-20">
           <div className="mx-auto max-w-[1200px]">
             <Eyebrow>The loop</Eyebrow>
             <h2 className="sec-reveal mt-6 text-center font-display text-4xl font-bold tracking-tight sm:text-5xl">
@@ -859,7 +853,7 @@ export default function Landing() {
         </section>
 
         {/* ================================ replay ================================ */}
-        <section id="replay" className="scroll-mt-24 px-6 py-28">
+        <section id="replay" className="scroll-mt-24 px-6 py-20">
           <div className="mx-auto max-w-[1100px]">
             <Eyebrow>Watch the run</Eyebrow>
             <h2 className="sec-reveal mt-6 text-center font-display text-4xl font-bold tracking-tight sm:text-5xl">
@@ -879,7 +873,7 @@ export default function Landing() {
         </section>
 
         {/* ================================ statement ================================ */}
-        <section className="statement px-6 py-28">
+        <section className="statement px-6 py-20">
           <div className="mx-auto max-w-4xl text-center">
             <p className="font-display text-3xl font-bold leading-snug tracking-tight text-fg sm:text-[44px] sm:leading-[1.2]">
               <StateWords text="You never author a test set. Production already wrote the perfect failing example — Tracely freezes it and guards it forever." />
@@ -898,7 +892,7 @@ export default function Landing() {
         </section>
 
         {/* ================================ features ================================ */}
-        <section id="features" className="scroll-mt-24 px-6 py-28">
+        <section id="features" className="scroll-mt-24 px-6 py-20">
           <div className="mx-auto max-w-[1200px]">
             <Eyebrow>Derived from the trace</Eyebrow>
             <h2 className="sec-reveal mt-6 text-center font-display text-4xl font-bold tracking-tight sm:text-5xl">
@@ -926,7 +920,7 @@ export default function Landing() {
         </section>
 
         {/* ================================ gate ================================ */}
-        <section id="gate" className="scroll-mt-24 px-6 py-28">
+        <section id="gate" className="scroll-mt-24 px-6 py-20">
           <div className="mx-auto max-w-[1200px]">
             <Eyebrow>Ship</Eyebrow>
             <h2 className="sec-reveal mt-6 text-center font-display text-4xl font-bold tracking-tight sm:text-5xl">
@@ -1001,7 +995,7 @@ export default function Landing() {
         </section>
 
         {/* ================================ sdk ================================ */}
-        <section id="sdk" className="scroll-mt-24 px-6 py-28">
+        <section id="sdk" className="scroll-mt-24 px-6 py-20">
           <div className="mx-auto grid max-w-[1200px] items-start gap-12 lg:grid-cols-2">
             <div>
               <div className="sec-reveal flex items-center gap-4">
@@ -1052,7 +1046,7 @@ export default function Landing() {
         </section>
 
         {/* =================================== mcp =================================== */}
-        <section id="mcp" className="scroll-mt-24 px-6 py-28">
+        <section id="mcp" className="scroll-mt-24 px-6 py-20">
           <div className="mx-auto grid max-w-[1200px] items-start gap-12 lg:grid-cols-2">
             <div>
               <div className="sec-reveal flex items-center gap-4">
@@ -1104,7 +1098,7 @@ export default function Landing() {
         </section>
 
         {/* the know-how half — MCP hands the agent your data, the skill hands it the know-how */}
-        <section className="px-6 py-28">
+        <section className="px-6 py-20">
           <div className="sec-reveal mx-auto grid max-w-[1200px] items-start gap-12 lg:grid-cols-2">
             <div>
               <div className="flex items-center gap-4">
@@ -1147,7 +1141,7 @@ export default function Landing() {
         </section>
 
         {/* ================================= pricing ================================= */}
-        <section id="pricing" className="scroll-mt-24 px-6 py-28">
+        <section id="pricing" className="scroll-mt-24 px-6 py-20">
           <div className="mx-auto max-w-[1200px]">
             <div className="sec-reveal flex items-center gap-4">
               <span className="eyebrow whitespace-nowrap">Pricing</span>
@@ -1216,7 +1210,7 @@ export default function Landing() {
         </section>
 
         {/* ================================ final cta ================================ */}
-        <section id="start" className="final-cta relative scroll-mt-24 overflow-hidden px-6 pb-10 pt-32">
+        <section id="start" className="final-cta relative scroll-mt-24 overflow-hidden px-6 pb-10 pt-20">
           <div className="bg-blueprint pointer-events-none absolute inset-0" />
           <div
             className="pointer-events-none absolute inset-x-0 bottom-0 h-[420px]"

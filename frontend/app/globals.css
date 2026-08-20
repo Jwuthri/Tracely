@@ -289,39 +289,39 @@
     -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 30%, black 30%, transparent 75%);
   }
   /* Hero: a scan sweeps a dot field — the page's own thesis, an evaluator passing over a trace.
-     Two masked layers instead of a WebGL canvas: it costs no dependency, no GPU context and no
-     LCP (the hero subhead is Lighthouse's LCP element), and it renders the same everywhere. */
+     One masked layer instead of a WebGL canvas: no dependency, no GPU context and no cost to LCP
+     (the hero subhead is Lighthouse's LCP element), and it renders the same in every browser.
+     The mask ramps in slowly and cuts off hard at the bottom, so the sweep has a leading edge —
+     that edge is the scan line, which is why there is no second element to keep in sync with. */
   .hero-dots {
-    background-image: radial-gradient(circle at center, rgb(var(--c-signal) / 0.5) 1px, transparent 1.6px);
+    background-image: radial-gradient(circle at center, rgb(var(--c-signal) / 0.6) 1px, transparent 1.6px);
     background-size: 26px 26px;
-    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 35%, #000 65%, transparent);
-    mask-image: linear-gradient(to bottom, transparent, #000 35%, #000 65%, transparent);
-    -webkit-mask-size: 100% 44%;
-    mask-size: 100% 44%;
+    --hero-band: linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgb(0 0 0 / 0.25) 45%,
+      rgb(0 0 0 / 0.7) 82%,
+      #000 96%,
+      transparent 100%
+    );
+    -webkit-mask-image: var(--hero-band);
+    mask-image: var(--hero-band);
+    -webkit-mask-size: 100% 46%;
+    mask-size: 100% 46%;
     -webkit-mask-repeat: no-repeat;
     mask-repeat: no-repeat;
-    animation: hero-scan 9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-  }
-  /* The leading edge. Same duration and easing as the band, offset so it rides the band's front. */
-  .hero-scanline {
-    background: linear-gradient(to bottom, transparent, rgb(var(--c-signal) / 0.45), transparent);
-    height: 3px;
-    filter: blur(1px);
-    animation: hero-scanline 9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+    animation: hero-scan 9s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
   @keyframes hero-scan {
-    0%, 100% { -webkit-mask-position: 0 -46%; mask-position: 0 -46%; }
-    50% { -webkit-mask-position: 0 102%; mask-position: 0 102%; }
-  }
-  @keyframes hero-scanline {
-    0%, 100% { transform: translateY(-4%); opacity: 0; }
-    12%, 88% { opacity: 1; }
-    50% { transform: translateY(124%); opacity: 0; }
+    0%, 100% { -webkit-mask-position: 0 -48%; mask-position: 0 -48%; }
+    50% { -webkit-mask-position: 0 104%; mask-position: 0 104%; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .hero-dots, .hero-scanline { animation: none; }
-    .hero-dots { -webkit-mask-position: 0 40%; mask-position: 0 40%; }
-    .hero-scanline { opacity: 0; }
+    .hero-dots {
+      animation: none;
+      -webkit-mask-position: 0 42%;
+      mask-position: 0 42%;
+    }
   }
 
   /* frosted glass plate — the marketing card surface */
