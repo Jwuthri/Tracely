@@ -137,7 +137,7 @@ function Bubble({ message }: { message: ChatMessage }) {
   return (
     <div
       className={clsx(
-        "animate-fadeup max-w-[88%] rounded-xl border px-3 py-2 text-[13px] leading-relaxed",
+        "animate-fadeup max-w-[88%] break-words rounded-xl border px-3 py-2 text-[13px] leading-relaxed",
         skin,
         // a provider's error body can be a paragraph of JSON — let it scroll, not eat the panel
         message.error && "max-h-[150px] overflow-y-auto",
@@ -456,7 +456,10 @@ export function Assistant() {
             </div>
           ) : (
             <>
-              <div ref={scroller} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+              <div
+                ref={scroller}
+                className="flex-1 space-y-3 overflow-y-auto overflow-x-hidden px-4 py-3"
+              >
                 {empty ? (
                   <div className="py-6 text-center">
                     <p className="text-[13px] text-fg">Ask me about Tracely.</p>

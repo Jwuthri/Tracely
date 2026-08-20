@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Activation, type ActivationState } from "../Activation";
 
@@ -23,8 +23,10 @@ describe("Activation", () => {
   it("expands the first UNFINISHED step and shows proof for the finished ones", () => {
     render(<Activation {...state({ traces: 1204, evaluators: 3 })} />);
     expect(screen.getByText("2 / 5")).toBeTruthy();
-    expect(screen.getByText("1,204 traces")).toBeTruthy();
-    expect(screen.getByText("3 evaluators")).toBeTruthy();
+    // scoped to the checklist: the pipeline diagram above it captions its nodes with the same counts
+    const list = within(screen.getByRole("list"));
+    expect(list.getByText("1,204 traces")).toBeTruthy();
+    expect(list.getByText("3 evaluators")).toBeTruthy();
     expect(screen.getByText(/Nothing to do here/)).toBeTruthy();   // step 3 is current
     expect(screen.queryByText(/tracely.init/)).toBeNull();          // step 1 collapsed again
   });

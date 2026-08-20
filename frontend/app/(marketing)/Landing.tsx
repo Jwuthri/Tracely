@@ -1,24 +1,57 @@
 "use client";
 
-import { useRef, type ReactNode, type SVGProps } from "react";
+import { useRef, useState, type ReactNode, type SVGProps } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { FleetPeek } from "./_components/FleetPeek";
+import { PipelinePeek } from "@/app/components/PipelinePeek";
 
 gsap.registerPlugin(useGSAP, ScrollTrigger);
 
 const GITHUB = "https://github.com/Jwuthri/Tracely";
 const APP = "/dashboard"; // same app — the authed shell lives in the (app) route group
 const DOCS = "https://doc.tracely-studio.xyz";
+const LINKEDIN = "https://www.linkedin.com/in/julien-wuthrich-a75156119/";
+const INSTALL = 'pip install "tracely-ai[openai]"';
 const API = "https://api.tracely-studio.xyz"; // the hosted backend — self-hosters swap in their own
 
 /* ---------------------------------- ui bits ---------------------------------- */
 
+/* A flat pill of solid colour reads as 2021. The lift comes from three cheap things: a squarer
+   radius, a top-edge inner highlight so the surface catches light, and a hairline ring. */
 const btnPrimary =
-  "inline-flex items-center gap-2 rounded-full bg-signal px-5 py-2.5 text-sm font-semibold text-ink-950 transition duration-300 hover:bg-signal-soft hover:shadow-glow";
+  "group inline-flex items-center gap-2 rounded-xl bg-gradient-to-b from-signal-soft to-signal px-5 py-2.5 text-sm font-semibold text-ink-950 ring-1 ring-inset ring-white/25 shadow-[0_1px_0_rgba(255,255,255,0.35)_inset,0_6px_20px_-8px_rgb(var(--c-signal)/0.65)] transition duration-300 hover:brightness-[1.08] hover:shadow-[0_1px_0_rgba(255,255,255,0.4)_inset,0_8px_28px_-8px_rgb(var(--c-signal)/0.85)]";
 const btnGhost =
-  "inline-flex items-center gap-2 rounded-full border border-line-bright/70 bg-white/[0.04] px-5 py-2.5 text-sm font-medium text-fg transition duration-300 hover:border-line-bright hover:bg-white/[0.08]";
+  "group inline-flex items-center gap-2 rounded-xl border border-line-bright/60 bg-ink-800/70 px-5 py-2.5 text-sm font-medium text-fg-muted shadow-[0_1px_0_rgba(255,255,255,0.05)_inset] backdrop-blur-sm transition duration-300 hover:border-line-bright hover:bg-ink-800 hover:text-fg";
+
+/** The install line, click to copy. Two call sites (hero, final CTA) — hence a component. */
+function CopyCmd({ cmd }: { cmd: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        // ponytail: clipboard is unavailable on insecure origins — the text stays selectable either way.
+        try {
+          await navigator.clipboard.writeText(cmd);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1600);
+        } catch {
+          /* no clipboard — nothing to do */
+        }
+      }}
+      className="inline-flex items-center gap-3 rounded-full border border-line bg-ink-900/70 px-4 py-2 font-mono text-[12.5px] text-fg-muted transition duration-300 hover:border-line-bright hover:text-fg"
+      aria-label={`Copy: ${cmd}`}
+    >
+      <span className="text-fg-faint">$</span>
+      <span>{cmd}</span>
+      <span className={`text-[10px] uppercase tracking-[0.16em] ${copied ? "text-ok" : "text-fg-faint"}`}>
+        {copied ? "copied" : "copy"}
+      </span>
+    </button>
+  );
+}
 
 /* Plans. Deliberately three: self-host is the honest default (it's MIT and complete), Free is
    the hosted on-ramp, Team is the paid tier. Prices live here rather than in a CMS because
@@ -516,17 +549,6 @@ export default function Landing() {
           scrollTrigger: { trigger: q(".sdk-code")[0], start: "top 80%", once: true },
         });
 
-        /* ---------- final wordmark ---------- */
-        gsap.fromTo(
-          q(".mega-word"),
-          { scale: 0.94, y: 40 },
-          {
-            scale: 1,
-            y: 0,
-            ease: "none",
-            scrollTrigger: { trigger: q(".final-cta")[0], start: "top 90%", end: "center 60%", scrub: 1 },
-          }
-        );
       });
 
       /* ---------- mouse parallax on the floating hero cards ---------- */
@@ -592,44 +614,60 @@ export default function Landing() {
 
       <main id="top">
         {/* ================================ hero ================================ */}
-        <section className="hero-wrap relative overflow-hidden px-6 pb-24 pt-40">
+        <section className="hero-wrap relative overflow-hidden px-6 pb-24 pt-32">
           <div className="bg-blueprint pointer-events-none absolute inset-0" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-[760px] overflow-hidden [mask-image:radial-gradient(ellipse_78%_70%_at_50%_36%,#000_30%,transparent_76%)]">
+            <div className="hero-dots absolute inset-0" />
+            <div className="hero-scanline absolute inset-x-0 top-0" />
+          </div>
           <div
             className="pointer-events-none absolute inset-x-0 top-0 h-[520px]"
             style={{ background: "radial-gradient(640px 320px at 50% -8%, rgba(34,211,238,0.16), transparent 70%)" }}
           />
 
           <div className="relative mx-auto max-w-[1200px]">
-            <div className="mx-auto max-w-4xl text-center">
+            <div className="mx-auto max-w-5xl text-center">
               <div className="hero-stagger mx-auto flex max-w-md items-center gap-4">
                 <div className="hairline-x flex-1" />
                 <span className="eyebrow whitespace-nowrap">Trace-native CI/CD for AI agents</span>
                 <div className="hairline-x flex-1" />
               </div>
 
-              <h1 className="mt-8 font-display text-5xl font-bold leading-[1.04] tracking-tight text-fg sm:text-6xl lg:text-[80px] lg:leading-[1.0]">
-                <MaskWords text="Production failures become" />{" "}
-                <MaskWords text="regression tests." wordClass="text-gradient-cyan" />
+              {/* Two hard lines, not a wrap: at any width between the clamp's ends the phrase
+                  breaks where the meaning does, instead of orphaning "tests." on its own row. */}
+              <h1 className="mt-7 font-display text-[clamp(34px,6.6vw,72px)] font-bold leading-[1.03] tracking-[-0.025em] text-fg">
+                <span className="block">
+                  <MaskWords text="Production failures" />
+                </span>
+                <span className="block">
+                  <MaskWords text="become" />{" "}
+                  <MaskWords text="regression tests." wordClass="text-gradient-cyan" />
+                </span>
               </h1>
 
-              <p className="hero-stagger mx-auto mt-7 max-w-2xl text-balance text-lg leading-relaxed text-fg-muted">
-                Tracely is LLM observability that closes the loop: it grades every agent trace as it
-                lands, clusters the failures into issues, freezes the bad runs into hermetic replayable
-                cases — and blocks the pull request that would ship them again.
+              <p className="hero-stagger mx-auto mt-6 max-w-2xl text-balance text-lg leading-relaxed text-fg-muted">
+                LLM observability that closes the loop: Tracely grades every agent trace as it
+                lands, clusters the failures into issues, and freezes the bad runs into hermetic
+                tests that block the pull request shipping them again.
               </p>
 
-              <p className="hero-stagger mt-6 font-mono text-[13px] tracking-tight text-fg-faint">
+              <p className="hero-stagger mt-5 font-mono text-[13px] tracking-tight text-fg-faint">
                 production trace <span className="text-signal">→</span> failure detection{" "}
                 <span className="text-signal">→</span> regression test <span className="text-signal">→</span> CI gate
               </p>
 
-              <div className="hero-stagger mt-9 flex flex-wrap items-center justify-center gap-4">
+              <div className="hero-stagger mt-8 flex flex-wrap items-center justify-center gap-4">
                 <a className={btnPrimary} href={APP}>
                   Open the dashboard <IconArrow className="h-4 w-4" />
                 </a>
                 <a className={btnGhost} href={GITHUB} target="_blank" rel="noreferrer">
                   <IconGitHub className="h-4 w-4" /> Star on GitHub
                 </a>
+              </div>
+
+              <div className="hero-stagger mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
+                <CopyCmd cmd={INSTALL} />
+                <span className="text-[13px] text-fg-faint">two lines of code · MIT · self-host or cloud</span>
               </div>
             </div>
 
@@ -809,6 +847,13 @@ export default function Landing() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div className="sec-reveal mt-16">
+              <PipelinePeek />
+              <p className="mt-5 text-center font-mono text-[12px] text-fg-faint">
+                one trace through the write path — ingest, grade, cluster, gate
+              </p>
             </div>
           </div>
         </section>
@@ -1171,18 +1216,29 @@ export default function Landing() {
         </section>
 
         {/* ================================ final cta ================================ */}
-        <section className="final-cta relative overflow-hidden px-6 pb-10 pt-32">
+        <section id="start" className="final-cta relative scroll-mt-24 overflow-hidden px-6 pb-10 pt-32">
           <div className="bg-blueprint pointer-events-none absolute inset-0" />
           <div
             className="pointer-events-none absolute inset-x-0 bottom-0 h-[420px]"
             style={{ background: "radial-gradient(720px 360px at 50% 108%, rgba(34,211,238,0.13), transparent 70%)" }}
           />
           <div className="relative mx-auto max-w-[1200px] text-center">
-            <p className="mega-word select-none font-display text-[clamp(88px,17vw,220px)] font-extrabold leading-none tracking-tight text-gradient">
-              Tracely
+            <div className="sec-reveal mx-auto flex max-w-md items-center gap-4">
+              <div className="hairline-x flex-1" />
+              <span className="eyebrow whitespace-nowrap">Start in one command</span>
+              <div className="hairline-x flex-1" />
+            </div>
+            <h2 className="sec-reveal mx-auto mt-8 max-w-4xl text-balance font-display text-[clamp(32px,4.6vw,54px)] font-bold leading-[1.06] tracking-[-0.025em] text-fg">
+              Ship agents that <span className="text-gradient-cyan">don&apos;t regress.</span>
+            </h2>
+            <p className="sec-reveal mx-auto mt-6 max-w-2xl text-balance leading-relaxed text-fg-muted">
+              Instrument an agent in two lines, send one trace, and the loop starts on its own —
+              graded on arrival, clustered when it fails, frozen into a case that guards the next PR.
             </p>
-            <p className="sec-reveal mt-4 text-xl text-fg-muted">Ship agents that don&apos;t regress.</p>
-            <div className="sec-reveal mt-9 flex flex-wrap items-center justify-center gap-4 pb-24">
+            <div className="sec-reveal mt-8 flex justify-center">
+              <CopyCmd cmd={INSTALL} />
+            </div>
+            <div className="sec-reveal mt-6 flex flex-wrap items-center justify-center gap-4">
               <a className={btnPrimary} href={APP}>
                 Open the dashboard <IconArrow className="h-4 w-4" />
               </a>
@@ -1191,25 +1247,38 @@ export default function Landing() {
               </a>
             </div>
 
-            <footer className="flex flex-col items-center justify-between gap-4 border-t border-line/60 py-8 sm:flex-row">
-              <p className="flex items-center gap-2.5 text-sm text-fg-faint">
-                <Mark size={22} />
-                <span className="font-display font-bold text-fg-muted">Tracely</span> · trace-native CI/CD for AI
-                agents · © 2026
-              </p>
-              <div className="flex items-center gap-6 text-sm text-fg-faint">
-                {/* Internal links are how crawl budget and authority reach new content pages.
-                    Add every new marketing route here as well as to app/sitemap.ts. */}
-                <a className="transition hover:text-fg" href="/llm-evaluation">LLM evaluation</a>
-                <a className="transition hover:text-fg" href="/llm-as-a-judge">LLM-as-a-judge</a>
-                <a className="transition hover:text-fg" href="/langfuse-alternatives">Compare</a>
-                <a className="transition hover:text-fg" href="/agent-skill">Agent skill</a>
-                <a className="transition hover:text-fg" href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
-                <a className="transition hover:text-fg" href={DOCS} target="_blank" rel="noreferrer">Docs</a>
-                <a className="transition hover:text-fg" href={APP}>Dashboard</a>
-                <a className="transition hover:text-fg" href={`${GITHUB}/tree/master/design`} target="_blank" rel="noreferrer">
-                  Design dossier
-                </a>
+            <p className="sec-reveal mt-12 pb-16 text-sm text-fg-faint">
+              Built and maintained by{" "}
+              <a
+                className="font-medium text-fg-muted underline decoration-line-bright underline-offset-4 transition hover:text-signal"
+                href={LINKEDIN}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Julien Wuthrich
+              </a>
+            </p>
+
+            <footer className="border-t border-line/60 pt-8 pb-10 text-left">
+              <div className="flex flex-col items-center justify-between gap-5 sm:flex-row">
+                <p className="flex items-center gap-2.5 text-sm text-fg-faint">
+                  <Mark size={22} />
+                  <span className="font-display font-bold text-fg-muted">Tracely</span> · © 2026
+                </p>
+                <div className="flex items-center gap-6 text-sm text-fg-muted">
+                  <a className="transition hover:text-fg" href={DOCS} target="_blank" rel="noreferrer">Docs</a>
+                  <a className="transition hover:text-fg" href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
+                  <a className="transition hover:text-fg" href={LINKEDIN} target="_blank" rel="noreferrer">LinkedIn</a>
+                </div>
+              </div>
+              {/* Internal links are how crawl budget and authority reach new content pages, so they
+                  stay — demoted to their own quiet row rather than crowding the primary one.
+                  Add every new marketing route here as well as to app/sitemap.ts. */}
+              <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[12.5px] text-fg-faint sm:justify-start">
+                <a className="transition hover:text-fg-muted" href="/llm-evaluation">LLM evaluation</a>
+                <a className="transition hover:text-fg-muted" href="/llm-as-a-judge">LLM-as-a-judge</a>
+                <a className="transition hover:text-fg-muted" href="/langfuse-alternatives">Langfuse alternatives</a>
+                <a className="transition hover:text-fg-muted" href="/agent-skill">Agent skill</a>
               </div>
             </footer>
           </div>

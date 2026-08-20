@@ -1,4 +1,5 @@
 import { CopyId } from "./CopyId";
+import { PipelinePeek } from "./PipelinePeek";
 
 /* The first-run path, told as the product's own loop: trace → grade → failure → case → gate.
    Every step's done-ness is DERIVED from real counts — there is no stored progress to drift
@@ -154,6 +155,20 @@ TRACELY_API=${s.endpoint} TRACELY_KEY=${s.ingestKey} \\
         <span className="shrink-0 font-mono text-[11px] text-fg-faint">
           {done} / {steps.length}
         </span>
+      </div>
+      {/* The same five steps as a picture: a stage with nothing in it stays dark, so the diagram
+          shows where the loop currently stops before the list explains what to do about it. */}
+      <div className="border-b border-line/50 px-4 py-5">
+        <PipelinePeek
+          live={{
+            traces: s.traces,
+            evaluators: s.evaluators,
+            failures: s.failures,
+            clusters: s.clusters,
+            cases: s.cases,
+            gates: s.gates,
+          }}
+        />
       </div>
       <ol className="divide-y divide-line/50">
         {steps.map((step, i) => (

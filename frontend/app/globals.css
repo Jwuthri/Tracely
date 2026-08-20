@@ -251,6 +251,23 @@
   .assistant-md > * + * {
     @apply mt-2;
   }
+  /* A URL or a query string has no spaces, so it has no break opportunity: left alone it sets a
+     min-content width wider than the bubble and drags the whole panel into horizontal scroll.
+     `anywhere` (not `break-word`) is the one that also shrinks min-content, which is what the
+     bubble's max-width needs to hold. */
+  .assistant-md,
+  .assistant-md code {
+    overflow-wrap: anywhere;
+  }
+  /* A fenced block keeps its formatting, so it scrolls on its own rather than wrapping — capped
+     at the bubble so the scrollbar is the block's, never the conversation's. */
+  .assistant-md pre {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .assistant-md pre code {
+    overflow-wrap: normal;
+  }
   .text-balance {
     text-wrap: balance;
   }
@@ -271,6 +288,42 @@
     mask-image: radial-gradient(ellipse 90% 80% at 50% 30%, black 30%, transparent 75%);
     -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 30%, black 30%, transparent 75%);
   }
+  /* Hero: a scan sweeps a dot field — the page's own thesis, an evaluator passing over a trace.
+     Two masked layers instead of a WebGL canvas: it costs no dependency, no GPU context and no
+     LCP (the hero subhead is Lighthouse's LCP element), and it renders the same everywhere. */
+  .hero-dots {
+    background-image: radial-gradient(circle at center, rgb(var(--c-signal) / 0.5) 1px, transparent 1.6px);
+    background-size: 26px 26px;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 35%, #000 65%, transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 35%, #000 65%, transparent);
+    -webkit-mask-size: 100% 44%;
+    mask-size: 100% 44%;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    animation: hero-scan 9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+  /* The leading edge. Same duration and easing as the band, offset so it rides the band's front. */
+  .hero-scanline {
+    background: linear-gradient(to bottom, transparent, rgb(var(--c-signal) / 0.45), transparent);
+    height: 3px;
+    filter: blur(1px);
+    animation: hero-scanline 9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+  @keyframes hero-scan {
+    0%, 100% { -webkit-mask-position: 0 -46%; mask-position: 0 -46%; }
+    50% { -webkit-mask-position: 0 102%; mask-position: 0 102%; }
+  }
+  @keyframes hero-scanline {
+    0%, 100% { transform: translateY(-4%); opacity: 0; }
+    12%, 88% { opacity: 1; }
+    50% { transform: translateY(124%); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-dots, .hero-scanline { animation: none; }
+    .hero-dots { -webkit-mask-position: 0 40%; mask-position: 0 40%; }
+    .hero-scanline { opacity: 0; }
+  }
+
   /* frosted glass plate — the marketing card surface */
   .glass {
     @apply rounded-2xl border border-line/80 bg-ink-800/55 backdrop-blur-md shadow-frame;
