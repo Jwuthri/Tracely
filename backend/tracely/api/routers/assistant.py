@@ -14,6 +14,7 @@ so the widget can show the work as it happens:
     {"type": "delta",     "text": str}                  a piece of the answer
     {"type": "done",      "chat_id", "title", "reply"}  saved; `reply` is authoritative
     {"type": "disabled"}                                no LLM key on this deployment
+    {"type": "over_budget", "spent_usd", "budget_usd"}  this conversation spent its allowance
     {"type": "error",     "detail": str}                the turn failed; nothing was stored
 
 The tools run as the CALLER: the request's own credential headers are forwarded into them

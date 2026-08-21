@@ -175,6 +175,28 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+# The tool a question almost always needs, kept out of the selector's hands: if the picker
+# returns nothing useful, an agent with no way to look anything up can only guess.
+ALWAYS_TOOLS = ["search_traces"]
+
+
+def spent_usd(history: list[dict]) -> float:
+    """What this conversation has already cost us, in dollars.
+
+    Stored per assistant turn in the transcript JSON rather than a column of its own — the row
+    is already loaded and rewritten every turn, so a migration would buy nothing.
+    """
+    return sum(float(m.get("cost_usd") or 0.0) for m in history if m.get("role") == "assistant")
+
+
+def _turn_cost_usd(usage: dict) -> float:
+    return provider.estimate_cost_usd(
+        usage.get("model") or settings.assistant_model,
+        int(usage.get("input_tokens") or 0),
+        int(usage.get("output_tokens") or 0),
+    )
+
+
 async def answer_stream(
     project_id: str,
     user_id: str | None,
@@ -207,6 +229,17 @@ async def answer_stream(
             return (list(row.messages or []) if row else [], row.title if row else "")
 
     history, existing_title = await run_in_threadpool(load)
+
+    # This conversation's own budget of OUR credit. Checked here so a chat that already spent it
+    # costs nothing more, and passed to the loop below so a single runaway turn can't blow it in
+    # one go — the two failure modes are different and both are real.
+    budget = float(settings.assistant_budget_usd or 0.0)
+    already = spent_usd(history)
+    if budget > 0 and already >= budget:
+        log.info("assistant_over_budget", project_id=project_id, spent=already, budget=budget)
+        yield {"type": "over_budget", "spent_usd": round(already, 4), "budget_usd": budget}
+        return
+
     history.append({"role": "user", "content": message, "attachments": attachments, "ts": _now()})
 
     # OUR key for the model, deliberately: the assistant explains Tracely, so it must answer in a
@@ -228,6 +261,15 @@ async def answer_stream(
                 model=settings.assistant_model,
                 temperature=0.3,
                 reasoning_effort=settings.assistant_reasoning_effort,
+                # Built inside the key scope on purpose: the tool-picker constructs its own
+                # (cheap) model, and `get_chat_model` reads the scope as it does so.
+                middleware=provider.agent_middleware(
+                    selector_model=settings.assistant_tool_selector_model,
+                    max_tools=settings.assistant_max_tools,
+                    max_model_calls=settings.assistant_max_model_calls,
+                    always_include=ALWAYS_TOOLS,
+                ),
+                budget_usd=(budget - already) if budget > 0 else None,
                 # This turn spends OUR credit, so log what it cost and for whom — otherwise the
                 # only place the assistant's bill shows up is the OpenRouter invoice,
                 # undifferentiated. A tool loop is several model calls; the usage covers them all.
@@ -236,6 +278,8 @@ async def answer_stream(
                     project_id=project_id,
                     images=len(images),
                     attachments=len(attachments),
+                    cost_usd=round(_turn_cost_usd(usage), 6),
+                    chat_spent_usd=round(already + _turn_cost_usd(usage), 6),
                     **usage,
                 ),
             )
@@ -243,16 +287,33 @@ async def answer_stream(
         yield {"type": "disabled"}
         return
 
-    reply = ""
+    reply, usage, stopped = "", {}, None
     async for event in stream:
         if event.get("type") == "final":
             reply = str(event.get("text") or "").strip()
+            usage, stopped = event.get("usage") or {}, event.get("stopped")
             continue
         yield event
+
+    if stopped == "budget":
+        # Out of credit mid-loop. Tell the user the conversation is finished rather than raising:
+        # "something broke" is the wrong lesson, and they still have whatever it managed to say.
+        note = (
+            "I've reached this conversation's spend limit, so I stopped here — "
+            "start a new conversation to keep going."
+        )
+        reply = f"{reply}\n\n_{note}_" if reply else note
     if not reply:
         raise RuntimeError("the model finished without an answer")
 
-    history.append({"role": "assistant", "content": reply, "ts": _now()})
+    history.append(
+        {
+            "role": "assistant",
+            "content": reply,
+            "ts": _now(),
+            "cost_usd": round(_turn_cost_usd(usage), 6),
+        }
+    )
 
     def save() -> tuple[str, str]:
         with SyncSessionLocal() as s:

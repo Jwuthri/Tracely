@@ -174,10 +174,12 @@ function Thinking() {
   );
 }
 
+// Questions that make the agent USE something. The old set ("What is a regression case?") was
+// written for a bot that could only explain the product, and quietly taught people it still can.
 const SUGGESTIONS = [
-  "What is a regression case?",
-  "How do I gate a pull request?",
-  "What should I look at first?",
+  "Why did my last conversation fail?",
+  "What's my biggest failure cluster?",
+  "Add a column that checks the agent stayed on topic",
 ];
 
 const ctrl =
@@ -198,6 +200,9 @@ export function Assistant() {
   const [notice, setNotice] = useState("");
   const [noKey, setNoKey] = useState(false);
   const booted = useRef(false);
+  // The in-flight turn, so it can be cancelled: a tool loop runs for tens of seconds and keeps
+  // spending after the user has stopped caring (closing the panel, switching chats, or saying so).
+  const inflight = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const filePicker = useRef<HTMLInputElement>(null);
@@ -301,6 +306,9 @@ export function Assistant() {
     setBusy(true);
     setNoKey(false);
     setActivity("");
+    stop(); // a previous turn should never outlive the one replacing it
+    const ctl = new AbortController();
+    inflight.current = ctl;
     // Whether the answer bubble exists yet: the first delta appends it, every later one grows it.
     // A ref, not state, because the frames arrive faster than a re-render.
     let started = false;
@@ -329,6 +337,11 @@ export function Assistant() {
             );
           }
           if (e.type === "disabled") return setNoKey(true);
+          if (e.type === "over_budget")
+            return fail(
+              `This conversation has used its $${e.budget_usd.toFixed(2)} assistant budget. ` +
+                "Start a new one to keep going.",
+            );
           if (e.type === "error") return fail(e.detail || "I couldn't reach the model.");
           if (e.type === "done") {
             // `reply` is authoritative — the deltas are a preview of it, not the record.
@@ -346,16 +359,32 @@ export function Assistant() {
             loadChats();
           }
         },
+        ctl.signal,
       );
-    } catch {
-      fail("I couldn't reach the model.");
+    } catch (err) {
+      // An abort is the user's own doing — whatever streamed so far stands, unremarked.
+      if (!(err instanceof DOMException && err.name === "AbortError"))
+        fail("I couldn't reach the model.");
     } finally {
+      if (inflight.current === ctl) inflight.current = null;
       setBusy(false);
       setActivity("");
     }
   }
 
+  function stop() {
+    inflight.current?.abort();
+    inflight.current = null;
+  }
+
+  // Closing the panel cancels whatever is streaming. There are four ways to close it (button,
+  // Escape, launcher, navigation) and a turn kept running costs us money nobody is reading.
+  useEffect(() => {
+    if (!open) inflight.current?.abort();
+  }, [open]);
+
   function newChat() {
+    stop(); // the answer was for the conversation being left behind
     setMessages([]);
     setChatId(null);
     setPending([]);
@@ -587,15 +616,27 @@ export function Assistant() {
                     aria-label="Message the assistant"
                     className="max-h-[120px] flex-1 resize-none bg-transparent px-1 py-1.5 text-[13px] leading-relaxed text-fg placeholder:text-fg-faint focus:outline-none"
                   />
-                  <button
-                    type="button"
-                    onClick={() => send(draft)}
-                    disabled={!canSend}
-                    aria-label="Send"
-                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-signal/40 bg-signal/15 text-signal transition-all hover:bg-signal/25 hover:shadow-glow disabled:opacity-40 disabled:hover:shadow-none"
-                  >
-                    <IconSend className="h-4 w-4" />
-                  </button>
+                  {busy ? (
+                    <button
+                      type="button"
+                      onClick={stop}
+                      aria-label="Stop"
+                      title="Stop"
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-ink-800 text-fg-muted transition-colors hover:border-fail/40 hover:text-fail"
+                    >
+                      <span className="h-2.5 w-2.5 rounded-[2px] bg-current" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => send(draft)}
+                      disabled={!canSend}
+                      aria-label="Send"
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-signal/40 bg-signal/15 text-signal transition-all hover:bg-signal/25 hover:shadow-glow disabled:opacity-40 disabled:hover:shadow-none"
+                    >
+                      <IconSend className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             </>

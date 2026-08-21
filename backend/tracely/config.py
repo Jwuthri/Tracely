@@ -141,6 +141,21 @@ class Settings(BaseSettings):
     # "" disables thinking; otherwise minimal|low|medium|high. Medium costs latency and reasoning
     # tokens on every turn — drop to "low" if replies feel slow for what they are.
     assistant_reasoning_effort: str = "medium"
+    # The assistant is an agent with ~30 tools, and every tool schema rides along on EVERY model
+    # call of a tool loop — the dominant cost of a turn, paid several times over. So a cheap
+    # model picks the handful of tools a question actually needs first
+    # (`LLMToolSelectorMiddleware`), and the expensive model only ever sees those. One extra
+    # small call buys a much smaller prompt on all the calls that follow.
+    assistant_tool_selector_model: str = "openai/gpt-oss-120b"
+    assistant_max_tools: int = 8  # per turn, after selection; 0 disables selection entirely
+    # Runaway guard: a model that keeps calling tools without concluding. `end` stops the loop
+    # and lets it answer with what it has, rather than erroring the turn away.
+    assistant_max_model_calls: int = 12
+    # What one CONVERSATION may spend of our credit, in USD. Cumulative across its turns — at
+    # roughly half a cent a turn this is ~200 turns, so it catches a loop, not a heavy user.
+    # Enforced before a turn starts AND mid-stream, because one turn's tool loop can run away
+    # on its own. Must be float dollars: `estimate_cost_usd_cents` rounds a normal turn to 0.
+    assistant_budget_usd: float = 1.0
 
     # failure intelligence (embeddings + agents) — embeddings ride the OpenRouter key too
     # (OpenAI-compatible /embeddings); this key is only the direct-OpenAI fallback.

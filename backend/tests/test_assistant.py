@@ -334,3 +334,147 @@ async def test_signed_out_callers_share_the_projects_chats(db, model):
     with svc.SyncSessionLocal() as s:
         assert [c.id for c in svc.repo.assistant_chat_list(s, "p1", None)] == [made["chat_id"]]
         assert svc.repo.assistant_chat_get(s, "p1", None, made["chat_id"]) is not None
+
+
+# ---------------------------------------------------------------- what it costs us
+
+
+def test_a_normal_turn_is_invisible_to_integer_cents():
+    """Why the budget is float dollars. A turn costs about half a cent, and the cents estimator
+    the scores use rounds that to 0 — accumulate it and a cap never fires, however long it runs."""
+    assert provider.estimate_cost_usd_cents("google/gemini-3.7-flash", 10_000, 550) == 0
+    assert provider.estimate_cost_usd("google/gemini-3.7-flash", 10_000, 550) > 0.004
+
+
+def test_spend_accrues_over_a_conversations_assistant_turns():
+    history = [
+        {"role": "user", "content": "one"},
+        {"role": "assistant", "content": "a", "cost_usd": 0.004},
+        {"role": "user", "content": "two"},
+        {"role": "assistant", "content": "b", "cost_usd": 0.006},
+    ]
+    assert svc.spent_usd(history) == pytest.approx(0.01)
+    assert svc.spent_usd([{"role": "assistant", "content": "old"}]) == 0.0  # pre-budget turns
+
+
+async def test_a_turn_records_what_it_cost(db, model, monkeypatch):
+    monkeypatch.setattr(
+        svc.provider, "stream_agent",
+        lambda prompt, **kw: _stream({
+            "type": "final", "text": "hi", "usage": {
+                "model": "google/gemini-3.7-flash", "input_tokens": 10_000, "output_tokens": 550,
+            },
+        }),
+    )
+    out = await turn("p1", "u1", chat_id=None, message="hi")
+    with svc.SyncSessionLocal() as s:
+        stored = svc.repo.assistant_chat_get(s, "p1", "u1", out["chat_id"]).messages
+    assert stored[-1]["cost_usd"] == pytest.approx(0.00478, abs=1e-4)
+
+
+async def test_a_conversation_that_spent_its_budget_is_refused_before_the_model(db, monkeypatch):
+    """The cheapest turn is the one never sent. Refusing must not cost a model call."""
+    monkeypatch.setattr(svc.provider, "use_server_key", contextlib.nullcontext)
+    monkeypatch.setattr(svc.provider, "llm_enabled", lambda: True)
+    monkeypatch.setattr(
+        svc.provider, "stream_agent",
+        lambda *a, **k: pytest.fail("an over-budget conversation must not reach the model"),
+    )
+    monkeypatch.setattr(svc.settings, "assistant_budget_usd", 0.01)
+
+    with svc.SyncSessionLocal() as s:
+        saved = svc.repo.assistant_chat_save(
+            s, "p1", "u1", chat_id=None, title="spendy",
+            messages=[{"role": "assistant", "content": "prior", "cost_usd": 0.02}],
+        )
+        chat_id = saved.id
+
+    out = await turn("p1", "u1", chat_id=chat_id, message="more please")
+    assert out["type"] == "over_budget"
+    assert out["budget_usd"] == 0.01 and out["spent_usd"] == pytest.approx(0.02)
+
+
+async def test_the_turns_remaining_budget_is_what_reaches_the_loop(db, model, monkeypatch):
+    """A single runaway turn has to be stoppable too, so the loop gets what's LEFT, not the whole
+    allowance — otherwise turn two of a nearly-spent chat could spend the budget over again."""
+    monkeypatch.setattr(svc.settings, "assistant_budget_usd", 1.0)
+    with svc.SyncSessionLocal() as s:
+        chat_id = svc.repo.assistant_chat_save(
+            s, "p1", "u1", chat_id=None, title="t",
+            messages=[{"role": "assistant", "content": "prior", "cost_usd": 0.25}],
+        ).id
+
+    await turn("p1", "u1", chat_id=chat_id, message="again")
+    assert model["budget_usd"] == pytest.approx(0.75)
+
+
+async def test_a_budget_stop_mid_loop_is_an_answer_not_an_error(db, monkeypatch):
+    """It already did the work and charged us; ending the turn with a raise would throw that away
+    and tell the user nothing about why."""
+    monkeypatch.setattr(svc.provider, "use_server_key", contextlib.nullcontext)
+    monkeypatch.setattr(svc.provider, "llm_enabled", lambda: True)
+    monkeypatch.setattr(
+        svc.provider, "stream_agent",
+        lambda *a, **k: _stream(
+            {"type": "tool", "name": "list_traces", "args": {}},
+            {"type": "final", "text": "", "usage": {}, "stopped": "budget"},
+        ),
+    )
+    out = await turn("p1", "u1", chat_id=None, message="loop forever")
+    assert out["type"] == "done"
+    assert "spend limit" in out["reply"]
+
+
+# ---------------------------------------------------------------- the tool picker
+
+
+def _fake_chat_model():
+    """The selector validates its model is a real `BaseChatModel` (a string would send it off to
+    langchain's own provider resolution — off OpenRouter, off our key), so the stub must be one."""
+    from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+
+    return GenericFakeChatModel(messages=iter([]))
+
+
+def test_selection_is_optional_and_the_loop_cap_is_not(monkeypatch):
+    monkeypatch.setattr(provider, "get_chat_model", lambda *a, **k: _fake_chat_model())
+
+    both = provider.agent_middleware(selector_model="x/y", max_tools=8, max_model_calls=12)
+    assert len(both) == 2
+
+    # ASSISTANT_MAX_TOOLS=0 hands the model every tool again — the escape hatch if a picker
+    # ever picks badly. The runaway cap stays either way.
+    off = provider.agent_middleware(selector_model="x/y", max_tools=0, max_model_calls=12)
+    assert len(off) == 1
+
+
+def test_the_picker_runs_on_our_key_not_langchains_own_provider_resolution(monkeypatch):
+    """Passing a model *string* would let langchain build its own client — off OpenRouter, off
+    our key, outside `provider`. The whole point of the gateway is that this can't happen."""
+    asked: list = []
+    monkeypatch.setattr(
+        provider, "get_chat_model", lambda m, *a, **k: asked.append(m) or _fake_chat_model()
+    )
+    provider.agent_middleware(selector_model="openai/gpt-oss-120b", max_tools=4)
+    assert asked == ["openai/gpt-oss-120b"]
+
+
+async def test_the_tool_picker_decides_once_per_turn(monkeypatch):
+    """Selection reads the last user message, which cannot change inside a turn — so re-running
+    it per model call pays for an extra model call to be told the same thing."""
+    monkeypatch.setattr(provider, "get_chat_model", lambda *a, **k: _fake_chat_model())
+    selector = provider.agent_middleware(selector_model="x/y", max_tools=3)[0]
+    selector._picked = ["already-chosen"]  # as if an earlier model call had selected
+
+    overridden: dict = {}
+
+    class Request:
+        def override(self, **kw):
+            overridden.update(kw)
+            return "reused"
+
+    async def handler(request):
+        return request
+
+    assert await selector.awrap_model_call(Request(), handler) == "reused"
+    assert overridden["tools"] == ["already-chosen"]

@@ -126,6 +126,10 @@ _FALLBACK_PRICING_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     "openai/gpt-oss-120b":             (0.037, 0.17),
     "google/gemini-3.5-flash-lite":    (0.30,  2.50),
     "google/gemini-3.6-flash":         (1.50,  7.50),
+    # Not in the dropdown either, but it is the shipped `assistant_model` — and the assistant's
+    # spend cap is priced from this table when the catalog is unreachable. Unpriced would mean a
+    # cap that silently never fires, so this row is load-bearing, not decorative.
+    "google/gemini-3.7-flash":         (0.375, 1.875),
     "google/gemini-3.1-pro-preview":   (2.00, 12.00),
     "anthropic/claude-haiku-4.5":      (1.00,  5.00),
     "anthropic/claude-sonnet-5":       (2.00, 10.00),
@@ -502,6 +506,19 @@ def estimate_cost_usd_cents(model_id: str, input_tokens: int, output_tokens: int
     return int(round(dollars * 100))
 
 
+def estimate_cost_usd(model_id: str, input_tokens: int, output_tokens: int) -> float:
+    """Per-call cost in **USD as a float** — the budget twin of `estimate_cost_usd_cents`.
+
+    Both exist on purpose. Scores store integer cents so repeated arithmetic can't drift; a
+    spend cap cannot use them, because a normal assistant turn costs about half a cent and
+    `int(round(0.47))` is 0 — accumulate that and the cap never fires however long the loop runs.
+    """
+    pin, pout = model_pricing(model_id)
+    if pin is None and pout is None:
+        return 0.0
+    return (input_tokens * (pin or 0.0) + output_tokens * (pout or 0.0)) / 1_000_000.0
+
+
 def list_models() -> list[dict[str, str]]:
     """The curated judge-model choices for the evaluator UI: `[{id, label}, …]`. Verified
     against the live OpenRouter catalog when reachable; the static list otherwise — narrowed to
@@ -607,6 +624,14 @@ def _provider_error(exc: TypeError) -> Exception:
         "Most often OpenRouter credit exhaustion — check the balance at "
         "https://openrouter.ai/settings/credits. Lowering LLM_MAX_OUTPUT_TOKENS also "
         f"reduces the credit OpenRouter reserves per call. [{exc}]"
+    )
+
+
+def _spent_usd(ai_messages: list, model: str | None) -> float:
+    """What this run has cost so far, in dollars — the budget check's input."""
+    usage = _extract_usage({"messages": ai_messages}, model)
+    return estimate_cost_usd(
+        usage["model"], usage["input_tokens"], usage["output_tokens"]
     )
 
 
@@ -764,6 +789,67 @@ def run_text_agent(
     return text
 
 
+def _cached_tool_selector(**kw):
+    """`LLMToolSelectorMiddleware` that selects ONCE per turn, not once per model call.
+
+    Upstream picks tools from the last user message — identical on every model call of a tool
+    loop — so re-running it each time buys nothing and pays for a whole extra model call to
+    learn the same answer. One of these is built per turn, so caching on the instance is
+    exactly per-turn. (Declared inside the function only because the import is a lazy one.)
+    """
+    from langchain.agents.middleware import LLMToolSelectorMiddleware
+
+    class CachedToolSelector(LLMToolSelectorMiddleware):
+        _picked = None
+
+        async def awrap_model_call(self, request, handler):
+            if self._picked is not None:
+                return await handler(request.override(tools=self._picked))
+
+            async def capture(modified):
+                self._picked = modified.tools
+                return await handler(modified)
+
+            return await super().awrap_model_call(request, capture)
+
+    return CachedToolSelector(**kw)
+
+
+def agent_middleware(
+    *,
+    selector_model: str = "",
+    max_tools: int = 0,
+    max_model_calls: int = 0,
+    always_include: list[str] | None = None,
+) -> list:
+    """The guards an agent loop runs under: a cheap tool-picker, and a cap on how long it can go.
+
+    The picker is the big lever on cost. Every tool's JSON schema rides along on EVERY model call
+    of a tool loop, so a 30-tool agent pays for 30 schemas several times per turn. Letting a much
+    cheaper model read the question and name the handful that matter cuts the expensive model's
+    prompt to a fraction, for one small call — the reason this is worth a round trip.
+
+    Build it inside the caller's key scope: the selector's model is constructed here, and
+    `get_chat_model` reads the scope contextvar as it does so.
+    """
+    from langchain.agents.middleware import ModelCallLimitMiddleware
+
+    mw: list = []
+    if max_tools > 0 and selector_model:
+        mw.append(
+            _cached_tool_selector(
+                model=get_chat_model(selector_model),
+                max_tools=max_tools,
+                always_include=always_include or [],
+            )
+        )
+    if max_model_calls > 0:
+        # `end` — let it answer with what it has. A runaway loop that errors the turn away tells
+        # the user nothing and still charged us for every call it made.
+        mw.append(ModelCallLimitMiddleware(run_limit=max_model_calls, exit_behavior="end"))
+    return mw
+
+
 def stream_agent(
     prompt: str | list[dict],
     *,
@@ -773,6 +859,8 @@ def stream_agent(
     temperature: float = 0.0,
     reasoning_effort: str | None = None,
     on_usage: UsageSink | None = None,
+    middleware: list | None = None,
+    budget_usd: float | None = None,
 ) -> AsyncIterator[dict]:
     """A tool-using agent, streamed. The in-app assistant's primitive.
 
@@ -781,7 +869,14 @@ def stream_agent(
         {"type": "tool",      "name": str, "args": dict}   the agent is calling a tool
         {"type": "tool_done", "name": str, "ok": bool}     that tool came back
         {"type": "delta",     "text": str}                 a piece of the final answer
-        {"type": "final",     "text": str, "usage": dict}  the whole answer, once
+        {"type": "final",     "text": str, "usage": dict, "stopped": str|None}   once, at the end
+
+    `middleware` is passed to `create_agent` — how the caller narrows the toolset per turn or
+    caps the loop (see `langchain.agents.middleware`).
+
+    `budget_usd` stops the loop as soon as this run's own spend reaches it, and marks the final
+    frame `stopped="budget"`. Checked after each model call rather than only at the end, because
+    the thing worth catching — a model calling tools for ever — never reaches the end.
 
     NOT an `async def`, deliberately: an async generator's body doesn't run until the first
     `__anext__`, which would build the model AFTER the caller's `use_server_key()` /
@@ -798,48 +893,58 @@ def stream_agent(
         get_chat_model(model, temperature, reasoning_effort),
         tools=tools,
         system_prompt=system_prompt,
+        middleware=middleware or [],
     )
 
     async def _run() -> AsyncIterator[dict]:
         ai_messages: list = []  # every model turn, for the token roll-up: a tool loop is N calls
         text = ""
+        stopped: str | None = None
         with _recorded(_blocks_text(prompt), system_prompt, model) as sink:
             try:
-                async for mode, payload in agent.astream(
-                    {"messages": [{"role": "user", "content": prompt}]},
-                    # `messages` carries token chunks, `updates` complete messages per node — the
-                    # first is what streams, the second is what's reliable to read tool calls and
-                    # usage off. Asking for both costs nothing and saves reassembling either.
-                    stream_mode=["updates", "messages"],
-                ):
-                    if mode == "messages":
-                        chunk, meta = payload
-                        if meta.get("langgraph_node") == "model" and getattr(chunk, "text", ""):
-                            yield {"type": "delta", "text": chunk.text}
-                        continue
-                    for node, update in (payload or {}).items():
-                        for msg in (update or {}).get("messages", []) or []:
-                            if node == "tools":
-                                yield {
-                                    "type": "tool_done",
-                                    "name": getattr(msg, "name", "") or "",
-                                    "ok": getattr(msg, "status", "success") != "error",
-                                }
-                                continue
-                            ai_messages.append(msg)
-                            text = _message_text(msg) or text
-                            for call in getattr(msg, "tool_calls", None) or []:
-                                yield {
-                                    "type": "tool",
-                                    "name": call.get("name") or "",
-                                    "args": call.get("args") or {},
-                                }
+                # `aclosing` because we may `break` on budget: abandoning langgraph's generator
+                # without closing it leaves the run's tasks to a garbage collector.
+                async with contextlib.aclosing(
+                    agent.astream(
+                        {"messages": [{"role": "user", "content": prompt}]},
+                        # `messages` carries token chunks, `updates` complete messages per node —
+                        # the first is what streams, the second is what's reliable to read tool
+                        # calls and usage off. Both costs nothing and saves reassembling either.
+                        stream_mode=["updates", "messages"],
+                    )
+                ) as stream:
+                    async for mode, payload in stream:
+                        if mode == "messages":
+                            chunk, meta = payload
+                            if meta.get("langgraph_node") == "model" and getattr(chunk, "text", ""):
+                                yield {"type": "delta", "text": chunk.text}
+                            continue
+                        for node, update in (payload or {}).items():
+                            for msg in (update or {}).get("messages", []) or []:
+                                if node == "tools":
+                                    yield {
+                                        "type": "tool_done",
+                                        "name": getattr(msg, "name", "") or "",
+                                        "ok": getattr(msg, "status", "success") != "error",
+                                    }
+                                    continue
+                                ai_messages.append(msg)
+                                text = _message_text(msg) or text
+                                for call in getattr(msg, "tool_calls", None) or []:
+                                    yield {
+                                        "type": "tool",
+                                        "name": call.get("name") or "",
+                                        "args": call.get("args") or {},
+                                    }
+                        if budget_usd is not None and _spent_usd(ai_messages, model) >= budget_usd:
+                            stopped = "budget"
+                            break
             except TypeError as exc:
                 raise _provider_error(exc) from exc
             usage = _extract_usage({"messages": ai_messages}, model)
             sink.append((text, usage))
         if on_usage is not None:
             on_usage(usage)
-        yield {"type": "final", "text": text, "usage": usage}
+        yield {"type": "final", "text": text, "usage": usage, "stopped": stopped}
 
     return _run()

@@ -8,6 +8,7 @@ export type AssistantEvent =
   | { type: "delta"; text: string }
   | { type: "done"; chat_id: string; title: string; reply: string }
   | { type: "disabled" }
+  | { type: "over_budget"; spent_usd: number; budget_usd: number }
   | { type: "error"; detail: string };
 
 export type TurnRequest = {

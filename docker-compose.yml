@@ -50,6 +50,13 @@ x-app-env: &app-env
   # pay for. ASSISTANT_REASONING_EFFORT: ""|minimal|low|medium|high.
   ASSISTANT_MODEL: ${ASSISTANT_MODEL:-google/gemini-3.7-flash}
   ASSISTANT_REASONING_EFFORT: ${ASSISTANT_REASONING_EFFORT:-medium}
+  # A cheap model picks which of the assistant's ~30 tools a question needs, so the expensive
+  # one never carries all of them. ASSISTANT_MAX_TOOLS=0 turns selection off.
+  ASSISTANT_TOOL_SELECTOR_MODEL: ${ASSISTANT_TOOL_SELECTOR_MODEL:-openai/gpt-oss-120b}
+  ASSISTANT_MAX_TOOLS: ${ASSISTANT_MAX_TOOLS:-8}
+  ASSISTANT_MAX_MODEL_CALLS: ${ASSISTANT_MAX_MODEL_CALLS:-12}
+  # USD one conversation may spend of OUR credit, cumulative across its turns.
+  ASSISTANT_BUDGET_USD: ${ASSISTANT_BUDGET_USD:-1.0}
   META_ANALYSIS_MODEL: ${META_ANALYSIS_MODEL:-openai/gpt-5-mini}
   ROLLING_SUMMARY_MODEL: ${ROLLING_SUMMARY_MODEL:-openai/gpt-5.4-nano}
   ROLLING_SUMMARY_STEP_MAX_TOKENS: ${ROLLING_SUMMARY_STEP_MAX_TOKENS:-512}

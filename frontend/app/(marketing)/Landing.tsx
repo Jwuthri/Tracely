@@ -660,9 +660,6 @@ export default function Landing() {
                 </a>
               </div>
 
-              <div className="hero-stagger mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
-                <CopyCmd cmd={INSTALL} />
-              </div>
             </div>
 
             {/* ------------------------- the self-writing trace ------------------------- */}
