@@ -27,6 +27,17 @@ def db(tmp_path, monkeypatch):
     return engine
 
 
+@pytest.fixture(autouse=True)
+def no_real_chat_model(monkeypatch):
+    """No test in this file may construct a real chat client.
+
+    Stubbing `stream_agent` is not enough: `agent_middleware(...)` is an ARGUMENT to it, so it is
+    evaluated first and eagerly builds the tool-picker's model — which raises without credentials.
+    That is what turned CI red while every laptop stayed green.
+    """
+    monkeypatch.setattr(provider, "get_chat_model", lambda *a, **k: _fake_chat_model())
+
+
 def _stream(*events):
     """An async generator over `events` — what a stubbed `stream_agent` hands back."""
 

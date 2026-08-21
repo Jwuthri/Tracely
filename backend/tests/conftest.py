@@ -19,6 +19,15 @@ os.environ["RESEND_API_KEY"] = ""
 # .env points at — i.e. the developer's own workspace, once per run. Tests assert on the recording
 # payload (`domain/introspection.py`), which is pure; nothing here needs it emitted.
 os.environ["INTROSPECTION_ENABLED"] = "false"
+# Fourth time, same class of bug, and the one that actually reached CI red: `Settings` reads
+# `.env`, so a developer with a real OpenRouter key ran a DIFFERENT suite from CI's. The assistant
+# tests passed on every laptop and failed on GitHub — not because they call a model, but because
+# building the tool-picker's client needs credentials, and constructing it is an argument to the
+# stubbed call. Hard-off so "no key configured" is the tested default everywhere; the handful of
+# tests that want a key set one on `settings` themselves.
+os.environ["OPENROUTER_API_KEY"] = ""
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["LLM_JUDGE_API_KEY"] = ""
 # Third time for the same class of bug: the judge's durable conversations live in Postgres, and a
 # developer's machine has one listening on localhost — so the suite silently reached it, wrote
 # checkpoint rows, and behaved differently there than in CI (where nothing is listening). Tests
