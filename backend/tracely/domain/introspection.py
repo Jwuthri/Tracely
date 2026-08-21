@@ -5,10 +5,13 @@ When an evaluator grades a run or a scenario drives a conversation, the interest
 module captures it into an ordinary OTLP payload, so the trace viewer that already renders agent
 runs renders Tracely's own runs too.
 
-Two kinds, kept apart by `internal_kind`:
+Three kinds, kept apart by `internal_kind`:
 
 - `eval` — one recording per evaluation of a trace, a group span per evaluator.
 - `sim`  — one recording per scenario phase (driving, then grading).
+- `assistant` — one recording per turn of the in-app chat agent: the models it called, and every
+  tool it ran against the product with the caller's own credentials. The one place you can see
+  *why* the assistant did what it did, in the same viewer as everything else.
 
 Pure: dataclasses plus payload building. `services/introspection_service.py` owns the contextvar
 lifecycle and the emit; `infrastructure/llm/provider.py` appends a step per LLM call.
@@ -31,6 +34,7 @@ from tracely.domain import otlp_payload as otlp
 
 EVAL = "eval"
 SIM = "sim"
+ASSISTANT = "assistant"
 
 # The recording in progress on this task, if any. Lives here rather than in the service so
 # `infrastructure/llm/provider.py` can append to it without importing upwards through the layers.

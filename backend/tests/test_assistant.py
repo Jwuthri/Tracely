@@ -614,3 +614,35 @@ async def test_a_client_that_leaves_stops_the_agent(monkeypatch):
     await body.aclose()  # the client goes away
 
     assert stopped.is_set()
+
+
+async def test_the_router_drains_a_turn_in_a_single_context(client, make_workspace, monkeypatch):
+    """A turn sets contextvars that outlive individual yields — the LLM key scope, and the
+    introspection recording whose token is reset at the end. Draining the stream with a task per
+    `__anext__` runs each step in a COPY of the context, so that reset raises "created in a
+    different Context" and the turn dies right after answering. Live-only bug until this test.
+    """
+    import contextvars
+
+    from tracely.api.routers import assistant as router
+
+    probe: contextvars.ContextVar = contextvars.ContextVar("probe", default="")
+
+    async def turn(*a, **k):
+        token = probe.set("open")
+        try:
+            yield {"type": "delta", "text": "hi"}
+            yield {"type": "done", "chat_id": "c1", "title": "t", "reply": "hi"}
+        finally:
+            probe.reset(token)  # the line that used to explode
+
+    monkeypatch.setattr(router.assistant_service, "answer_stream", turn)
+    await make_workspace("ctx", "ctx_key", "ctx@x.test")
+    r = await client.post(
+        "/api/assistant/chat", json={"message": "hi"},
+        headers={"Authorization": "Bearer ctx_key"},
+    )
+
+    assert '"type": "error"' not in r.text, r.text
+    assert '"reply": "hi"' in r.text
+    assert r.text.rstrip().endswith("[DONE]")

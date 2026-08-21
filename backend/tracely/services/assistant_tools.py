@@ -29,6 +29,7 @@ deletes truly gone should drop them from `build_tools` rather than trust the wor
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from tracely.api.internal_client import api_call
@@ -40,6 +41,8 @@ MAX_RESULT_CHARS = 15_000
 EXPORT_MAX = 10
 # A backfill re-grades with real judge calls, on OUR event loop, inside one chat turn.
 EVAL_TARGET_MAX = 20
+# What a tool call stores on its recorded span — for a human reading the trace, not the model.
+RECORD_CHARS = 4_000
 # Driving a scenario or replaying a case makes real HTTP calls to the customer's agent.
 SLOW_TIMEOUT_S = 300.0
 
@@ -68,6 +71,52 @@ def _params(**kw: Any) -> dict[str, Any]:
     """Query params, minus the ones the caller left empty — so a blank optional argument means
     'don't filter' rather than 'filter on the empty string'."""
     return {k: v for k, v in kw.items() if v not in ("", None)}
+
+
+def _recorded(tool_obj):
+    """File this tool's call into the active introspection Recording, if there is one.
+
+    Wrapping the tool object rather than each function keeps the recording out of thirty
+    docstrings — and, more usefully, captures the ARGUMENTS and the RESULT, which is what makes a
+    recorded turn answer "did it call the right tool with the right ids" instead of just naming it.
+    Costs nothing when no recording is open, which is every call outside the in-app assistant.
+    """
+    from tracely.domain import introspection
+
+    inner = tool_obj.coroutine
+
+    async def traced(**kwargs):
+        rec = introspection.active()
+        if rec is None:
+            return await inner(**kwargs)
+        start_ns = time.time_ns()
+        try:
+            result = await inner(**kwargs)
+        except Exception as exc:  # a tool that raises is a bug, but it must still be legible
+            rec.add(
+                tool_obj.name, obs_type="TOOL", start_ns=start_ns,
+                input=_clip_text(json.dumps(kwargs, default=str)), error=str(exc)[:500],
+            )
+            raise
+        text = result if isinstance(result, str) else json.dumps(result, default=str)
+        rec.add(
+            tool_obj.name, obs_type="TOOL", start_ns=start_ns,
+            input=_clip_text(json.dumps(kwargs, default=str)),
+            output=_clip_text(text),
+            # `error:` is how a tool reports failure here (see the module docstring), so the
+            # recording has to read the text to know a step went wrong.
+            error=text[:500] if isinstance(result, str) and result.startswith("error:") else "",
+        )
+        return result
+
+    tool_obj.coroutine = traced
+    return tool_obj
+
+
+def _clip_text(text: str) -> str:
+    """What gets stored on the span. Smaller than `MAX_RESULT_CHARS`: the model needs the whole
+    result to reason with, a person reading the trace needs enough to recognise it."""
+    return text if len(text) <= RECORD_CHARS else text[:RECORD_CHARS] + f"… [{len(text)} chars]"
 
 
 def build_tools(headers: dict[str, str]) -> list:
@@ -436,7 +485,7 @@ def build_tools(headers: dict[str, str]) -> list:
         will be deleted and get an explicit yes before calling it."""
         return await call("DELETE", "/api/sessions", json={"threads": thread_ids})
 
-    return [
+    return [_recorded(t) for t in (
         list_traces, get_trace, search_traces, list_conversations, get_conversation,
         export_conversations, list_clusters, get_cluster, get_trends, get_ops_metrics,
         list_cases, list_gates, get_gate,
@@ -445,4 +494,4 @@ def build_tools(headers: dict[str, str]) -> list:
         list_scenarios, create_scenario, import_scenario, run_scenario,
         promote_trace, promote_cluster, replay_case,
         delete_evaluator, delete_scenario, delete_case, delete_clusters, delete_conversations,
-    ]
+    )]

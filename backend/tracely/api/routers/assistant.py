@@ -24,6 +24,7 @@ The tools run as the CALLER: the request's own credential headers are forwarded 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
 import uuid
@@ -111,33 +112,45 @@ async def chat(
     )
 
     async def gen():
-        events = stream.__aiter__()
-        pending: asyncio.Task | None = None
+        # ONE task drains the turn, and this generator only reads its queue. Draining it directly
+        # — a task per `__anext__`, to time out for a keep-alive — ran each step of the agent in a
+        # different copied Context, which breaks every contextvar the turn depends on: the LLM key
+        # scope, and the introspection recording, whose token then cannot be reset in the context
+        # that set it. Same shape as `/evaluations/run`, for the same reason.
+        queue: asyncio.Queue = asyncio.Queue()
+        finished = object()
+
+        async def pump():
+            try:
+                async for event in stream:
+                    await queue.put(event)
+            except Exception as exc:
+                # A dead provider is a chat bubble, not a 500 in the console — and once the first
+                # frame is out the status code is already 200, so a failure has to BE a frame.
+                log.warning(
+                    "assistant_chat_failed", project_id=principal.project_id, error=str(exc)
+                )
+                await queue.put({"type": "error", "detail": f"the model call failed: {exc}"[:300]})
+            finally:
+                await queue.put(finished)
+
+        task = asyncio.create_task(pump())
         try:
             while True:
-                if pending is None:
-                    pending = asyncio.create_task(anext(events))
-                done, _ = await asyncio.wait({pending}, timeout=PING_EVERY_S)
-                if not done:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=PING_EVERY_S)
+                except asyncio.TimeoutError:
                     yield ": keep-alive\n\n"
                     continue
-                task, pending = pending, None
-                try:
-                    event = task.result()
-                except StopAsyncIteration:
+                if event is finished:
                     break
                 yield _sse(event)
-        except Exception as exc:
-            # A dead provider is a chat bubble, not a 500 in the console — and once the first
-            # frame is out the status code is already 200, so a failure has to BE a frame.
-            log.warning("assistant_chat_failed", project_id=principal.project_id, error=str(exc))
-            yield _sse({"type": "error", "detail": f"the model call failed: {exc}"[:300]})
         finally:
             # Client gone mid-turn (they closed the panel, or hit Stop): stop the agent rather
             # than letting it keep calling tools and spending on an answer nobody will read.
-            if pending is not None:
-                pending.cancel()
-            await stream.aclose()
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(

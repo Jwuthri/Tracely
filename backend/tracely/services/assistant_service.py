@@ -25,6 +25,7 @@ replay a workspace's data.
 from __future__ import annotations
 
 import base64
+import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
@@ -32,11 +33,13 @@ import structlog
 from starlette.concurrency import run_in_threadpool
 
 from tracely.config import settings
+from tracely.domain import introspection
 from tracely.infrastructure.blob import s3
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.llm import provider
 from tracely.services import assistant_tools
+from tracely.services.introspection_service import record_async
 
 log = structlog.get_logger(__name__)
 
@@ -296,42 +299,65 @@ async def answer_stream(
         return
 
     reply, usage, stopped = "", {}, None
-    async for event in stream:
-        if event.get("type") == "final":
-            reply = str(event.get("text") or "").strip()
-            usage, stopped = event.get("usage") or {}, event.get("stopped")
-            continue
-        yield event
+    # Tracely records its own work as a trace, and the assistant is work: this is where the turn
+    # gets a `kind="assistant"` recording, so the model calls (`provider._recorded`) and the tool
+    # calls (`assistant_tools._recorded`) file themselves onto it. Internal by construction — the
+    # ingest hop won't schedule it, `EvaluationService` refuses it, and `_REAL` keeps it out of
+    # the workspace's counts, so watching the assistant costs the customer nothing.
+    async with record_async(
+        introspection.ASSISTANT,
+        uuid.uuid4().hex,  # one trace per turn
+        "assistant · {n} step(s)",
+        project_id=project_id,
+        subject_label=message[:200],
+        # Namespaced so a chat can never merge with a real conversation that shares its id; set
+        # after the save below, because a brand-new chat has no id until then.
+        conversation_id="",
+        turn_index=sum(1 for m in history if m.get("role") == "assistant"),
+    ) as rec:
+        if rec is not None:
+            rec.label = "turn"
+            rec.describe(input=message[:2000], meta={"kind": "assistant", "path": path})
+        async for event in stream:
+            if event.get("type") == "final":
+                reply = str(event.get("text") or "").strip()
+                usage, stopped = event.get("usage") or {}, event.get("stopped")
+                continue
+            yield event
 
-    if stopped == "budget":
+        if stopped == "budget":
         # Out of credit mid-loop. Tell the user the conversation is finished rather than raising:
         # "something broke" is the wrong lesson, and they still have whatever it managed to say.
-        note = (
-            "I've reached this conversation's spend limit, so I stopped here — "
-            "start a new conversation to keep going."
-        )
-        reply = f"{reply}\n\n_{note}_" if reply else note
-    if not reply:
-        raise RuntimeError("the model finished without an answer")
-
-    history.append(
-        {
-            "role": "assistant",
-            "content": reply,
-            "ts": _now(),
-            "cost_usd": round(_turn_cost_usd(usage), 6),
-        }
-    )
-
-    def save() -> tuple[str, str]:
-        with SyncSessionLocal() as s:
-            saved = repo.assistant_chat_save(
-                s, project_id, user_id,
-                chat_id=chat_id,
-                messages=history,
-                title=existing_title or title_for(message),
+            note = (
+                "I've reached this conversation's spend limit, so I stopped here — "
+                "start a new conversation to keep going."
             )
-            return saved.id, saved.title
+            reply = f"{reply}\n\n_{note}_" if reply else note
+        if not reply:
+            raise RuntimeError("the model finished without an answer")
 
-    saved_id, saved_title = await run_in_threadpool(save)
-    yield {"type": "done", "chat_id": saved_id, "title": saved_title, "reply": reply}
+        history.append(
+            {
+                "role": "assistant",
+                "content": reply,
+                "ts": _now(),
+                "cost_usd": round(_turn_cost_usd(usage), 6),
+            }
+        )
+
+        def save() -> tuple[str, str]:
+            with SyncSessionLocal() as s:
+                saved = repo.assistant_chat_save(
+                    s, project_id, user_id,
+                    chat_id=chat_id,
+                    messages=history,
+                    title=existing_title or title_for(message),
+                )
+                return saved.id, saved.title
+
+        saved_id, saved_title = await run_in_threadpool(save)
+        if rec is not None:
+            # Now the chat has an id, so every turn of it lands on one row of the traces table.
+            rec.conversation_id = f"assistant:{saved_id}"
+            rec.describe(output=reply[:2000])
+        yield {"type": "done", "chat_id": saved_id, "title": saved_title, "reply": reply}
