@@ -352,3 +352,25 @@ def test_bubbles_decode_json_encoded_scalars():
     by = {e["name"]: e for e in r["events"]}
     assert by["thinking"]["detail"] == "Delegating the FAQ — one specialist should own it."
     assert by["faq"]["say"] == "Return policy — window and condition?"
+
+
+def test_detail_names_the_tool_when_the_model_answered_with_a_call():
+    # A model turn whose answer IS a tool call exports no sayable output — the office bubble
+    # came up empty. `tool_call_names` is indexed on the span; say what it reached for.
+    r = build_replay(
+        [span("b", "", "GENERATION", "chat gpt-4o", 0, agent="support", tool_call_names=["get_order"])]
+    )
+    assert r["events"][0]["detail"] == "→ get_order"
+
+
+def test_spoken_output_still_wins_over_the_tool_names():
+    r = build_replay(
+        [
+            span(
+                "b", "", "GENERATION", "chat", 0, agent="support",
+                output=json.dumps([{"role": "assistant", "content": "on it"}]),
+                tool_call_names=["get_order"],
+            )
+        ]
+    )
+    assert r["events"][0]["detail"] == "on it"

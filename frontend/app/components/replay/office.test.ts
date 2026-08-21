@@ -64,6 +64,13 @@ describe("poseAt", () => {
     expect(p.at).toBe("desk");
     expect(p.bubble?.type).toBe("thought");
   });
+  it("keeps naming the tool when a turn ENDS on a tool run, not on words", () => {
+    // the computer tool runs 1200..1500 on the play clock — just after it, the character used
+    // to stand there with an empty head as if it had answered nothing
+    expect(poseAt(actors[1], script, 1550, layout).bubble).toEqual({
+      type: "chip", icon: "tool", text: "charge",
+    });
+  });
   it("idle actors sit at their desk with no bubble (after linger)", () => {
     const p = poseAt(actors[1], script, 9000, layout);
     expect(p.at).toBe("desk");

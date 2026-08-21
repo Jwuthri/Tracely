@@ -211,3 +211,16 @@ def test_min_size_floor_hides_one_off_clusters(session):
     assert [c.count for c, _ in repo.clusters_list_with_agent(session, PROJECT)] == [5, 1]
     assert [c.count for c, _ in repo.clusters_list_with_agent(session, PROJECT, 5)] == [5]
     assert repo.clusters_list_with_agent(session, PROJECT, 6) == []
+
+
+def test_each_member_keeps_its_own_unmasked_reason(session):
+    """The cluster's signature is masked so two traces can be recognised as the same failure; that
+    same masking makes it useless as a per-trace explanation. Without the member summary the
+    linked-traces list is a column of trace ids and nothing else."""
+    _cluster(session, "t1", "The agent answered about order 4471 instead of order 9902")
+    _cluster(session, "t2", "The agent answered about order 1234 instead of order 5678")
+
+    members = {m.trace_id: m.summary for m in session.execute(select(ClusterMember)).scalars()}
+    assert _counts(session) == [2], "masking should still merge them into one cluster"
+    assert members["t1"].endswith("instead of order 9902")
+    assert members["t2"].endswith("instead of order 5678")

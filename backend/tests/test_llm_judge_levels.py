@@ -443,6 +443,38 @@ def test_include_answer_false_skips_a_turn_with_no_user_message(monkeypatch):
     assert _judge(RUN).run(_ctx(spans), {"prompt": "Label.", "include_answer": False}) == []
 
 
+def test_an_advanced_judge_skips_a_turn_where_no_variable_resolved(monkeypatch):
+    """The same rule for the ADVANCED path, which had no guard at all.
+
+    Real exporters ship orphan fragments — a tool/chain span whose turn root never arrived, with
+    no input and no output anywhere. Every `@VARIABLE` soft-misses, so the judge was handed a
+    rubric made of `[No … available]` and asked for a verdict; it dutifully invented one, and 69
+    of them clustered into "the agent provided no answer at all". Ingestion noise, one LLM call
+    each."""
+    _stub_structured(monkeypatch, {"score": 0.0, "reason": "no answer"})
+    spans = [_span(type="CHAIN", name="agent_teams.tool", input="", output="", is_app_root=0,
+                   parent_span_id="never-exported")]
+    config = {"is_advanced": True, "prompt": "Request @CURRENT_MESSAGE.input\nAnswer @CURRENT_MESSAGE.output"}
+    assert _judge(RUN).run(_ctx(spans), config) == []
+
+
+def test_an_advanced_judge_still_grades_a_request_with_no_answer(monkeypatch):
+    """The guard is "nothing resolved", not "something missing": an agent that answered nothing is
+    a real failure, and the one that stops being graded the moment it breaks is useless."""
+    _stub_structured(monkeypatch, {"score": 0.0, "reason": "no answer"})
+    spans = [_span(input="where is my refund?", output="")]
+    config = {"is_advanced": True, "threshold": 0.6,
+              "prompt": "Request @CURRENT_MESSAGE.input\nAnswer @CURRENT_MESSAGE.output"}
+    assert [r.verdict for r in _judge(RUN).run(_ctx(spans), config)] == ["FAIL"]
+
+
+def test_an_advanced_rubric_with_no_variables_is_never_skipped(monkeypatch):
+    """Nothing to miss is not the same as nothing to grade."""
+    _stub_structured(monkeypatch, {"score": 1.0, "reason": "x"})
+    spans = [_span(input="", output="")]
+    assert len(_judge(RUN).run(_ctx(spans), {"is_advanced": True, "prompt": "Always score 1."})) == 1
+
+
 # ── the advanced template is sent once, not twice ─────────────────────────────
 
 

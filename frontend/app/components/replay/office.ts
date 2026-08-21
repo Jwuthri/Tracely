@@ -179,6 +179,10 @@ export function poseAt(
     }
     if (last?.status === "error") bubble = { type: "error", text: last.name };
     else if (last?.kind === "llm" && last.detail) bubble = { type: "speech", text: last.detail };
+    // A turn can END on a tool run rather than words — the character then stood there with an
+    // empty head, as if it had answered nothing. Keep naming what it answered WITH.
+    else if (last?.kind === "tool" || last?.kind === "skill")
+      bubble = { type: "chip", icon: last.kind === "skill" ? "skill" : "tool", text: last.name };
   }
 
   return {

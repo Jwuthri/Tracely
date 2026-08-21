@@ -1,4 +1,5 @@
 import { BillingActions } from "@/app/components/BillingActions";
+import { Meter } from "@/app/components/Meter";
 import { Badge } from "@/app/components/ui";
 import { getBillingUsage } from "@/app/lib/api";
 import { getMe } from "@/app/lib/auth";
@@ -108,14 +109,7 @@ function BillingUsageCard({
           )}
         </div>
 
-        {capped && (
-          <div className="h-2 overflow-hidden rounded-full bg-ink-900">
-            <div
-              className={`h-full rounded-full transition-[width] ${meterTone(frac)}`}
-              style={{ width: `${Math.min(100, frac * 100)}%` }}
-            />
-          </div>
-        )}
+        {capped && <Meter value={frac * 100} segments={20} tone={meterTone(frac)} />}
 
         {frac >= 1 && (
           <p className="rounded-lg border border-fail/30 bg-fail/10 px-3 py-2 text-[13px] text-fail">

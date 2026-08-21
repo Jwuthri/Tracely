@@ -481,7 +481,22 @@ class LLMJudgeEvaluator(Evaluator):
         return out
 
     def _grade_resolved(self, config: dict, template: str, context) -> EvalResult | None:
+        """Resolve the rubric's `@VARIABLE`s and grade — unless NOTHING resolved.
+
+        A template whose every variable soft-missed has no subject: the judge would read a rubric
+        made entirely of `[No CURRENT_MESSAGE.output available]` and, having been asked for a
+        verdict, invent one. Real exporters ship orphan fragments constantly (a tool/chain span
+        whose turn root never arrived, carrying no input and no output on any span), and grading
+        them manufactured a "the agent provided no answer at all" failure cluster out of pure
+        ingestion noise — plus one LLM call each. No score is written instead, which is what
+        `_run_message` has always done for an empty message body.
+
+        Deliberately "none resolved", not "any missing": a turn with a request and no answer is a
+        REAL failure and still gets graded — its `@CURRENT_MESSAGE.input` resolved. A rubric with
+        no variables at all (a static prompt) has nothing to miss and is never skipped."""
         resolved = template_resolver.resolve(template, context)
+        if resolved.variables_missing and not resolved.variables_used:
+            return None
         return self._grade_advanced(config, resolved.resolved_text)
 
     # ── grading + output-type handling ───────────────────────────────────────

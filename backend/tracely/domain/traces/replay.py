@@ -344,6 +344,14 @@ def build_replay(
                     say = _delegation_say(span, str(alias))
                     break
 
+        # A model turn that ANSWERED with a tool call instead of words has no sayable output —
+        # the bubble came up empty. The requested names are indexed on the span; say them.
+        detail = _preview(span.get("status_message")) or _text_of(span.get("output"))
+        if not detail:
+            called = [str(t) for t in (span.get("tool_call_names") or []) if t]
+            if called:
+                detail = _preview("\u2192 " + ", ".join(called))
+
         events.append(
             {
                 "t_ms": _ms(t0, span["start_time"]),
@@ -359,7 +367,7 @@ def build_replay(
                 "delegate_to": delegate_to,
                 "say": say,
                 "model": str(span.get("model_id") or ""),
-                "detail": _preview(span.get("status_message")) or _text_of(span.get("output")),
+                "detail": detail,
                 "span_id": sid,
                 "trace_id": str(span.get("trace_id") or ""),
                 "turn_id": str(span.get("turn_id") or ""),

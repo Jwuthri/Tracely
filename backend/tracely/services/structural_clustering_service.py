@@ -44,6 +44,10 @@ class StructuralClusteringService:
         if not agent_id or not eval_failures:
             return None
         sig = FailureSignature.compute(eval_failures, spans)
+        # The cluster's own signature is MASKED (that is what makes two traces the same failure);
+        # the member keeps the unmasked reason, so the linked-traces list can say what went wrong
+        # in THIS trace instead of showing a wall of identical ids.
+        summary = "; ".join(f.comment for f in eval_failures if f.comment)[:1000]
         now = datetime.now(timezone.utc)
 
         cl = self._find_existing(project_id, agent_id, sig.key) or self._find_similar(
@@ -52,7 +56,7 @@ class StructuralClusteringService:
         if cl is None:
             try:
                 cl = self._create(project_id, agent_id, sig, now)
-                self._record_member(cl, trace_id, now)
+                self._record_member(cl, trace_id, now, summary)
                 self.session.commit()
                 return cl.id
             except IntegrityError:
@@ -63,7 +67,7 @@ class StructuralClusteringService:
                 if cl is None:
                     raise
 
-        self._record_member(cl, trace_id, now)
+        self._record_member(cl, trace_id, now, summary)
         self.session.commit()
         return cl.id
 
@@ -127,7 +131,9 @@ class StructuralClusteringService:
         self.session.flush()
         return cl
 
-    def _record_member(self, cl: FailureCluster, trace_id: str, now: datetime) -> None:
+    def _record_member(
+        self, cl: FailureCluster, trace_id: str, now: datetime, summary: str = ""
+    ) -> None:
         member = self.session.get(ClusterMember, (cl.id, trace_id))
         if member is None:
             self.session.add(
@@ -135,7 +141,10 @@ class StructuralClusteringService:
                     cluster_id=cl.id,
                     trace_id=trace_id,
                     is_medoid=(cl.count == 0),
+                    summary=summary,
                 )
             )
             cl.count = (cl.count or 0) + 1
+        elif summary and not member.summary:
+            member.summary = summary  # heal a row recorded before summaries were kept
         cl.last_seen_at = now

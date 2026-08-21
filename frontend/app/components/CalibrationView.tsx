@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TraceDetailData } from "@/app/lib/api";
 import { judgeTakeaway } from "@/app/lib/calibration";
 import { IO } from "./IO";
+import { Meter } from "./Meter";
 import { TimeAgo } from "./TimeAgo";
 import { Badge, verdictVariant } from "./ui";
 
@@ -269,12 +270,11 @@ export function CalibrationView() {
                 ))}
               </div>
             </div>
-            <div className="mt-3 h-1 overflow-hidden rounded-full bg-line">
-              <div
-                className="h-full rounded-full bg-signal transition-[width] duration-500"
-                style={{ width: `${Math.min(100, (sel.labeled / Math.min(TARGET, sel.total || TARGET)) * 100)}%` }}
-              />
-            </div>
+            <Meter
+              className="mt-3"
+              segments={25}
+              value={(sel.labeled / Math.min(TARGET, sel.total || TARGET)) * 100}
+            />
             <Takeaway e={sel} />
           </div>
         )}
