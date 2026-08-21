@@ -190,6 +190,13 @@ def spent_usd(history: list[dict]) -> float:
 
 
 def _turn_cost_usd(usage: dict) -> float:
+    """What this turn cost, from the ANSWERING model's tokens.
+
+    The tool picker's own call is not counted: it happens inside middleware, so its usage never
+    reaches the agent graph's messages. It runs on a model ~10x cheaper and costs a few percent
+    of a turn, which is why plumbing it isn't worth it — but it does make the budget a floor on
+    spend rather than an exact invoice, and that is worth knowing before trusting the number.
+    """
     return provider.estimate_cost_usd(
         usage.get("model") or settings.assistant_model,
         int(usage.get("input_tokens") or 0),
@@ -268,6 +275,7 @@ async def answer_stream(
                     max_tools=settings.assistant_max_tools,
                     max_model_calls=settings.assistant_max_model_calls,
                     always_include=ALWAYS_TOOLS,
+                    answering_model=settings.assistant_model,
                 ),
                 budget_usd=(budget - already) if budget > 0 else None,
                 # This turn spends OUR credit, so log what it cost and for whom — otherwise the

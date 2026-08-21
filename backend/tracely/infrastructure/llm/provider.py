@@ -821,6 +821,7 @@ def agent_middleware(
     max_tools: int = 0,
     max_model_calls: int = 0,
     always_include: list[str] | None = None,
+    answering_model: str = "",
 ) -> list:
     """The guards an agent loop runs under: a cheap tool-picker, and a cap on how long it can go.
 
@@ -835,7 +836,13 @@ def agent_middleware(
     from langchain.agents.middleware import ModelCallLimitMiddleware
 
     mw: list = []
-    if max_tools > 0 and selector_model:
+    # Same model for both jobs = no saving (the picker's call costs what it saves) AND no way to
+    # tell the picker's tokens from the answer's on the stream, which is a visible bug, not a
+    # slow one. Silently declining to pick is the safe reading of that configuration.
+    same = selector_model and answering_model and (
+        _normalize_model(selector_model.strip()) == _normalize_model(answering_model.strip())
+    )
+    if max_tools > 0 and selector_model and not same:
         mw.append(
             _cached_tool_selector(
                 model=get_chat_model(selector_model),
@@ -896,6 +903,8 @@ def stream_agent(
         middleware=middleware or [],
     )
 
+    answering_model = _normalize_model((model or settings.llm_judge_model).strip())
+
     async def _run() -> AsyncIterator[dict]:
         ai_messages: list = []  # every model turn, for the token roll-up: a tool loop is N calls
         text = ""
@@ -916,7 +925,17 @@ def stream_agent(
                     async for mode, payload in stream:
                         if mode == "messages":
                             chunk, meta = payload
-                            if meta.get("langgraph_node") == "model" and getattr(chunk, "text", ""):
+                            # A middleware with a model of its own (the tool picker) calls it
+                            # INSIDE this graph, so its tokens arrive on this stream too, from
+                            # the same `model` node — and streaming those types the picker's raw
+                            # JSON into the chat ahead of the answer. The model id is the only
+                            # thing that separates them, which is why `agent_middleware` refuses
+                            # to pick with the same model it is picking for.
+                            if (
+                                meta.get("langgraph_node") == "model"
+                                and meta.get("ls_model_name") == answering_model
+                                and getattr(chunk, "text", "")
+                            ):
                                 yield {"type": "delta", "text": chunk.text}
                             continue
                         for node, update in (payload or {}).items():

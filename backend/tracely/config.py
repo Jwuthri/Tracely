@@ -135,9 +135,11 @@ class Settings(BaseSettings):
     # The in-app assistant (the dashboard's chat widget). Unlike every other LLM call, this one
     # runs on OUR OpenRouter key — it answers questions about Tracely, so it must work in a
     # workspace that has configured no key of its own (`provider.use_server_key`). A Gemini flash
-    # model: cheap output (reasoning tokens bill at the completion rate), a 1M context, and image
-    # input for when the assistant learns to look at the user's screen.
-    assistant_model: str = "google/gemini-3.7-flash"
+    # model: a 1M context, and image input for when the assistant learns to look at the user's
+    # screen. Watch the axis when changing this — `flash-lite` is cheaper on INPUT and dearer on
+    # OUTPUT than `3.7-flash`, so it only wins while replies stay under ~12% of the prompt, and
+    # `reasoning_effort` bills at the completion rate on the wrong side of that trade.
+    assistant_model: str = "google/gemini-3.5-flash-lite"
     # "" disables thinking; otherwise minimal|low|medium|high. Medium costs latency and reasoning
     # tokens on every turn — drop to "low" if replies feel slow for what they are.
     assistant_reasoning_effort: str = "medium"

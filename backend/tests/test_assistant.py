@@ -478,3 +478,49 @@ async def test_the_tool_picker_decides_once_per_turn(monkeypatch):
 
     assert await selector.awrap_model_call(Request(), handler) == "reused"
     assert overridden["tools"] == ["already-chosen"]
+
+
+async def test_only_the_answering_models_tokens_are_streamed(monkeypatch):
+    """The tool picker calls its own model INSIDE the agent graph, so its tokens arrive on the
+    same stream from the same node. Unfiltered, the user watches the picker's raw JSON get typed
+    into the chat before the answer — which is exactly what shipped until this test existed."""
+    from langchain_core.messages import AIMessage, AIMessageChunk
+
+    def frames():
+        picker = AIMessageChunk(content='{"tools": ["get_trace"]}')
+        answer = AIMessageChunk(content="it failed because of a timeout")
+        return [
+            ("messages", (picker, {"langgraph_node": "model", "ls_model_name": "picker/cheap"})),
+            ("messages", (answer, {"langgraph_node": "model", "ls_model_name": "answer/model"})),
+            ("updates", {"model": {"messages": [AIMessage(content="it failed because of a timeout")]}}),
+        ]
+
+    class FakeAgent:
+        def astream(self, _input, **kw):
+            async def gen():
+                for f in frames():
+                    yield f
+            return gen()
+
+    monkeypatch.setattr(provider, "get_chat_model", lambda *a, **k: object())
+    monkeypatch.setattr(
+        "langchain.agents.create_agent", lambda *a, **k: FakeAgent(), raising=False
+    )
+    events = [
+        e async for e in provider.stream_agent("q", tools=[], model="answer/model")
+    ]
+    deltas = [e["text"] for e in events if e["type"] == "delta"]
+    assert deltas == ["it failed because of a timeout"]
+    assert not any("tools" in d for d in deltas)
+
+
+def test_the_picker_declines_to_pick_with_the_model_it_picks_for(monkeypatch):
+    """No saving, and no way to separate the two on the stream — so it must not be configured on."""
+    monkeypatch.setattr(provider, "get_chat_model", lambda *a, **k: _fake_chat_model())
+    same = provider.agent_middleware(
+        selector_model="google/gemini-3.7-flash",
+        answering_model="google/gemini-3.7-flash",
+        max_tools=8,
+        max_model_calls=12,
+    )
+    assert len(same) == 1  # the loop cap only
