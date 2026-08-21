@@ -175,7 +175,7 @@ function PeekBubble({ bubble, x, y }: { bubble: NonNullable<ReturnType<typeof po
           : "rounded-md border-t_tool/50 bg-t_tool/15 font-mono text-t_tool";
   const text = bubble.type === "chip" ? `${bubble.icon === "skill" ? "◈" : "⚙"} ${bubble.text}` : bubble.text;
   return (
-    <div className={`fleet-pop pointer-events-none absolute z-50 w-max max-w-[190px] ${anchor}`}>
+    <div className={`pointer-events-none absolute z-50 w-max max-w-[190px] ${bubble.faded ? "opacity-60" : "fleet-pop"} ${anchor}`}>
       <div className={`border px-2.5 py-1.5 text-left text-[10px] leading-snug ${skin}`}>{text}</div>
     </div>
   );

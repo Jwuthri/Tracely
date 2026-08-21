@@ -4,7 +4,7 @@
 // actor; poseAt answers, for one actor at play-time t: WHERE they stand, what they're DOING,
 // and what floats above their head. The component only animates between poses.
 
-import { isContainer, type PlayEvent, type ReplayActor } from "./timeline";
+import { isContainer, isCustomer, type PlayEvent, type ReplayActor } from "./timeline";
 
 export type Pt = { x: number; y: number };
 
@@ -13,14 +13,18 @@ export type OfficeLayout = {
   library: Pt; // stand point in front of the bookshelf
   tools: Pt;   // stand point at the tool wall
   door: Pt;    // where characters enter from
+  customer: Pt; // where the customer stands, just inside the door
   coffee: Pt;
 };
 
-export type Bubble =
+/** `faded`: a last word that has been up for a while — still readable, visually quieter.
+ *  A chip's `sub` is what the tool returned, for a turn that ends on a tool run. */
+export type Bubble = (
   | { type: "speech"; text: string }
   | { type: "thought"; text: string }
-  | { type: "chip"; icon: "tool" | "skill"; text: string }
-  | { type: "error"; text: string };
+  | { type: "chip"; icon: "tool" | "skill"; text: string; sub?: string }
+  | { type: "error"; text: string }
+) & { faded?: boolean };
 
 export type Pose = {
   x: number;
@@ -35,7 +39,8 @@ export type Pose = {
 
 /** Seat roots in a row across the floor, sub-agents on a lower row clustered near their
  *  parent. Fixed furniture hugs the walls. All positions are % of the stage. */
-export function layoutOffice(actors: ReplayActor[]): OfficeLayout {
+export function layoutOffice(all: ReplayActor[]): OfficeLayout {
+  const actors = all.filter((a) => !isCustomer(a)); // the customer has no desk — they stand by the door
   const roots = actors.filter((a) => !a.parent);
   const desks: Record<string, Pt> = {};
   const rootY = 40;
@@ -72,14 +77,73 @@ export function layoutOffice(actors: ReplayActor[]): OfficeLayout {
     library: { x: 8.5, y: 52 },
     tools: { x: 91.5, y: 52 },
     door: { x: 88, y: 22 },
+    customer: { x: 84, y: 31 },
     coffee: { x: 8, y: 84 },
   };
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-/** How long a finished event keeps its bubble up (ms of play time). */
+/** How long a finished event reads as FRESH (ms of play time). A last word stays up until the
+ *  actor acts again — it just fades after this. */
 const LINGER = 1600;
+
+/** The bubble for something an actor finished: words stay words, a turn that ENDED on a tool
+ *  run names the tool and what it returned, an error keeps the red mark. A model turn with no
+ *  sayable output falls back to the turn envelope's output (the root span's answer). */
+export function wordOf(e: PlayEvent, events: PlayEvent[] = []): Bubble | null {
+  if (e.status === "error") return { type: "error", text: e.name };
+  if (e.kind === "ask") return { type: "speech", text: e.detail || "…" };
+  if (e.kind === "tool" || e.kind === "skill")
+    return { type: "chip", icon: e.kind === "skill" ? "skill" : "tool", text: e.name, sub: e.detail };
+  if (e.kind === "think") return e.detail ? { type: "thought", text: e.detail } : null;
+  if (e.kind !== "llm") return null;
+  const text = e.detail || events.find((c) => isContainer(c) && c.actor === e.actor && c.trace_id === e.trace_id && c.detail)?.detail;
+  return text ? { type: "speech", text } : null;
+}
+
+/** An actor's most recently FINISHED non-container event at t, optionally within one turn.
+ *  Picked by END time — picking by start let a long-running early event mask the actual last
+ *  word. */
+export function lastEventOf(actorId: string, events: PlayEvent[], t: number, traceId?: string): PlayEvent | null {
+  let last: PlayEvent | null = null;
+  let lastEnd = -1;
+  for (const e of events) {
+    if (e.pt > t) break;
+    if (e.actor !== actorId || isContainer(e) || (traceId !== undefined && e.trace_id !== traceId)) continue;
+    const end = e.pt + e.pdur;
+    if (end <= t && end > lastEnd) { last = e; lastEnd = end; }
+  }
+  return last;
+}
+
+/** One row per turn: what the customer asked and every agent's last word IN that turn — the
+ *  transcript strip. A sub-agent invoked in a turn shows its last word for that invocation. */
+export type TurnDigest = {
+  trace_id: string; pt: number; ask: string; words: { actor: string; bubble: Bubble }[];
+};
+export function turnDigest(events: PlayEvent[], actors: ReplayActor[]): TurnDigest[] {
+  const turns: TurnDigest[] = [];
+  const byTrace = new Map<string, TurnDigest>();
+  for (const e of events) {
+    let turn = byTrace.get(e.trace_id);
+    if (!turn) {
+      turn = { trace_id: e.trace_id, pt: e.pt, ask: "", words: [] };
+      byTrace.set(e.trace_id, turn);
+      turns.push(turn);
+    }
+    if (e.kind === "ask") turn.ask = e.detail;
+  }
+  for (const turn of turns) {
+    for (const a of actors) {
+      if (isCustomer(a)) continue;
+      const last = lastEventOf(a.id, events, Infinity, turn.trace_id);
+      const bubble = last && wordOf(last, events);
+      if (bubble) turn.words.push({ actor: a.id, bubble });
+    }
+  }
+  return turns;
+}
 
 /** The most interesting in-flight, non-container event for an actor at t (latest started). */
 function inflightOf(actorId: string, events: PlayEvent[], t: number): PlayEvent | null {
@@ -111,8 +175,19 @@ export function poseAt(
   layout: OfficeLayout,
   slot = 0,
 ): Pose {
+  if (isCustomer(actor)) {
+    // The customer is there the whole time, just inside the door, and holds this turn's
+    // question up until the next one — the office works for THEM.
+    let ask: PlayEvent | null = null;
+    for (const e of events) { if (e.pt > t) break; if (e.actor === actor.id) ask = e; }
+    const live = ask !== null && t < ask.pt + ask.pdur;
+    return {
+      x: layout.customer.x, y: layout.customer.y, at: "door", action: live ? ask : null,
+      bubble: ask ? { ...(wordOf(ask) as Bubble), faded: !live } : null,
+      facing: -1, entered: true, working: live,
+    };
+  }
   const desk = layout.desks[actor.id] ?? { x: 50, y: 50 };
-  const mine = events.filter((e) => e.actor === actor.id);
   // The whole team is seated from t=0 — a sub-agent idles at its desk until the main agent
   // brings it work, rather than popping into existence at its first span.
 
@@ -164,25 +239,12 @@ export function poseAt(
       bubble = { type: "thought", text: "…" };
     }
   } else {
-    // afterglow: the MOST RECENTLY FINISHED reply or failure lingers so it can be read —
-    // picking by start time let a long-running early event mask the actual last word.
-    let last: PlayEvent | null = null;
-    let lastEnd = -1;
-    for (const e of mine) {
-      if (e.pt > t) break;
-      if (isContainer(e)) continue;
-      const end = e.pt + e.pdur;
-      if (end <= t && t - end < LINGER && end > lastEnd) {
-        last = e;
-        lastEnd = end;
-      }
-    }
-    if (last?.status === "error") bubble = { type: "error", text: last.name };
-    else if (last?.kind === "llm" && last.detail) bubble = { type: "speech", text: last.detail };
-    // A turn can END on a tool run rather than words — the character then stood there with an
-    // empty head, as if it had answered nothing. Keep naming what it answered WITH.
-    else if (last?.kind === "tool" || last?.kind === "skill")
-      bubble = { type: "chip", icon: last.kind === "skill" ? "skill" : "tool", text: last.name };
+    // afterglow: the last word stays up until the actor acts again — a reply, a thought, the
+    // tool a turn ended on (with its result), or the failure — fading once it is no longer
+    // fresh. Only an actor that never did anything has an empty head.
+    const last = lastEventOf(actor.id, events, t);
+    const word = last && wordOf(last, events);
+    if (word) bubble = { ...word, faded: t - (last.pt + last.pdur) > LINGER };
   }
 
   return {
@@ -270,13 +332,18 @@ export function narrate(
   // Prefer what is IN FLIGHT right now; once nothing is, speak of the last beat in the past
   // tense — a sign stuck on "X runs Y" seconds after Y finished is lying.
   let current: PlayEvent | null = null;
+  let askLeads = false;
   let lastEnded: PlayEvent | null = null;
   let lastEnd = -1;
   for (const e of events) {
     if (e.pt > t) break;
     if (isContainer(e) && !e.delegate_to) continue;
-    if (t < e.pt + e.pdur) current = e;
-    else if (e.pt + e.pdur > lastEnd) {
+    if (t < e.pt + e.pdur) {
+      // the customer's question leads the sign for as long as it is fresh — the agents start
+      // working the same instant, and "sup drafts a reply" before anyone heard the ask is odd
+      if (!askLeads) current = e;
+      askLeads ||= e.kind === "ask";
+    } else if (e.pt + e.pdur > lastEnd) {
       lastEnded = e;
       lastEnd = e.pt + e.pdur;
     }
@@ -285,6 +352,8 @@ export function narrate(
     const who = nameOf(current.actor);
     if (current.delegate_to) return `${who} → ${nameOf(current.delegate_to)}: ${current.say || "handoff"}`;
     switch (current.kind) {
+      case "ask":
+        return `customer asks: ${current.detail || "…"}`;
       case "think":
         return `${who} is thinking…`;
       case "skill":
@@ -300,6 +369,7 @@ export function narrate(
   if (lastEnded) {
     const who = nameOf(lastEnded.actor);
     if (lastEnded.delegate_to) return `${who} → ${nameOf(lastEnded.delegate_to)} · handed off`;
+    if (lastEnded.kind === "ask") return "customer is waiting…";
     return `${who} · ${lastEnded.name} ✓`;
   }
   return "office opens…";

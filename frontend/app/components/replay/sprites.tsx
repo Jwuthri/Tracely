@@ -11,6 +11,7 @@ export function PixelPerson({
   working = false,
   facing = 1,
   dim = false,
+  hat = false,
 }: {
   hue: number;
   size?: number;
@@ -18,6 +19,8 @@ export function PixelPerson({
   working?: boolean;
   facing?: 1 | -1;
   dim?: boolean;
+  /** A beanie: the customer, not staff. */
+  hat?: boolean;
 }) {
   const shirt = `hsl(${hue} 62% 52%)`;
   const shirtDark = `hsl(${hue} 62% 40%)`;
@@ -32,6 +35,8 @@ export function PixelPerson({
         <rect x="10" y="0" width="16" height="5" fill={hair} />
         <rect x="8" y="2" width="4" height="6" fill={hair} />
         <rect x="10" y="4" width="16" height="10" fill="hsl(28 56% 74%)" />
+        {hat && <rect x="8" y="0" width="20" height="6" fill="#e8b04b" />}
+        {hat && <rect x="8" y="4" width="20" height="2" fill="#b8843a" />}
         <rect x="14" y="8" width="3" height="3" fill="#151a24" />
         <rect x="21" y="8" width="3" height="3" fill="#151a24" />
         {/* body */}

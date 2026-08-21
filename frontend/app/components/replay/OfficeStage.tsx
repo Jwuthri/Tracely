@@ -3,14 +3,15 @@
 import clsx from "clsx";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { layoutOffice, librarySkills, narrate, poseAt, stationInfo, wallTools, type DeclaredTool, type Pose, type StationInfo } from "./office";
+import { layoutOffice, librarySkills, narrate, poseAt, stationInfo, turnDigest, wallTools, type Bubble, type DeclaredTool, type Pose, type StationInfo, type TurnDigest } from "./office";
 import { Bookshelf, CoffeeMachine, Desk, OfficeDoor, PixelPerson, Plant, ToolsRack } from "./sprites";
-import { fmtMs, OFFICE_PACING, orderActors, realMsAt, toPlayEvents, type PlayEvent, type ReplayActor, type ReplayEvent } from "./timeline";
+import { fmtMs, isCustomer, OFFICE_PACING, orderActors, realMsAt, toPlayEvents, type PlayEvent, type ReplayActor, type ReplayEvent } from "./timeline";
 import { usePlayClock, useWalking } from "./useClock";
 
 /* The Fleet office: the conversation acted out as a scene. Every character is a real agent
    from the trace; delegations are walks with speech bubbles, thinking is a thought cloud,
-   tools happen at the tool wall, skills at the library. */
+   tools happen at the tool wall, skills at the library. The customer stands by the door and
+   asks each turn's question; everyone's last word stays over their head until they act again. */
 
 type Declared = { name: string; description: string; tools: DeclaredTool[] };
 type Payload = { actors: ReplayActor[]; events: ReplayEvent[]; declared: Declared[]; durationMs: number };
@@ -60,6 +61,9 @@ export function OfficeStage({ threadId }: { threadId: string }) {
     [data],
   );
   const tools = useMemo(() => wallTools(events, declaredTools), [events, declaredTools]);
+  const staff = useMemo(() => actors.filter((a) => !isCustomer(a)), [actors]);
+  const customer = actors.find(isCustomer);
+  const turns = useMemo(() => turnDigest(events, actors), [events, actors]);
 
   const clock = usePlayClock(total);
   const { t } = clock;
@@ -79,7 +83,7 @@ export function OfficeStage({ threadId }: { threadId: string }) {
   const activeTool = [...poses.values()].find((p) => p.at === "tools")?.action?.name ?? "";
   const sign = narrate(events, t, nameOf);
   const done = total > 0 && t >= total;
-  const failures = actors.reduce((n, a) => n + a.errors, 0);
+  const failures = staff.reduce((n, a) => n + a.errors, 0);
   const doneSign = failures > 0
     ? `end of recording — ${failures} step${failures > 1 ? "s" : ""} failed`
     : "end of recording — everyone did their bit";
@@ -163,7 +167,7 @@ export function OfficeStage({ threadId }: { threadId: string }) {
           <div className="absolute left-[30%] top-[20%] w-[3.5%]"><Plant /></div>
 
           {/* desks */}
-          {actors.map((a) => {
+          {staff.map((a) => {
             const d = layout.desks[a.id];
             const p = poses.get(a.id);
             if (!d) return null;
@@ -176,8 +180,8 @@ export function OfficeStage({ threadId }: { threadId: string }) {
             );
           })}
 
-          {/* characters */}
-          {actors.map((a, i) => {
+          {/* characters — the customer stands by the door, the staff at their desks */}
+          {[...(customer ? [customer] : []), ...staff].map((a, i) => {
             const p = poses.get(a.id);
             if (!p) return null;
             return (
@@ -207,9 +211,13 @@ export function OfficeStage({ threadId }: { threadId: string }) {
       {/* ── scrubber ── */}
       <Scrubber events={events} total={total} t={t} onSeek={clock.seek} />
 
+      {/* ── transcript: the question and everyone's last word, turn by turn ── */}
+      <Transcript turns={turns} t={t} nameOf={nameOf} onSeek={clock.seek} />
+
       <p className="text-[12px] text-fg-muted">
-        Every character is a real agent from the trace — delegations walk over, knowledge tools are
-        read at the library, actions run at the tool wall. Long pauses are squeezed;{" "}
+        Every character is a real agent from the trace — the customer at the door asks each turn's
+        question, delegations walk over, knowledge tools are read at the library, actions run at
+        the tool wall, and each agent's last word stays up until they act again. Long pauses are squeezed;{" "}
         <Link href={`/sessions/${encodeURIComponent(threadId)}`} className="text-signal hover:underline">
           open the full conversation →
         </Link>
@@ -224,37 +232,48 @@ function Walker({ actor, pose, slot, selected, onClick }: {
 }) {
   const walking = useWalking(pose.x, pose.y);
 
-  const hue = hueOf(actor.id);
-  const size = actor.depth ? 38 : 46;
+  const guest = isCustomer(actor);
+  const hue = guest ? 42 : hueOf(actor.id);
+  const size = guest ? 36 : actor.depth ? 38 : 46;
   return (
     <button
       onClick={onClick}
       className="absolute -translate-x-1/2 -translate-y-full cursor-pointer transition-all duration-700 ease-in-out"
-      style={{ left: `${pose.x}%`, top: `${pose.y}%`, zIndex: Math.round(pose.y) + 10 }}
+      // depth order on the floor — but a FRESH word must paint over a neighbour's faded one
+      style={{ left: `${pose.x}%`, top: `${pose.y}%`, zIndex: Math.round(pose.y) + 10 + (pose.bubble && !pose.bubble.faded ? 100 : 0) }}
       title={actor.name}
     >
-      {pose.bubble && <BubbleView bubble={pose.bubble} x={pose.x} y={pose.y} />}
+      {pose.bubble && <BubbleView bubble={pose.bubble} x={pose.x} y={pose.y} beside={guest} />}
       <div className={clsx(selected && "rounded-lg ring-2 ring-signal/70")}> 
-        <PixelPerson hue={hue} size={size} walking={walking} working={pose.working && !walking} facing={pose.facing} />
+        <PixelPerson hue={hue} size={size} walking={walking} working={pose.working && !walking} facing={pose.facing} hat={guest} />
       </div>
       <div className="mx-auto -mt-0.5 h-1.5 w-7 rounded-full bg-black/40 blur-[1.5px]" />
       <span className={clsx("mt-0.5 block rounded-sm px-1 font-mono text-[9px]",
-        pose.working ? "bg-ink-950/90 text-signal" : "bg-ink-950/70 text-fg-faint")}>
+        guest ? "bg-ink-950/80 text-warn" : pose.working ? "bg-ink-950/90 text-signal" : "bg-ink-950/70 text-fg-faint")}>
         {actor.name}
       </span>
     </button>
   );
 }
 
-function BubbleView({ bubble, x, y }: { bubble: NonNullable<Pose["bubble"]>; x: number; y: number }) {
+function BubbleView({ bubble, x, y, beside = false }: {
+  bubble: NonNullable<Pose["bubble"]>; x: number; y: number;
+  /** Hang the bubble to the LEFT of the character (the customer by the door, whose words
+   *  must not drop onto the desks below). */
+  beside?: boolean;
+}) {
   // Keep the bubble inside the office on BOTH axes: right-aligned near the right wall (left
   // near the left), and dropped BELOW the character when they stand near the top — otherwise
   // a long line spills over the roster or is clipped by the stage's top edge.
   const side = x >= 64 ? "right" : x <= 36 ? "left" : "center";
-  const below = y <= 46;
+  // only the door zone is close enough to the top to clip; the root row (y≈40) goes UP, or
+  // its words land on the sub-agents' bubbles one row down
+  const below = y <= 34 && !beside;
   const anchor = clsx(
-    side === "right" ? "right-0" : side === "left" ? "left-0" : "left-1/2 -translate-x-1/2",
-    below ? "top-full mt-1" : "bottom-full mb-2",
+    beside ? "right-full top-0 mr-1.5" : side === "right" ? "right-0" : side === "left" ? "left-0" : "left-1/2 -translate-x-1/2",
+    !beside && (below ? "top-full mt-1" : "bottom-full mb-2"),
+    // a last word that has been up a while stays readable but stops competing with live beats
+    bubble.faded ? "opacity-60" : "fleet-pop",
   );
   const tail = side === "right" ? "ml-auto mr-5" : "ml-5";
   const tailDots = side === "right" ? "ml-auto mr-6" : "ml-6";
@@ -262,7 +281,7 @@ function BubbleView({ bubble, x, y }: { bubble: NonNullable<Pose["bubble"]>; x: 
 
   if (bubble.type === "thought") {
     return (
-      <div className={clsx("fleet-pop pointer-events-none absolute z-50 w-max max-w-[190px]", anchor)}>
+      <div className={clsx("pointer-events-none absolute z-50 w-max max-w-[190px]", anchor)}>
         <div className="rounded-[14px] border border-t_think/40 bg-ink-800/95 px-2.5 py-1.5 text-left font-mono text-[10px] leading-snug text-t_think">
           {bubble.text}
         </div>
@@ -273,27 +292,85 @@ function BubbleView({ bubble, x, y }: { bubble: NonNullable<Pose["bubble"]>; x: 
   }
   if (bubble.type === "speech") {
     return (
-      <div className={clsx("fleet-pop pointer-events-none absolute z-50 w-max max-w-[210px]", anchor)}>
-        <div className="rounded-lg border border-line-bright bg-[#f4f6fb] px-2.5 py-1.5 text-left text-[10.5px] font-medium leading-snug text-ink-900">
+      <div className={clsx("pointer-events-none absolute z-50 w-max max-w-[210px]", anchor)}>
+        <div className={clsx("rounded-lg border border-line-bright bg-[#f4f6fb] px-2.5 py-1.5 text-left text-[10.5px] font-medium leading-snug text-ink-900",
+          bubble.faded && "line-clamp-3")}>
           {bubble.text}
         </div>
-        <div className={clsx("h-2 w-2 -translate-y-1 rotate-45 border-b border-r border-line-bright bg-[#f4f6fb]", tail)} />
+        {beside
+          ? <div className="absolute right-0 top-3 h-2 w-2 translate-x-1 rotate-45 border-r border-t border-line-bright bg-[#f4f6fb]" />
+          : <div className={clsx("h-2 w-2 -translate-y-1 rotate-45 border-b border-r border-line-bright bg-[#f4f6fb]", tail)} />}
       </div>
     );
   }
   if (bubble.type === "error") {
     return (
-      <div className="fleet-pop pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 -translate-x-1/2">
+      <div className={clsx("pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 -translate-x-1/2", bubble.faded ? "opacity-60" : "fleet-pop")}>
         <span className="grid h-6 w-6 animate-bounce place-items-center rounded-full bg-fail font-mono text-[13px] font-bold text-ink-950 shadow-[0_0_14px_rgba(251,113,133,0.8)]">!</span>
       </div>
     );
   }
   return (
-    <div className={clsx("fleet-pop pointer-events-none absolute z-50 w-max", anchor)}>
-      <span className={clsx("rounded-md border px-2 py-0.5 font-mono text-[10px]",
+    <div className={clsx("pointer-events-none absolute z-50 w-max max-w-[200px]", anchor)}>
+      <span className={clsx("block rounded-md border px-2 py-0.5 text-left font-mono text-[10px]",
         bubble.icon === "skill" ? "border-t_retriever/50 bg-t_retriever/15 text-t_retriever" : "border-t_tool/50 bg-t_tool/15 text-t_tool")}>
         {bubble.icon === "skill" ? "◈" : "⚙"} {bubble.text}
+        {/* a turn that ended on this tool: show what it returned, not just that it ran */}
+        {bubble.sub && <span className="block truncate text-[9.5px] text-fg-muted" title={bubble.sub}>→ {bubble.sub}</span>}
       </span>
+    </div>
+  );
+}
+
+/* ── the words, line by line ── */
+function WordText({ bubble }: { bubble: Bubble }) {
+  if (bubble.type === "error") return <span className="font-mono text-fail">! {bubble.text}</span>;
+  if (bubble.type === "chip")
+    return (
+      <span className={clsx("font-mono", bubble.icon === "skill" ? "text-t_retriever" : "text-t_tool")}>
+        {bubble.icon === "skill" ? "◈" : "⚙"} {bubble.text}
+        {bubble.sub && <span className="text-fg-muted"> → {bubble.sub}</span>}
+      </span>
+    );
+  if (bubble.type === "thought") return <span className="italic text-t_think">{bubble.text}</span>;
+  return <span>{bubble.text}</span>;
+}
+
+/* ── transcript: per turn, the question and every agent's last word ── */
+function Transcript({ turns, t, nameOf, onSeek }: {
+  turns: TurnDigest[]; t: number; nameOf: (id: string) => string; onSeek: (v: number) => void;
+}) {
+  if (!turns.length) return null;
+  return (
+    <div className="card overflow-hidden !p-0">
+      <div className="border-b border-line px-4 py-2.5 font-mono text-[11px] uppercase tracking-wider text-fg-muted">
+        transcript · {turns.length} turn{turns.length > 1 ? "s" : ""} · last word of every agent
+      </div>
+      <ol className="divide-y divide-line-soft">
+        {turns.map((turn, i) => (
+          <li key={turn.trace_id} className={clsx("transition-opacity duration-500", turn.pt > t && "opacity-40")}>
+            <button onClick={() => onSeek(turn.pt)} title="jump to this turn"
+              className="flex w-full items-start gap-3 px-4 py-2.5 text-left hover:bg-ink-800/40">
+              <span className="mt-0.5 shrink-0 font-mono text-[10px] text-fg-faint">#{i + 1}</span>
+              <div className="min-w-0 flex-1 space-y-1 text-[12px] leading-snug">
+                <p className="flex gap-2">
+                  <span className="w-[110px] shrink-0 truncate font-mono text-[10px] leading-[18px] text-warn">customer</span>
+                  <span className="min-w-0 font-medium">{turn.ask || <span className="text-fg-faint">(no message recorded)</span>}</span>
+                </p>
+                {turn.words.map((w) => (
+                  <p key={w.actor} className="flex gap-2">
+                    <span className="w-[110px] shrink-0 truncate font-mono text-[10px] leading-[18px] text-fg-muted" title={nameOf(w.actor)}>
+                      {nameOf(w.actor)}
+                    </span>
+                    <span className="min-w-0 text-fg"><WordText bubble={w.bubble} /></span>
+                  </p>
+                ))}
+                {!turn.words.length && <p className="text-[11px] text-fg-faint">no agent said anything this turn</p>}
+              </div>
+            </button>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
@@ -305,7 +382,7 @@ function Roster({ actors, poses, onPick, declared }: {
   return (
     <>
       <div className="border-b border-line px-4 py-2.5 font-mono text-[11px] uppercase tracking-wider text-fg-muted">
-        the team · {actors.length}
+        the team · {actors.filter((a) => !isCustomer(a)).length}
       </div>
       <div className="flex-1 space-y-1 overflow-y-auto p-2">
         {actors.map((a) => {
@@ -314,13 +391,15 @@ function Roster({ actors, poses, onPick, declared }: {
           return (
             <button key={a.id} onClick={() => onPick(a.id)}
               className="flex w-full items-center gap-2.5 rounded-lg border border-transparent px-2 py-1.5 text-left transition-colors hover:border-line hover:bg-ink-800/60">
-              <div className="w-7 shrink-0"><PixelPerson hue={hueOf(a.id)} size={26} /></div>
+              <div className="w-7 shrink-0"><PixelPerson hue={isCustomer(a) ? 42 : hueOf(a.id)} size={26} hat={isCustomer(a)} /></div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[12.5px] font-semibold" style={{ paddingLeft: a.depth * 8 }}>
+                <p className={clsx("truncate text-[12.5px] font-semibold", isCustomer(a) && "text-warn")} style={{ paddingLeft: a.depth * 8 }}>
                   {a.depth > 0 && <span className="text-fg-faint">└ </span>}{a.name}
                 </p>
                 <p className="truncate font-mono text-[9.5px] text-fg-faint">
-                  {doing ? `${doing.kind}: ${doing.name}` : p?.working ? "working" : "idle"}
+                  {isCustomer(a)
+                    ? (p?.bubble?.type === "speech" ? `“${p.bubble.text}”` : "waiting")
+                    : doing ? `${doing.kind}: ${doing.name}` : p?.working ? "working" : "idle"}
                 </p>
               </div>
               {a.errors > 0 && <span className="font-mono text-[9px] text-fail">{a.errors}!</span>}
@@ -352,12 +431,20 @@ function InspectCard({ actor, pose, events, declared, onClose }: {
       </div>
       <div className="flex-1 overflow-y-auto p-4">
         <div className="mx-auto w-16 rounded-lg border border-line bg-ink-800 p-2">
-          <PixelPerson hue={hueOf(actor.id)} size={48} working={pose?.working} />
+          <PixelPerson hue={isCustomer(actor) ? 42 : hueOf(actor.id)} size={48} working={pose?.working} hat={isCustomer(actor)} />
         </div>
         <p className="mt-2 text-center text-[15px] font-bold">{actor.name}</p>
         <p className="text-center font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">
-          {actor.kind === "subagent" ? "sub-agent" : "agent"}
+          {isCustomer(actor) ? "the person this office works for" : actor.kind === "subagent" ? "sub-agent" : "agent"}
         </p>
+        {pose?.bubble && (
+          <p className="mt-3 rounded-lg border border-line-soft bg-ink-800/60 p-2.5 text-[11.5px] leading-relaxed text-fg">
+            <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wider text-fg-faint">
+              {isCustomer(actor) ? "asked" : pose.working ? "now" : "last word"}
+            </span>
+            <WordText bubble={pose.bubble} />
+          </p>
+        )}
         {declared?.description && (
           <p className="mt-3 rounded-lg border border-line-soft bg-ink-800/60 p-2.5 text-[11.5px] leading-relaxed text-fg-muted">
             {declared.description}

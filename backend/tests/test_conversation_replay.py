@@ -3,9 +3,19 @@
 import json
 from datetime import datetime, timedelta
 
-from tracely.domain.traces.replay import build_replay
+from tracely.domain.traces.replay import CUSTOMER, _user_text_of
+from tracely.domain.traces.replay import build_replay as _build_replay
 
 T0 = datetime(2026, 8, 15, 12, 0, 0)
+
+
+def build_replay(*args, **kwargs):
+    """The AGENTS' script: the synthetic customer (tested on its own at the bottom) is
+    stripped so this file's positional asserts keep reading the first agent beat."""
+    r = _build_replay(*args, **kwargs)
+    r["actors"] = [a for a in r["actors"] if a["id"] != CUSTOMER]
+    r["events"] = [e for e in r["events"] if e["kind"] != "ask"]
+    return r
 
 
 def span(sid, parent, stype, name, at_ms, dur_ms=100, agent="", level="", **extra):
@@ -374,3 +384,69 @@ def test_spoken_output_still_wins_over_the_tool_names():
         ]
     )
     assert r["events"][0]["detail"] == "on it"
+
+
+# ── the customer ──────────────────────────────────────────────────────────────
+
+
+def test_customer_leads_the_cast_and_asks_once_per_turn():
+    """One synthetic customer, first in the cast, one `ask` at the start of every turn carrying
+    that turn's user message — the office and the transcript both read it from here."""
+    turn1 = [
+        dict(span("1", "", "AGENT", "run", 0, 500, agent="sup"), input="Where is my order?"),
+        span("2", "1", "GENERATION", "chat", 50, 80, agent="sup"),
+    ]
+    # a framework root: normalized message list, history included — the LAST user message is
+    # this turn's ask, not the first
+    history = json.dumps([
+        {"role": "system", "content": "You help."},
+        {"role": "user", "content": "Where is my order?"},
+        {"role": "assistant", "content": "Shipped yesterday."},
+        {"role": "user", "content": [{"type": "text", "text": "Refund it please."}]},
+    ])
+    turn2 = [
+        dict(span("1", "", "CHAIN", "graph", 900, 400, agent="sup"), trace_id="t2", input=history),
+        dict(span("2", "1", "GENERATION", "chat", 950, 200, agent="sup"), trace_id="t2"),
+    ]
+    r = _build_replay(turn1 + turn2)
+    assert r["actors"][0] == {
+        "id": CUSTOMER, "name": "customer", "kind": "customer", "parent": "", "depth": 0,
+        "first_ms": 0, "last_ms": 900, "events": 2, "errors": 0,
+    }
+    asks = [e for e in r["events"] if e["kind"] == "ask"]
+    assert [(a["t_ms"], a["trace_id"], a["detail"]) for a in asks] == [
+        (0, "t1", "Where is my order?"),
+        (900, "t2", "Refund it please."),
+    ]
+    assert r["events"][0]["kind"] == "ask"          # the ask leads its turn on the clock
+    assert all(e["station"] == "door" and e["container"] is False for e in asks)
+
+
+def test_customer_ask_falls_back_to_the_first_prompt_when_the_root_is_config():
+    """CrewAI/LlamaIndex roots carry a config payload, not the question — same fallback as
+    `session_turns`: the earliest GENERATION's user message."""
+    spans = [
+        dict(span("1", "", "CHAIN", "crew", 0, 500, agent="a"), input='{"agents": ["x"], "verbose": true}'),
+        dict(span("2", "1", "GENERATION", "chat", 100, 80, agent="a"),
+             input=json.dumps([{"role": "user", "content": "Plan my trip"}])),
+        dict(span("3", "1", "GENERATION", "chat", 300, 80, agent="a"),
+             input=json.dumps([{"role": "user", "content": "later internal prompt"}])),
+    ]
+    ask = next(e for e in _build_replay(spans)["events"] if e["kind"] == "ask")
+    assert ask["detail"] == "Plan my trip"
+
+
+def test_customer_is_always_there_even_with_nothing_sayable():
+    r = _build_replay([span("t", "", "TOOL", "search", 0, 100, agent="a")])
+    assert r["actors"][0]["kind"] == "customer"
+    assert [e["detail"] for e in r["events"] if e["kind"] == "ask"] == [""]
+
+
+def test_user_text_of_never_leaks_an_envelope():
+    assert _user_text_of('"Refund please."') == "Refund please."
+    assert _user_text_of('{"messages": [{"role": "human", "content": "hi"}]}') == "hi"
+    assert _user_text_of('{"input": "ship it"}') == "ship it"
+    assert _user_text_of('{"model": "gpt-4o", "temperature": 0}') == ""
+    assert _user_text_of('[{"role": "assistant", "content": "only me"}]') == ""
+    assert _user_text_of('{"q": ') == '{"q":'  # not JSON after all: a plain string
+    assert _user_text_of(None) == ""

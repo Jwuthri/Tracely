@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { layoutOffice, librarySkills, narrate, poseAt, stationInfo, wallTools } from "./office";
-import { toPlayEvents, type ReplayActor, type ReplayEvent } from "./timeline";
+import { layoutOffice, librarySkills, narrate, poseAt, stationInfo, turnDigest, wallTools, wordOf } from "./office";
+import { OFFICE_PACING, toPlayEvents, type ReplayActor, type ReplayEvent } from "./timeline";
 
 const actor = (id: string, parent = "", depth = 0): ReplayActor =>
   ({ id, name: id, kind: depth ? "subagent" : "agent", parent, depth, first_ms: 0, last_ms: 0, events: 0, errors: 0 }) as ReplayActor;
+const customer: ReplayActor = { ...actor("__customer__"), name: "customer", kind: "customer" };
 
 const ev = (t: number, dur: number, a: string, kind: string, name: string, extra: Partial<ReplayEvent> = {}): ReplayEvent => ({
   t_ms: t, dur_ms: dur, actor: a, kind, name, status: "ok", model: "", detail: "",
@@ -68,14 +69,18 @@ describe("poseAt", () => {
     // the computer tool runs 1200..1500 on the play clock — just after it, the character used
     // to stand there with an empty head as if it had answered nothing
     expect(poseAt(actors[1], script, 1550, layout).bubble).toEqual({
-      type: "chip", icon: "tool", text: "charge",
+      type: "chip", icon: "tool", text: "charge", sub: "", faded: false,
     });
   });
-  it("idle actors sit at their desk with no bubble (after linger)", () => {
+  it("idle actors sit at their desk holding their (faded) last word", () => {
+    // faq's last beat was the `charge` tool — its name stays over their head, quieter, until
+    // they act again; an empty head would read as "never did anything"
     const p = poseAt(actors[1], script, 9000, layout);
     expect(p.at).toBe("desk");
-    expect(p.bubble).toBeNull();
+    expect(p.bubble).toEqual({ type: "chip", icon: "tool", text: "charge", sub: "", faded: true });
     expect(p.working).toBe(false);
+    // an actor with no events yet has nothing to say
+    expect(poseAt(actors[1], script, 100, layout).bubble).toBeNull();
   });
 });
 
@@ -134,5 +139,66 @@ it("afterglow shows the most recently FINISHED word, not the longest-running one
   ]).events;
   // both ended by 2100; long-early ended LAST (pt0+2000) so its words linger
   const p = poseAt(actors[0], script, 2100, layout);
-  expect(p.bubble).toEqual({ type: "speech", text: "early words" });
+  expect(p.bubble).toEqual({ type: "speech", text: "early words", faded: false });
+});
+
+
+describe("the customer", () => {
+  const actors = [customer, actor("sup")];
+  const layout = layoutOffice(actors);
+  const script = toPlayEvents([
+    ev(0, 0, "__customer__", "ask", "asks", { detail: "Where is my order?", trace_id: "t1", station: "door" }),
+    ev(0, 400, "sup", "llm", "chat", { detail: "Shipped yesterday.", trace_id: "t1" }),
+    ev(3000, 0, "__customer__", "ask", "asks", { detail: "Refund it.", trace_id: "t2", station: "door" }),
+    ev(3000, 300, "sup", "tool", "issue_refund", { detail: '{"refund_id":"rf_1"}', trace_id: "t2", station: "computer" }),
+  ], OFFICE_PACING).events;
+
+  it("has no desk and stands by the door the whole time", () => {
+    expect(layout.desks.__customer__).toBeUndefined();
+    expect(layout.desks.sup).toBeDefined();
+    for (const t of [0, 500, 9000]) {
+      const p = poseAt(customer, script, t, layout);
+      expect(p.at).toBe("door");
+      expect(p.x).toBe(layout.customer.x);
+    }
+  });
+  it("speaks the turn's question and keeps it up (faded) until the next turn", () => {
+    expect(poseAt(customer, script, 100, layout).bubble).toEqual({ type: "speech", text: "Where is my order?", faded: false });
+    // office pacing: every beat is ≥900 and the 3s pause squeezes to 900, so turn 2 starts at
+    // play 900 and its ask is live 900..1800 — long after that it is still up, just faded
+    const ask2 = script.find((e) => e.trace_id === "t2")!;
+    expect(ask2.pt).toBe(900);
+    expect(poseAt(customer, script, ask2.pt + 50, layout).bubble).toEqual({ type: "speech", text: "Refund it.", faded: false });
+    const later = poseAt(customer, script, 9000, layout);
+    expect(later.bubble).toEqual({ type: "speech", text: "Refund it.", faded: true });
+    expect(later.working).toBe(false);
+  });
+  it("narrates the ask", () => {
+    expect(narrate(script, 10, (id) => id)).toBe("customer asks: Where is my order?");
+  });
+  it("turnDigest lists the question and each agent's last word per turn", () => {
+    expect(turnDigest(script, actors)).toEqual([
+      { trace_id: "t1", pt: 0, ask: "Where is my order?", words: [{ actor: "sup", bubble: { type: "speech", text: "Shipped yesterday." } }] },
+      { trace_id: "t2", pt: script.find((e) => e.trace_id === "t2")!.pt, ask: "Refund it.",
+        words: [{ actor: "sup", bubble: { type: "chip", icon: "tool", text: "issue_refund", sub: '{"refund_id":"rf_1"}' } }] },
+    ]);
+  });
+});
+
+it("wordOf: a turn that ends on a tool names it, an empty reply falls back to the turn's answer", () => {
+  const script = toPlayEvents([
+    ev(0, 1000, "sup", "turn", "run", { container: true, detail: "Refund of $1,299 issued." }),
+    ev(100, 100, "sup", "llm", "chat", { detail: "" }),
+    ev(300, 100, "sup", "tool", "issue_refund", { detail: "ok", status: "error" }),
+    ev(500, 100, "sub", "think", "thinking", { detail: "hmm" }),
+    ev(700, 100, "sup", "guard", "pii", { detail: "clean" }),
+  ]).events;
+  const [turn, llm, tool, think, guard] = script;
+  expect(wordOf(llm, script)).toEqual({ type: "speech", text: "Refund of $1,299 issued." }); // the envelope's answer
+  expect(wordOf(llm, [])).toBeNull();                                                       // nothing to fall back on
+  expect(wordOf(tool)).toEqual({ type: "error", text: "issue_refund" });                    // failure beats result
+  expect(wordOf({ ...tool, status: "ok" })).toEqual({ type: "chip", icon: "tool", text: "issue_refund", sub: "ok" });
+  expect(wordOf(think)).toEqual({ type: "thought", text: "hmm" });
+  expect(wordOf(guard)).toBeNull();
+  expect(turn.container).toBe(true);
 });

@@ -37,6 +37,6 @@ describe("landing fleet scene", () => {
   it("ends on the reply that will be graded", () => {
     const reply = events[events.length - 1];
     expect(pose("support", reply.pt + reply.pdur - 50).bubble?.type).toBe("thought");
-    expect(pose("support", total).bubble).toEqual({ type: "speech", text: "Sure — your refund is on its way!" });
+    expect(pose("support", total).bubble).toEqual({ type: "speech", text: "Sure — your refund is on its way!", faded: false });
   });
 });

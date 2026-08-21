@@ -32,6 +32,8 @@ _KIND = {
     "SKILL": "skill",
 }
 _ACTOR_TYPES = {"AGENT", "SUBAGENT"}
+# The person the whole office works for. Synthetic actor id — no agent slug can collide with it.
+CUSTOMER = "__customer__"
 
 # event kind -> where the actor performs it. The span TYPE is authoritative: SKILL and
 # RETRIEVER are knowledge access (the library), TOOL is an action (the computer) — instrument
@@ -47,6 +49,7 @@ _STATION = {
     "tool": "computer",
     "skill": "library",
     "delegate": "peer",
+    "ask": "door",
 }
 
 
@@ -103,6 +106,38 @@ def _text_of(value: Any, limit: int = 120) -> str:
     return _preview(value, limit)
 
 
+def _user_text_of(value: Any, limit: int = 160) -> str:
+    """The CUSTOMER's words in a span input: the last `user` message of a message list, a
+    plain string, or a `{"messages"|"input"|"question"|"query": …}` wrapper. Anything else
+    (a framework's config payload, a tool's arguments) is "" — never a JSON envelope."""
+    if isinstance(value, str) and value.lstrip().startswith(("[", "{", '"')):
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            return _preview(value, limit)
+    if isinstance(value, str):
+        return _preview(value, limit)
+    if isinstance(value, dict):
+        if "role" in value:
+            value = [value]
+        else:
+            for key in ("messages", "input", "question", "query"):
+                if value.get(key):
+                    return _user_text_of(value[key], limit)
+            return ""
+    if isinstance(value, list):
+        for m in reversed(value):
+            if isinstance(m, dict) and str(m.get("role") or "").lower() in ("user", "human"):
+                content = m.get("content")
+                if isinstance(content, list):
+                    content = " ".join(
+                        b.get("text", "") for b in content if isinstance(b, dict) and b.get("text")
+                    )
+                if isinstance(content, str) and content.strip():
+                    return _preview(content, limit)
+    return ""
+
+
 def _called_names(message: dict) -> list[str]:
     """Function names of a message's `tool_calls` — tolerant of every junk shape the wire
     delivers (a non-list, a string entry, a `function` that isn't a dict)."""
@@ -157,7 +192,8 @@ def build_replay(
 ) -> dict:
     """`{duration_ms, actors[], events[]}` — the conversation as a playable script.
 
-    `actors` are ordered by first appearance (stable seating). Each carries `parent` (the actor
+    `actors` are ordered by first appearance (stable seating), led by the synthetic `customer`
+    (kind `customer`) whose `ask` events carry each turn's user message. Each carries `parent` (the actor
     that spawned it, empty for top-level) and `depth`. `events` are ordered by start time with
     `t_ms` relative to the conversation's first span, so the UI plays one clock. Each event also
     carries `station` (desk/computer/library/peer) and, for handoffs, `delegate_to` + `say`.
@@ -374,9 +410,54 @@ def build_replay(
             }
         )
 
+    # ── the customer: one `ask` per turn (trace), spoken at the turn's first span ──
+    # The question is the root span's input (manual SDK: a plain string; frameworks: the
+    # normalized message list whose LAST user message is this turn's ask). A framework root
+    # that carries a config payload instead falls back to the earliest GENERATION's prompt —
+    # same preference order as `session_turns`.
+    turns: dict[str, list[dict]] = {}
+    for span in rows:
+        turns.setdefault(str(span.get("trace_id") or ""), []).append(span)
+    asks: list[dict] = []
+    for tid, tspans in turns.items():
+        roots = [s for s in tspans if ref(s, s.get("parent_span_id")) not in by_id]
+        gens = [s for s in tspans if str(s.get("type") or "").upper() == "GENERATION"]
+        ask = next((t for s in roots + gens + tspans if (t := _user_text_of(s.get("input")))), "")
+        asks.append(
+            {
+                "t_ms": _ms(t0, tspans[0]["start_time"]),
+                "dur_ms": 0,
+                "actor": CUSTOMER,
+                "kind": "ask",
+                "name": "asks",
+                "status": "ok",
+                "container": False,
+                "station": "door",
+                "delegate_to": "",
+                "say": "",
+                "model": "",
+                "detail": ask,
+                "span_id": str(tspans[0].get("span_id") or ""),
+                "trace_id": tid,
+                "turn_id": str(tspans[0].get("turn_id") or ""),
+            }
+        )
+    events = sorted(asks + events, key=lambda e: e["t_ms"])  # stable: an ask leads its turn
+    customer = {
+        "id": CUSTOMER,
+        "name": "customer",
+        "kind": "customer",
+        "parent": "",
+        "depth": 0,
+        "first_ms": asks[0]["t_ms"],
+        "last_ms": asks[-1]["t_ms"],
+        "events": len(asks),
+        "errors": 0,
+    }
+
     duration = max((e["t_ms"] + e["dur_ms"]) for e in events) if events else 0
     return {
         "duration_ms": duration,
-        "actors": [seen[k] for k in order],
+        "actors": [customer, *(seen[k] for k in order)],
         "events": events,
     }

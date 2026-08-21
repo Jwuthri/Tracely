@@ -175,6 +175,11 @@ export function ConversationStage({ threadId }: { threadId: string }) {
                           sub-agent
                         </span>
                       )}
+                      {a.kind === "customer" && (
+                        <span className="rounded border border-warn/40 bg-warn/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-warn">
+                          customer
+                        </span>
+                      )}
                       {busy && <span className="font-mono text-[10px] text-ok">● working</span>}
                     </div>
                     <div className="mt-1 h-[22px]">
@@ -184,7 +189,8 @@ export function ConversationStage({ threadId }: { threadId: string }) {
                             doing.status === "error" ? "border-fail/50 bg-fail-dim/50 text-fail" : "border-line bg-ink-700 text-fg")}
                           style={doing.status === "ok" ? { borderColor: `${kindStyle(doing.kind).color}55` } : undefined}>
                           <span style={{ color: kindStyle(doing.kind).color }}>{kindStyle(doing.kind).icon}</span>
-                          {doing.name}
+                          {/* the customer's beat IS the question — the span name says nothing */}
+                          <span className="max-w-[420px] truncate">{doing.kind === "ask" ? doing.detail || "…" : doing.name}</span>
                           {doing.model && <span className="text-fg-faint">· {doing.model}</span>}
                           {liveIds.has(doing.span_id) && <span className="stage-dots" />}
                         </span>

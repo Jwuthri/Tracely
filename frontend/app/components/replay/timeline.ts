@@ -1,7 +1,9 @@
 // Pure helpers for the conversation replay stage (tested — no React, no fetch).
 
 export type ReplayActor = {
-  id: string; name: string; kind: "agent" | "subagent"; parent: string;
+  /** `customer` is the one synthetic actor: the person the office works for, whose `ask`
+   *  events carry each turn's user message. */
+  id: string; name: string; kind: "agent" | "subagent" | "customer"; parent: string;
   depth: number; first_ms: number; last_ms: number; events: number; errors: number;
 };
 
@@ -33,9 +35,12 @@ export const KIND_STYLE: Record<string, { label: string; color: string; icon: st
   skill: { label: "skill", color: "#f472b6", icon: "◆" },
   guard: { label: "guard", color: "#fbbf24", icon: "⛨" },
   step: { label: "step", color: "#8b94a7", icon: "·" },
+  ask: { label: "customer", color: "#fbbf24", icon: "❝" },
 };
 
 export const kindStyle = (k: string) => KIND_STYLE[k] ?? KIND_STYLE.step;
+
+export const isCustomer = (a: { kind: string }) => a.kind === "customer";
 
 /** A container span envelopes other spans; its duration is the sum of everyone's work. */
 export const isContainer = (e: { kind: string; container?: boolean }) =>
