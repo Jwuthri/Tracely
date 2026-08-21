@@ -22,7 +22,7 @@ export type OfficeLayout = {
 export type Bubble = (
   | { type: "speech"; text: string }
   | { type: "thought"; text: string }
-  | { type: "chip"; icon: "tool" | "skill"; text: string; sub?: string }
+  | { type: "chip"; icon: "tool" | "skill" | "call"; text: string; sub?: string }
   | { type: "error"; text: string }
 ) & { faded?: boolean };
 
@@ -45,8 +45,10 @@ export function layoutOffice(all: ReplayActor[]): OfficeLayout {
   const desks: Record<string, Pt> = {};
   const rootY = 40;
   const subY = 66;
+  // Roots stop short of the right corner: that is the customer's spot, and their question
+  // hangs leftward from it in the same band a root's bubble rises into.
   roots.forEach((r, i) => {
-    const x = roots.length === 1 ? 50 : 22 + (i * 56) / Math.max(1, roots.length - 1);
+    const x = roots.length === 1 ? 46 : 20 + (i * 48) / Math.max(1, roots.length - 1);
     desks[r.id] = { x, y: rootY };
   });
   // subs cluster under their parent; siblings fan out around the parent's x
@@ -77,7 +79,7 @@ export function layoutOffice(all: ReplayActor[]): OfficeLayout {
     library: { x: 8.5, y: 52 },
     tools: { x: 91.5, y: 52 },
     door: { x: 88, y: 22 },
-    customer: { x: 84, y: 31 },
+    customer: { x: 87, y: 31 },
     coffee: { x: 8, y: 84 },
   };
 }
@@ -88,31 +90,76 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
  *  actor acts again — it just fades after this. */
 const LINGER = 1600;
 
-/** The bubble for something an actor finished: words stay words, a turn that ENDED on a tool
- *  run names the tool and what it returned, an error keeps the red mark. A model turn with no
- *  sayable output falls back to the turn envelope's output (the root span's answer). */
+/** What an actor shows for ONE beat — in flight or finished, the same rendering either way.
+ *  An llm is the interesting case: a model that answered with a tool call has no words, and
+ *  showing "…" for it (the old behaviour) meant a supervisor stood there saying nothing for
+ *  most of the conversation. Order: failure, handoff, words, the tools it called, the model. */
 export function wordOf(e: PlayEvent, events: PlayEvent[] = []): Bubble | null {
   if (e.status === "error") return { type: "error", text: e.name };
+  if (e.delegate_to || e.kind === "delegate") return { type: "speech", text: e.say || `→ ${e.name}` };
   if (e.kind === "ask") return { type: "speech", text: e.detail || "…" };
   if (e.kind === "tool" || e.kind === "skill")
     return { type: "chip", icon: e.kind === "skill" ? "skill" : "tool", text: e.name, sub: e.detail };
   if (e.kind === "think") return e.detail ? { type: "thought", text: e.detail } : null;
   if (e.kind !== "llm") return null;
-  const text = e.detail || events.find((c) => isContainer(c) && c.actor === e.actor && c.trace_id === e.trace_id && c.detail)?.detail;
-  return text ? { type: "speech", text } : null;
+  const calls = e.calls ?? [];
+  // `detail` is "→ a, b" when the model only called tools — the chip says that better.
+  const spoke = e.detail && !(calls.length && e.detail.startsWith("→")) ? e.detail : "";
+  if (spoke) return { type: "speech", text: spoke };
+  if (calls.length) return { type: "chip", icon: "call", text: calls.join(", ") };
+  // Nothing recorded on the span itself. ONLY the actor's last beat of the turn may borrow the
+  // turn envelope's answer (frameworks record the final reply on the graph root): letting every
+  // silent llm borrow it made each of them repeat the conversation's last message.
+  const isLastOfTurn = !events.some(
+    (o) => !isContainer(o) && o.actor === e.actor && o.trace_id === e.trace_id && o.pt > e.pt,
+  );
+  const owned = isLastOfTurn
+    ? events.find((c) => isContainer(c) && c.actor === e.actor && c.trace_id === e.trace_id && c.detail)?.detail
+    : "";
+  if (owned) return { type: "speech", text: owned };
+  return e.model ? { type: "chip", icon: "call", text: `✎ ${e.model}` } : null;
 }
 
-/** An actor's most recently FINISHED non-container event at t, optionally within one turn.
- *  Picked by END time — picking by start let a long-running early event mask the actual last
- *  word. */
+/** Play-time each of an actor's beats OWNS the bubble. Beats are laid end to end in order,
+ *  each holding the head for at least MIN_DWELL: prod traces fire an llm and the tool it just
+ *  asked for ~1ms apart, and since the newer beat masks the older one, the supervisor's
+ *  decision flashed for a millisecond and was gone. A beat may lag its own start by at most
+ *  MAX_LAG so a burst of spans can't drift the bubble far from what the character is doing;
+ *  the last beat holds indefinitely (that is the "last word stays up" rule). */
+const MIN_DWELL = 650;
+const MAX_LAG = 1300;
+
+export function bubbleWindows(actorId: string, events: PlayEvent[]): { e: PlayEvent; from: number }[] {
+  const out: { e: PlayEvent; from: number }[] = [];
+  for (const e of events) {
+    if (e.actor !== actorId || isContainer(e)) continue;
+    const prev = out[out.length - 1];
+    const from = prev ? Math.min(Math.max(e.pt, prev.from + MIN_DWELL), e.pt + MAX_LAG) : e.pt;
+    out.push({ e, from });
+  }
+  return out;
+}
+
+/** The beat whose bubble is on screen at t (see `bubbleWindows`). */
+export function bubbleAt(actorId: string, events: PlayEvent[], t: number): PlayEvent | null {
+  const windows = bubbleWindows(actorId, events);
+  let found: PlayEvent | null = null;
+  for (const w of windows) {
+    if (w.from > t) break;
+    found = w.e;
+  }
+  return found;
+}
+
+/** An actor's last beat at or before t, optionally within one turn. Ordered by START, like the
+ *  bubble queue and like the conversation itself: the message an agent produced last is the one
+ *  it began last, even when an earlier, longer call finished after it. */
 export function lastEventOf(actorId: string, events: PlayEvent[], t: number, traceId?: string): PlayEvent | null {
   let last: PlayEvent | null = null;
-  let lastEnd = -1;
   for (const e of events) {
     if (e.pt > t) break;
     if (e.actor !== actorId || isContainer(e) || (traceId !== undefined && e.trace_id !== traceId)) continue;
-    const end = e.pt + e.pdur;
-    if (end <= t && end > lastEnd) { last = e; lastEnd = end; }
+    last = e;
   }
   return last;
 }
@@ -217,34 +264,16 @@ export function poseAt(
     }
   }
 
-  // what floats above their head
+  // What floats above their head: ONE rule for the whole conversation. `bubbleAt` picks the
+  // beat that owns the head right now — in flight or long finished, each beat guaranteed its
+  // turn on screen — and `wordOf` renders it. The last beat holds until the actor acts again,
+  // fading once it is no longer fresh, so nobody ever stands there with an empty head.
   let bubble: Bubble | null = null;
-  const active = inflight ?? delegation;
-  if (active) {
-    if (active.status === "error") {
-      bubble = { type: "error", text: active.name };
-    } else if (active.delegate_to) {
-      bubble = { type: "speech", text: active.say || `→ ${active.name}` };
-    } else if (active.kind === "think") {
-      bubble = { type: "thought", text: active.detail || "…" };
-    } else if (active.kind === "skill") {
-      bubble = { type: "chip", icon: "skill", text: active.name };
-    } else if (active.kind === "tool") {
-      bubble = { type: "chip", icon: "tool", text: active.name };
-    } else if (active.kind === "delegate" && active.say) {
-      // explicit handoff whose callee exported no spans: the walk has nowhere to go, but the
-      // task itself is real — say it from the desk instead of vanishing.
-      bubble = { type: "speech", text: active.say };
-    } else if (active.kind === "llm") {
-      bubble = { type: "thought", text: "…" };
-    }
-  } else {
-    // afterglow: the last word stays up until the actor acts again — a reply, a thought, the
-    // tool a turn ended on (with its result), or the failure — fading once it is no longer
-    // fresh. Only an actor that never did anything has an empty head.
-    const last = lastEventOf(actor.id, events, t);
-    const word = last && wordOf(last, events);
-    if (word) bubble = { ...word, faded: t - (last.pt + last.pdur) > LINGER };
+  const held = delegation ?? bubbleAt(actor.id, events, t);
+  const word = held && wordOf(held, events);
+  if (held && word) {
+    const ended = held.pt + held.pdur;
+    bubble = { ...word, faded: t > ended && t - ended > LINGER };
   }
 
   return {
@@ -361,7 +390,11 @@ export function narrate(
       case "tool":
         return `${who} runs ${current.name}`;
       case "llm":
-        return `${who} drafts a reply (${current.model || "llm"})`;
+        // a model turn that answered with a tool call is not "drafting a reply" — say what it
+        // actually asked for, the same thing its bubble shows
+        return current.calls?.length
+          ? `${who} calls ${current.calls.join(", ")}`
+          : `${who} drafts a reply (${current.model || "llm"})`;
       default:
         return `${who} · ${current.name}`;
     }

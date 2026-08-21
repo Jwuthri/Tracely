@@ -20,6 +20,9 @@ export type ReplayEvent = {
   delegate_to?: string;
   /** The handoff text (a DELEGATE span's input, or the tool-call arguments). */
   say?: string;
+  /** Tools this beat REQUESTED — an llm that answered with a call instead of words. Indexed
+   *  names when ingest caught them, else dug out of the payload (`_output_calls`). */
+  calls?: string[];
 };
 
 /** An event placed on the PLAY clock (gaps squeezed), keeping its real timestamp. */

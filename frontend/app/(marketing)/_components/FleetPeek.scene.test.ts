@@ -31,12 +31,13 @@ describe("landing fleet scene", () => {
 
   it("raises the failure as an error bubble", () => {
     const boom = events.find((e) => e.status === "error")!;
-    expect(pose("billing", boom.pt + 100).bubble).toEqual({ type: "error", text: "check_eligibility" });
+    expect(pose("billing", boom.pt + 100).bubble).toEqual({ type: "error", text: "check_eligibility", faded: false });
   });
 
   it("ends on the reply that will be graded", () => {
     const reply = events[events.length - 1];
-    expect(pose("support", reply.pt + reply.pdur - 50).bubble?.type).toBe("thought");
+    // the reply is readable WHILE it is being written — an in-flight llm used to be a bare "…"
+    expect(pose("support", reply.pt + reply.pdur - 50).bubble).toEqual({ type: "speech", text: "Sure — your refund is on its way!", faded: false });
     expect(pose("support", total).bubble).toEqual({ type: "speech", text: "Sure — your refund is on its way!", faded: false });
   });
 });

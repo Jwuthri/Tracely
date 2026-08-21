@@ -191,6 +191,11 @@ export function ConversationStage({ threadId }: { threadId: string }) {
                           <span style={{ color: kindStyle(doing.kind).color }}>{kindStyle(doing.kind).icon}</span>
                           {/* the customer's beat IS the question — the span name says nothing */}
                           <span className="max-w-[420px] truncate">{doing.kind === "ask" ? doing.detail || "…" : doing.name}</span>
+                          {/* a model turn that answered with a tool call: name the tool, or the
+                              row reads as an anonymous model call doing nothing */}
+                          {doing.kind === "llm" && doing.calls?.length ? (
+                            <span className="text-t_tool">→ {doing.calls.join(", ")}</span>
+                          ) : null}
                           {doing.model && <span className="text-fg-faint">· {doing.model}</span>}
                           {liveIds.has(doing.span_id) && <span className="stage-dots" />}
                         </span>

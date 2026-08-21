@@ -292,7 +292,7 @@ function BubbleView({ bubble, x, y, beside = false }: {
   }
   if (bubble.type === "speech") {
     return (
-      <div className={clsx("pointer-events-none absolute z-50 w-max max-w-[210px]", anchor)}>
+      <div className={clsx("pointer-events-none absolute z-50 w-max", beside ? "max-w-[168px]" : "max-w-[210px]", anchor)}>
         <div className={clsx("rounded-lg border border-line-bright bg-[#f4f6fb] px-2.5 py-1.5 text-left text-[10.5px] font-medium leading-snug text-ink-900",
           bubble.faded && "line-clamp-3")}>
           {bubble.text}
@@ -313,8 +313,10 @@ function BubbleView({ bubble, x, y, beside = false }: {
   return (
     <div className={clsx("pointer-events-none absolute z-50 w-max max-w-[200px]", anchor)}>
       <span className={clsx("block rounded-md border px-2 py-0.5 text-left font-mono text-[10px]",
-        bubble.icon === "skill" ? "border-t_retriever/50 bg-t_retriever/15 text-t_retriever" : "border-t_tool/50 bg-t_tool/15 text-t_tool")}>
-        {bubble.icon === "skill" ? "◈" : "⚙"} {bubble.text}
+        bubble.icon === "skill" ? "border-t_retriever/50 bg-t_retriever/15 text-t_retriever"
+          : bubble.icon === "call" ? "border-t_llm/50 bg-t_llm/15 text-t_llm"
+          : "border-t_tool/50 bg-t_tool/15 text-t_tool")}>
+        {bubble.icon === "skill" ? "◈" : bubble.icon === "call" ? "→" : "⚙"} {bubble.text}
         {/* a turn that ended on this tool: show what it returned, not just that it ran */}
         {bubble.sub && <span className="block truncate text-[9.5px] text-fg-muted" title={bubble.sub}>→ {bubble.sub}</span>}
       </span>
@@ -327,8 +329,8 @@ function WordText({ bubble }: { bubble: Bubble }) {
   if (bubble.type === "error") return <span className="font-mono text-fail">! {bubble.text}</span>;
   if (bubble.type === "chip")
     return (
-      <span className={clsx("font-mono", bubble.icon === "skill" ? "text-t_retriever" : "text-t_tool")}>
-        {bubble.icon === "skill" ? "◈" : "⚙"} {bubble.text}
+      <span className={clsx("font-mono", bubble.icon === "skill" ? "text-t_retriever" : bubble.icon === "call" ? "text-t_llm" : "text-t_tool")}>
+        {bubble.icon === "skill" ? "◈" : bubble.icon === "call" ? "→" : "⚙"} {bubble.text}
         {bubble.sub && <span className="text-fg-muted"> → {bubble.sub}</span>}
       </span>
     );

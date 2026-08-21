@@ -139,10 +139,12 @@ def _user_text_of(value: Any, limit: int = 160) -> str:
 
 
 def _called_names(message: dict) -> list[str]:
-    """Function names of a message's `tool_calls` — tolerant of every junk shape the wire
-    delivers (a non-list, a string entry, a `function` that isn't a dict)."""
-    raw = message.get("tool_calls")
+    """Function names of a message's tool calls — tolerant of every junk shape the wire
+    delivers (a non-list, a string entry, a `function` that isn't a dict). Covers both
+    conventions: OpenAI's `tool_calls[].function.name` and Anthropic's `tool_use` content
+    blocks, which carry the name on the block itself."""
     names = []
+    raw = message.get("tool_calls")
     for call in raw if isinstance(raw, list) else []:
         if not isinstance(call, dict):
             continue
@@ -150,6 +152,34 @@ def _called_names(message: dict) -> list[str]:
         name = (fn.get("name") if isinstance(fn, dict) else None) or call.get("name")
         if isinstance(name, str) and name:
             names.append(name)
+    content = message.get("content")
+    for block in content if isinstance(content, list) else []:
+        if not isinstance(block, dict) or block.get("type") not in ("tool_use", "tool_call"):
+            continue
+        name = block.get("name")
+        if isinstance(name, str) and name and name not in names:
+            names.append(name)
+    return names
+
+
+def _output_calls(value: Any) -> list[str]:
+    """The tools a model REQUESTED, dug out of the span's stored output.
+
+    The `tool_call_names` column is the intended source, but ingest only fills it from OTLP
+    attributes it recognizes as messages — on real traces it is empty for the very shapes that
+    matter (a bare `{"content": …, "tool_calls": […]}`, Anthropic `tool_use` blocks). An
+    answer that IS a tool call must never render as an empty head, so parse the payload."""
+    if not isinstance(value, str) or not value.lstrip().startswith(("[", "{")):
+        return []
+    try:
+        parsed = json.loads(value)
+    except (ValueError, TypeError):
+        return []
+    msgs = parsed if isinstance(parsed, list) else [parsed]
+    names: list[str] = []
+    for m in msgs:
+        if isinstance(m, dict):
+            names.extend(n for n in _called_names(m) if n not in names)
     return names
 
 
@@ -381,12 +411,16 @@ def build_replay(
                     break
 
         # A model turn that ANSWERED with a tool call instead of words has no sayable output —
-        # the bubble came up empty. The requested names are indexed on the span; say them.
+        # the bubble came up empty. Say what it reached for instead: the indexed names when
+        # ingest captured them, else the ones in the payload \u2014 on real traces it usually did
+        # NOT capture them (see `_output_calls`). `calls` travels as its own field so the UI
+        # can render a "called X" chip instead of parsing this line back out of `detail`.
+        called = [str(t) for t in (span.get("tool_call_names") or []) if t] or _output_calls(
+            span.get("output")
+        )
         detail = _preview(span.get("status_message")) or _text_of(span.get("output"))
-        if not detail:
-            called = [str(t) for t in (span.get("tool_call_names") or []) if t]
-            if called:
-                detail = _preview("\u2192 " + ", ".join(called))
+        if not detail and called:
+            detail = _preview("\u2192 " + ", ".join(called))
 
         events.append(
             {
@@ -404,6 +438,7 @@ def build_replay(
                 "say": say,
                 "model": str(span.get("model_id") or ""),
                 "detail": detail,
+                "calls": called,
                 "span_id": sid,
                 "trace_id": str(span.get("trace_id") or ""),
                 "turn_id": str(span.get("turn_id") or ""),
@@ -437,6 +472,7 @@ def build_replay(
                 "say": "",
                 "model": "",
                 "detail": ask,
+                "calls": [],
                 "span_id": str(tspans[0].get("span_id") or ""),
                 "trace_id": tid,
                 "turn_id": str(tspans[0].get("turn_id") or ""),

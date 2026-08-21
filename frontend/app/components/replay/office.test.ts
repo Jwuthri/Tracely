@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { layoutOffice, librarySkills, narrate, poseAt, stationInfo, turnDigest, wallTools, wordOf } from "./office";
+import { bubbleAt, layoutOffice, librarySkills, narrate, poseAt, stationInfo, turnDigest, wallTools, wordOf } from "./office";
 import { OFFICE_PACING, toPlayEvents, type ReplayActor, type ReplayEvent } from "./timeline";
 
 const actor = (id: string, parent = "", depth = 0): ReplayActor =>
@@ -52,7 +52,7 @@ describe("poseAt", () => {
     const p = poseAt(actors[0], script, 700, layout);
     expect(p.at).toBe("peer");
     expect(Math.abs(p.x - layout.desks.faq.x)).toBeLessThan(12);
-    expect(p.bubble).toEqual({ type: "speech", text: "check the warranty" });
+    expect(p.bubble).toEqual({ type: "speech", text: "check the warranty", faded: false });
   });
   it("reads knowledge at the library, runs actions at the tool wall", () => {
     // play clock: gaps over 400ms are squeezed — library is in flight at pt 800..1100,
@@ -64,6 +64,14 @@ describe("poseAt", () => {
     const p = poseAt(actors[0], script, 1700, layout);
     expect(p.at).toBe("desk");
     expect(p.bubble?.type).toBe("thought");
+  });
+  it("an llm IN FLIGHT says what it said — never a bare ellipsis", () => {
+    // the old bubble was a hardcoded "…" for any running llm, so a supervisor (nearly all llm
+    // spans) stood there saying nothing for most of the conversation
+    const solo = [actor("sup")];
+    const l = layoutOffice(solo);
+    const s2 = toPlayEvents([ev(0, 2000, "sup", "llm", "chat", { detail: "Shipped yesterday." })]).events;
+    expect(poseAt(solo[0], s2, 500, l).bubble).toEqual({ type: "speech", text: "Shipped yesterday.", faded: false });
   });
   it("keeps naming the tool when a turn ENDS on a tool run, not on words", () => {
     // the computer tool runs 1200..1500 on the play clock — just after it, the character used
@@ -127,19 +135,25 @@ it("narrate describes the current beat", () => {
   const name = (id: string) => id.toUpperCase();
   expect(narrate(script, 100, name)).toBe("SUP → FAQ: go");
   expect(narrate(script, 500, name)).toBe("FAQ runs lookup_kb");
+  // an llm that answered with a call names the tool instead of "drafts a reply"
+  const calling = toPlayEvents([ev(0, 300, "sup", "llm", "chat", { calls: ["transfer_to_billing"], model: "gpt-4o" })]).events;
+  expect(narrate(calling, 100, name)).toBe("SUP calls transfer_to_billing");
   expect(narrate(script, 5000, name)).toBe("FAQ · lookup_kb ✓"); // past tense once it ended
 });
 
-it("afterglow shows the most recently FINISHED word, not the longest-running one", () => {
+it("afterglow shows what the actor said LAST, not what finished last", () => {
   const actors = [actor("a")];
   const layout = layoutOffice(actors);
   const script = toPlayEvents([
     ev(0, 2000, "a", "llm", "long-early", { detail: "early words" }),
     ev(500, 300, "a", "llm", "short-late", { detail: "the last word" }),
   ]).events;
-  // both ended by 2100; long-early ended LAST (pt0+2000) so its words linger
-  const p = poseAt(actors[0], script, 2100, layout);
-  expect(p.bubble).toEqual({ type: "speech", text: "early words", faded: false });
+  // long-early ENDS last (pt0+2000) but short-late is the later message — the conversation
+  // reads in start order, so that is the word left on screen
+  expect(poseAt(actors[0], script, 2100, layout).bubble).toEqual({ type: "speech", text: "the last word", faded: false });
+  expect(poseAt(actors[0], script, 9000, layout).bubble).toEqual({ type: "speech", text: "the last word", faded: true });
+  // …and the earlier one still got its own window first
+  expect(poseAt(actors[0], script, 100, layout).bubble?.text).toBe("early words");
 });
 
 
@@ -185,7 +199,7 @@ describe("the customer", () => {
   });
 });
 
-it("wordOf: a turn that ends on a tool names it, an empty reply falls back to the turn's answer", () => {
+it("wordOf renders each kind of beat", () => {
   const script = toPlayEvents([
     ev(0, 1000, "sup", "turn", "run", { container: true, detail: "Refund of $1,299 issued." }),
     ev(100, 100, "sup", "llm", "chat", { detail: "" }),
@@ -194,11 +208,77 @@ it("wordOf: a turn that ends on a tool names it, an empty reply falls back to th
     ev(700, 100, "sup", "guard", "pii", { detail: "clean" }),
   ]).events;
   const [turn, llm, tool, think, guard] = script;
-  expect(wordOf(llm, script)).toEqual({ type: "speech", text: "Refund of $1,299 issued." }); // the envelope's answer
-  expect(wordOf(llm, [])).toBeNull();                                                       // nothing to fall back on
+  expect(wordOf(llm, script)).toBeNull();                  // silent AND not the turn's last beat
   expect(wordOf(tool)).toEqual({ type: "error", text: "issue_refund" });                    // failure beats result
   expect(wordOf({ ...tool, status: "ok" })).toEqual({ type: "chip", icon: "tool", text: "issue_refund", sub: "ok" });
   expect(wordOf(think)).toEqual({ type: "thought", text: "hmm" });
   expect(wordOf(guard)).toBeNull();
   expect(turn.container).toBe(true);
+});
+
+
+describe("an llm that answered with a tool call", () => {
+  const solo = [actor("sup")];
+  const l = layoutOffice(solo);
+  const callEv = (extra: Partial<ReplayEvent>) => toPlayEvents([ev(0, 1000, "sup", "llm", "chat", extra)]).events[0];
+
+  it("names the tools it called instead of standing there silent", () => {
+    expect(wordOf(callEv({ detail: "→ transfer_to_billing", calls: ["transfer_to_billing"] }))).toEqual({
+      type: "chip", icon: "call", text: "transfer_to_billing",
+    });
+    // words win when the model actually said something
+    expect(wordOf(callEv({ detail: "on it", calls: ["get_weather"] }))).toEqual({ type: "speech", text: "on it" });
+    // nothing at all: name the model rather than an empty head
+    expect(wordOf(callEv({ detail: "", calls: [], model: "gpt-4o" }))).toEqual({ type: "chip", icon: "call", text: "✎ gpt-4o" });
+    expect(wordOf(callEv({ detail: "", calls: [], model: "" }))).toBeNull();
+  });
+
+  it("shows the call in the office while it runs", () => {
+    const script = [callEv({ detail: "→ lookup", calls: ["lookup"] })];
+    expect(poseAt(solo[0], script, 300, l).bubble).toEqual({ type: "chip", icon: "call", text: "lookup", faded: false });
+  });
+});
+
+it("only the turn's LAST silent llm borrows the turn envelope's answer", () => {
+  // frameworks record the final reply on the graph root; letting EVERY silent llm borrow it
+  // made each of them repeat the conversation's last message
+  const script = toPlayEvents([
+    ev(0, 2000, "sup", "turn", "graph", { container: true, detail: "Refund issued." }),
+    ev(100, 100, "sup", "llm", "step1", { detail: "" }),
+    ev(400, 100, "sup", "llm", "step2", { detail: "" }),
+  ]).events;
+  const [, first, last] = script;
+  expect(wordOf(first, script)).toBeNull();                                   // mid-turn: silent
+  expect(wordOf(last, script)).toEqual({ type: "speech", text: "Refund issued." });
+  // a different turn's envelope is never borrowed
+  const other = { ...last, trace_id: "other" };
+  expect(wordOf(other, script)).toBeNull();
+});
+
+describe("bubble dwell", () => {
+  // the prod shape: the model asks for a tool, the tool span starts ~1ms later. The newer beat
+  // used to mask the older one instantly, so the decision flashed for a millisecond.
+  const solo = [actor("sup")];
+  const l = layoutOffice(solo);
+  const script = toPlayEvents([
+    ev(0, 1500, "sup", "llm", "chat", { detail: "→ get_balance", calls: ["get_balance"] }),
+    ev(1, 3, "sup", "tool", "get_balance", { station: "computer", detail: "1299" }),
+  ], OFFICE_PACING).events;
+
+  it("gives the masked beat a readable window instead of 1ms", () => {
+    expect(script[1].pt - script[0].pt).toBe(1);            // 1ms apart on the play clock
+    expect(bubbleAt("sup", script, 0)?.name).toBe("chat");
+    expect(bubbleAt("sup", script, 300)?.name).toBe("chat"); // would have been "get_balance"
+    expect(bubbleAt("sup", script, 700)?.name).toBe("get_balance");
+    expect(poseAt(solo[0], script, 300, l).bubble).toEqual({ type: "chip", icon: "call", text: "get_balance", faded: false });
+  });
+
+  it("caps how far a burst can drift the bubble behind the action", () => {
+    const burst = toPlayEvents(
+      Array.from({ length: 6 }, (_, i) => ev(i, 5, "sup", "tool", `t${i}`, { station: "computer" })),
+      OFFICE_PACING,
+    ).events;
+    const windows = burst.map((e) => bubbleAt("sup", burst, e.pt + 1300 + 5)?.name);
+    expect(windows[windows.length - 1]).toBe("t5");   // the last beat is reachable, not stuck
+  });
 });

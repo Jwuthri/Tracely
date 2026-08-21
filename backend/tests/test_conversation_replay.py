@@ -450,3 +450,52 @@ def test_user_text_of_never_leaks_an_envelope():
     assert _user_text_of('[{"role": "assistant", "content": "only me"}]') == ""
     assert _user_text_of('{"q": ') == '{"q":'  # not JSON after all: a plain string
     assert _user_text_of(None) == ""
+
+
+# ── what the model reached for ────────────────────────────────────────────────
+
+
+def test_calls_are_dug_out_of_the_payload_when_ingest_indexed_nothing():
+    """The real-trace case: `tool_call_names` is EMPTY on the very spans that matter (ingest
+    only fills it from OTLP attributes it recognizes as messages). An answer that IS a tool
+    call must still name the tool — parse the stored output."""
+    openai_shape = json.dumps(
+        {"content": "", "tool_calls": [{"id": "c1", "function": {"name": "transfer_to_billing"}}]}
+    )
+    anthropic_shape = json.dumps(
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "let me check"},
+                {"type": "tool_use", "id": "tu_7", "name": "get_weather", "input": {"city": "SF"}},
+            ],
+        }
+    )
+    r = build_replay(
+        [
+            dict(span("a", "", "GENERATION", "chat", 0, agent="sup"), output=openai_shape),
+            dict(span("b", "", "GENERATION", "chat", 10, agent="sup"), output=anthropic_shape),
+        ]
+    )
+    silent, spoken = r["events"]
+    assert silent["calls"] == ["transfer_to_billing"]
+    assert silent["detail"] == "→ transfer_to_billing"  # no words: say what it reached for
+    # words AND a call: the words are the message, but the call still travels for the chip
+    assert spoken["calls"] == ["get_weather"]
+    assert spoken["detail"] == "let me check"
+
+
+def test_indexed_names_win_over_the_payload_and_junk_never_crashes():
+    r = build_replay(
+        [
+            dict(
+                span("a", "", "GENERATION", "chat", 0, agent="sup"),
+                tool_call_names=["indexed"],
+                output=json.dumps({"tool_calls": [{"function": {"name": "parsed"}}]}),
+            ),
+            dict(span("b", "", "GENERATION", "chat", 10, agent="sup"), output='{"tool_calls": 7}'),
+            dict(span("c", "", "GENERATION", "chat", 20, agent="sup"), output="not json at all"),
+            dict(span("d", "", "TOOL", "t", 30, agent="sup"), output=None),
+        ]
+    )
+    assert [e["calls"] for e in r["events"]] == [["indexed"], [], [], []]
