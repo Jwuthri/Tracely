@@ -23,6 +23,7 @@ The tools run as the CALLER: the request's own credential headers are forwarded 
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import uuid
@@ -82,6 +83,14 @@ def _summary(row) -> dict:
     }
 
 
+# How long a silent stream may stay silent. `run_scenario`, `replay_case` and `run_evaluation`
+# each make real calls that take minutes, and a turn spending them emits nothing in between —
+# long enough for a proxy to decide the connection is dead and close it, which the browser sees
+# as a chat that stopped mid-answer. An SSE comment is the protocol's own way to say "still here":
+# parsers ignore it, so it costs one line and changes nothing downstream.
+PING_EVERY_S = 15.0
+
+
 def _sse(obj: dict) -> str:
     return f"data: {json.dumps(obj)}\n\n"
 
@@ -102,14 +111,33 @@ async def chat(
     )
 
     async def gen():
+        events = stream.__aiter__()
+        pending: asyncio.Task | None = None
         try:
-            async for event in stream:
+            while True:
+                if pending is None:
+                    pending = asyncio.create_task(anext(events))
+                done, _ = await asyncio.wait({pending}, timeout=PING_EVERY_S)
+                if not done:
+                    yield ": keep-alive\n\n"
+                    continue
+                task, pending = pending, None
+                try:
+                    event = task.result()
+                except StopAsyncIteration:
+                    break
                 yield _sse(event)
         except Exception as exc:
             # A dead provider is a chat bubble, not a 500 in the console — and once the first
             # frame is out the status code is already 200, so a failure has to BE a frame.
             log.warning("assistant_chat_failed", project_id=principal.project_id, error=str(exc))
             yield _sse({"type": "error", "detail": f"the model call failed: {exc}"[:300]})
+        finally:
+            # Client gone mid-turn (they closed the panel, or hit Stop): stop the agent rather
+            # than letting it keep calling tools and spending on an answer nobody will read.
+            if pending is not None:
+                pending.cancel()
+            await stream.aclose()
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(

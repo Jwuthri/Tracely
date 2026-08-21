@@ -550,3 +550,67 @@ async def test_a_failed_tool_pick_falls_back_to_every_tool(monkeypatch):
 
     request = Request()
     assert await selector.awrap_model_call(request, handler) is request
+
+
+async def test_a_silent_turn_still_says_it_is_alive(client, make_workspace, monkeypatch):
+    """A turn that runs a scenario or a backfill emits nothing for minutes. Proxies close a stream
+    that quiet, and the browser shows a chat that stopped mid-answer — so the stream has to keep
+    talking. An SSE comment is the protocol's own way to do it; parsers drop it."""
+    import asyncio
+
+    from tracely.api.routers import assistant as router
+
+    monkeypatch.setattr(router, "PING_EVERY_S", 0.01)
+
+    async def slow(*a, **k):
+        await asyncio.sleep(0.05)  # several ping intervals of silence
+        yield {"type": "done", "chat_id": "c1", "title": "t", "reply": "took a while"}
+
+    monkeypatch.setattr(router.assistant_service, "answer_stream", slow)
+    await make_workspace("ping", "ping_key", "ping@x.test")
+    r = await client.post(
+        "/api/assistant/chat", json={"message": "run it"},
+        headers={"Authorization": "Bearer ping_key"},
+    )
+
+    assert ": keep-alive" in r.text
+    assert '"reply": "took a while"' in r.text  # the answer still arrives, after the pings
+    assert r.text.rstrip().endswith("[DONE]")
+    # a comment is not a frame: the browser's reader only looks at `data: ` lines
+    assert not any(ln.startswith("data: ") and "keep-alive" in ln for ln in r.text.splitlines())
+
+
+async def test_a_client_that_leaves_stops_the_agent(monkeypatch):
+    """Closing the panel mid-turn must stop the WORK, not just stop watching it — an abandoned
+    tool loop keeps calling tools and spending on an answer nobody will ever read. Starlette
+    closes the response generator on disconnect; this checks that closing it reaches the agent."""
+    import asyncio
+
+    from tracely.api.routers import assistant as router
+    from tracely.auth import Principal
+
+    stopped = asyncio.Event()
+
+    async def forever(*a, **k):
+        try:
+            while True:
+                yield {"type": "delta", "text": "..."}
+                await asyncio.sleep(0.01)
+        finally:
+            stopped.set()
+
+    monkeypatch.setattr(router.assistant_service, "answer_stream", forever)
+
+    class FakeRequest:
+        headers: dict = {}
+
+    response = await router.chat(
+        router.ChatBody(message="go"),
+        FakeRequest(),
+        Principal(project_id="p1", user_id="u1", role=None, kind="ingest"),
+    )
+    body = response.body_iterator
+    assert "delta" in await body.__anext__()  # streaming has started
+    await body.aclose()  # the client goes away
+
+    assert stopped.is_set()
