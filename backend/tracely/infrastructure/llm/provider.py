@@ -800,7 +800,32 @@ def _cached_tool_selector(**kw):
     from langchain.agents.middleware import LLMToolSelectorMiddleware
 
     class CachedToolSelector(LLMToolSelectorMiddleware):
+        """Caches the pick for the turn, and fails open.
+
+        Both hooks are overridden because langgraph picks the sync or the async one depending on
+        how the agent is driven — patching only the async path leaves the same hole open on the
+        other, which is exactly how the fail-open below was first missed.
+        """
+
         _picked = None
+
+        def _fallback(self, exc):
+            log.warning("tool_selection_failed", error=str(exc)[:200])
+
+        def wrap_model_call(self, request, handler):
+            if self._picked is not None:
+                return handler(request.override(tools=self._picked))
+
+            def capture(modified):
+                self._picked = modified.tools
+                return handler(modified)
+
+            try:
+                return super().wrap_model_call(request, capture)
+            except Exception as exc:
+                self._fallback(exc)
+                self._picked = request.tools
+                return handler(request)
 
         async def awrap_model_call(self, request, handler):
             if self._picked is not None:
@@ -810,7 +835,12 @@ def _cached_tool_selector(**kw):
                 self._picked = modified.tools
                 return await handler(modified)
 
-            return await super().awrap_model_call(request, capture)
+            try:
+                return await super().awrap_model_call(request, capture)
+            except Exception as exc:
+                self._fallback(exc)
+                self._picked = request.tools
+                return await handler(request)
 
     return CachedToolSelector(**kw)
 

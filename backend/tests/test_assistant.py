@@ -524,3 +524,29 @@ def test_the_picker_declines_to_pick_with_the_model_it_picks_for(monkeypatch):
         max_model_calls=12,
     )
     assert len(same) == 1  # the loop cap only
+
+
+async def test_a_failed_tool_pick_falls_back_to_every_tool(monkeypatch):
+    """The picker raises on a hallucinated tool name — observed live, with the real
+    `list_clusters` guessed as `list_failure_clusters`. It is an optimization, so it must fail
+    OPEN: killing a turn to save a few thousand tokens is a terrible trade."""
+    monkeypatch.setattr(provider, "get_chat_model", lambda *a, **k: _fake_chat_model())
+    selector = provider.agent_middleware(selector_model="x/y", max_tools=3)[0]
+
+    class Request:
+        tools = ["all", "the", "tools"]
+
+        def override(self, **kw):  # pragma: no cover — the fallback must not go through this
+            raise AssertionError("the fallback should hand back the untouched request")
+
+    async def handler(request):
+        return request
+
+    # the upstream selector blows up the way it does on an invalid selection
+    async def boom(request, handler):
+        raise ValueError("Model selected invalid tools: ['list_failure_clusters']")
+
+    monkeypatch.setattr(type(selector).__mro__[1], "awrap_model_call", boom)
+
+    request = Request()
+    assert await selector.awrap_model_call(request, handler) is request
