@@ -6,7 +6,7 @@ import { Badge, StatCard, statusVariant, verdictVariant } from "@/app/components
 import { IconChevron } from "@/app/components/icons";
 import { OpsStrip } from "@/app/components/OpsPanel";
 import { Spark } from "@/app/components/Bars";
-import { ClusterMeter, TaxonomyChip, clusterTone } from "@/app/components/ClusterMeter";
+import { ClusterMeter, TaxonomyChip, clusterTone, compactCount } from "@/app/components/ClusterMeter";
 
 function SectionHead({ title, href }: { title: string; href: string }) {
   return (
@@ -48,8 +48,10 @@ function TopClusters({ clusters }: { clusters: FailureCluster[] }) {
               href={`/clusters/${c.id}`}
               className="group flex gap-3.5 rounded-lg px-2.5 py-2.5 transition-colors hover:bg-hilite/[0.03]"
             >
-              <span className="flex w-9 shrink-0 flex-col items-end pt-px leading-none">
-                <span className={`font-display text-[21px] font-extrabold tabular-nums ${tone.text}`}>{c.count}</span>
+              <span className="flex w-10 shrink-0 flex-col items-end pt-px leading-none" title={`${c.count} traces`}>
+                <span className={`font-display text-[21px] font-extrabold tabular-nums ${tone.text}`}>
+                  {compactCount(c.count)}
+                </span>
                 <span className="mt-1 font-mono text-[9px] uppercase tracking-wider text-fg-faint">
                   {c.count === 1 ? "trace" : "traces"}
                 </span>

@@ -8,7 +8,7 @@ import { RowLink } from "./RowLink";
 import { SelectBox } from "./SelectBox";
 import { TimeAgo } from "./TimeAgo";
 import { Badge } from "./ui";
-import { ClusterMeter, TaxonomyChip, clusterTone } from "./ClusterMeter";
+import { ClusterMeter, TaxonomyChip, clusterTone, compactCount } from "./ClusterMeter";
 
 const GRID = "grid grid-cols-[32px_64px_1fr_120px_120px_28px] items-center gap-3";
 
@@ -113,14 +113,19 @@ export function ClusterList({ clusters }: { clusters: FailureCluster[] }) {
             className={`${GRID} group border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-hilite/[0.025]`}
           >
             <SelectBox checked={selected.has(c.id)} onChange={() => toggle(c.id)} label={`Select "${c.label}"`} />
-            <span className={`text-right font-display text-[20px] font-extrabold tabular-nums ${clusterTone(c.taxonomy).text}`}>
-              {c.count}
+            <span
+              title={`${c.count} traces`}
+              className={`text-right font-display text-[20px] font-extrabold tabular-nums ${clusterTone(c.taxonomy).text}`}
+            >
+              {compactCount(c.count)}
             </span>
             <span className="flex min-w-0 flex-col gap-1.5">
               <span className="truncate text-[13.5px] text-fg">{c.label}</span>
               <span className="flex items-center gap-2.5">
                 <TaxonomyChip taxonomy={c.taxonomy} tone={clusterTone(c.taxonomy)} />
-                <ClusterMeter value={c.count} max={max} tone={clusterTone(c.taxonomy)} className="w-full max-w-[220px]" />
+                {/* the Seen column already carries rank here — drop the meter rather than let it fight
+                    the chip for a squeezed 1fr cell */}
+                <ClusterMeter value={c.count} max={max} tone={clusterTone(c.taxonomy)} className="hidden w-full max-w-[220px] xl:flex" />
               </span>
             </span>
             <span>

@@ -11,6 +11,12 @@ const TONE = {
 
 export type Tone = (typeof TONE)[keyof typeof TONE];
 
+/** A cluster of 12,000 traces has to fit the same column as one of 9 — "12k" always does.
+ * Callers put the exact number in a `title`. */
+const COMPACT = new Intl.NumberFormat("en", { notation: "compact", maximumSignificantDigits: 2 });
+// Below 1k the exact count fits, and "999" is more use than "1K".
+export const compactCount = (n: number) => (n < 1000 ? String(n) : COMPACT.format(n));
+
 /** Taxonomies arrive in two vocabularies: the structural ones are `"family: detail"`
  * (signature.py), the LLM-clustered ones are a free-text category like "tool execution error".
  * Keyword-match the whole string so both land in the same three buckets. */
@@ -36,10 +42,15 @@ export function TaxonomyChip({ taxonomy, tone }: { taxonomy: string; tone: Tone 
 
 const SEGMENTS = 20;
 
+/** Counts are printed next to the meter, so the meter's job is rank, not magnitude — and on a
+ * linear scale one runaway cluster flattens the rest to a single tick each (1000 vs 9 vs 31 all
+ * round to 1/20). Square root keeps the order and keeps the tail readable. */
+const scale = (value: number, max: number) => Math.sqrt(value / Math.max(1, max));
+
 /** Share-of-failures meter. Segmented, not a flat bar: two clusters within a few percent of
  * each other draw the same rectangle, but a different number of ticks. */
 export function ClusterMeter({ value, max, tone, className }: { value: number; max: number; tone: Tone; className?: string }) {
-  const filled = Math.min(SEGMENTS, Math.max(1, Math.round((value / Math.max(1, max)) * SEGMENTS)));
+  const filled = Math.min(SEGMENTS, Math.max(1, Math.round(scale(value, max) * SEGMENTS)));
   return (
     <span className={clsx("flex h-[7px] items-stretch gap-[3px]", className)} aria-hidden>
       {Array.from({ length: SEGMENTS }, (_, i) => (
