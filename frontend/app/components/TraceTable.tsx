@@ -187,21 +187,33 @@ export function TraceTable({
   }>({ conversations: {}, traces: {}, spans: {} });
   const [rsumGenerating, setRsumGenerating] = useState<Set<string>>(new Set());
   const rsumInflight = useRef<Set<string>>(new Set());
+  // ponytail: one shared promise chain — the loads run strictly one at a time. Every conversation
+  // row's cell calls `ensure` on mount, so a full page fired one request PER ROW simultaneously;
+  // each holds two Postgres connections server-side (the auth dependency for the whole request,
+  // plus a sync one while the handler works in the threadpool), which exhausted the connection
+  // limit and 500'd every other page rendering at that moment. Swap in a small concurrency
+  // limiter if one-at-a-time ever feels slow — this column is lazy decoration, so it doesn't yet.
+  const rsumChain = useRef<Promise<void>>(Promise.resolve());
 
   const loadRsum = useCallback((thread: string) => {
     rsumInflight.current.add(thread);
-    return fetch(`/api/sessions/${encodeURIComponent(thread)}/rolling-summary/by-level`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!d) return;
-        setRsum((p) => ({
-          conversations: { ...p.conversations, [thread]: d.conversation ?? null },
-          traces: { ...p.traces, ...(d.traces ?? {}) },
-          spans: { ...p.spans, ...(d.spans ?? {}) },
-        }));
-      })
-      .catch(() => {})
-      .finally(() => rsumInflight.current.delete(thread));
+    rsumChain.current = rsumChain.current.then(() =>
+      fetch(`/api/sessions/${encodeURIComponent(thread)}/rolling-summary/by-level`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          // A failed load still latches `conversations[thread]` (to null): `ensure`'s guard is
+          // `!== undefined`, so leaving it unset re-queued the same thread on every render — one
+          // failure became a permanent request storm, which is how the outage above sustained itself.
+          setRsum((p) => ({
+            conversations: { ...p.conversations, [thread]: d?.conversation ?? null },
+            traces: { ...p.traces, ...(d?.traces ?? {}) },
+            spans: { ...p.spans, ...(d?.spans ?? {}) },
+          }));
+        })
+        .catch(() => {})
+        .finally(() => rsumInflight.current.delete(thread)),
+    );
+    return rsumChain.current;
   }, []);
 
   const ensureRsum = useCallback(

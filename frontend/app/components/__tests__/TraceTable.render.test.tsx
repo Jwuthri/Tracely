@@ -272,3 +272,52 @@ describe("TraceTable classification badge", () => {
     expect(screen.getByText("user is paying")).toBeInTheDocument();
   });
 });
+
+// ── rolling-summary fan-out ──────────────────────────────────────────────────
+// The "Rolling summary" column is on by default, so every conversation row asks for its thread's
+// summary on mount. Unbounded, that was one simultaneous request per row — enough to exhaust the
+// backend's Postgres connections and 500 whatever else was rendering ("too many clients already").
+
+describe("TraceTable rolling summary", () => {
+  const rsumCalls = (m: ReturnType<typeof vi.fn>) =>
+    m.mock.calls.filter((c) => String(c[0]).includes("rolling-summary"));
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("loads one thread at a time instead of one request per row at once", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const fetchMock = vi.fn(() => {
+      peak = Math.max(peak, ++inFlight);
+      return Promise.resolve({
+        ok: true,
+        json: () => { inFlight--; return Promise.resolve({ conversation: [], traces: {}, spans: {} }); },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const many = Array.from({ length: 8 }, (_, i) => conv({ thread: `t-${i}`, last_trace_id: `tr-${i}` }));
+    render(<TraceTable conversations={many} />);
+
+    await waitFor(() => expect(rsumCalls(fetchMock)).toHaveLength(8));
+    expect(peak).toBe(1);
+  });
+
+  // A failed load has to latch too, or `ensure`'s "already loaded?" guard never trips. Every
+  // summary that DOES land re-renders the rows, which re-runs the failed row's effect and asks
+  // again — so one blip amplifies into a permanent request storm rather than dying out.
+  it("does not re-request a thread whose load failed", async () => {
+    const fetchMock = vi.fn((url: string) =>
+      url.includes("t-bad")
+        ? Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve(null) })
+        : Promise.resolve({ ok: true, json: () => Promise.resolve({ conversation: [], traces: {}, spans: {} }) }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TraceTable conversations={[conv({ thread: "t-bad" }), conv({ thread: "t-ok", last_trace_id: "tr-2" })]} />);
+
+    await waitFor(() => expect(rsumCalls(fetchMock)).toHaveLength(2));
+    await new Promise((r) => setTimeout(r, 50)); // let the success's re-render settle
+    expect(rsumCalls(fetchMock).filter((c) => String(c[0]).includes("t-bad"))).toHaveLength(1);
+  });
+});
