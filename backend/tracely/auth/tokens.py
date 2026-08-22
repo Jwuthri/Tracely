@@ -2,7 +2,13 @@
 
 Security: the algorithm is PINNED to HS256 on verify (defeats alg-confusion forgery), the issuer is
 checked, and exp/iss/sub are required. The secret never leaves the backend; the frontend only forwards
-the opaque token in `Authorization: Bearer`."""
+the opaque token in `Authorization: Bearer`.
+
+Revocation: a token carries the issuing user's `token_version` as `tv`, and `resolve_principal`
+rejects it when the stored counter has moved on. Bumping that counter (password change, password
+reset) is the only way to end a session before it expires — there is no denylist and nothing to
+sweep. A token minted before `tv` existed has no claim, reads as 0, and still matches the column
+default, so shipping this signs nobody out."""
 
 from __future__ import annotations
 
@@ -17,7 +23,9 @@ class TokenError(Exception):
     """Raised when a session token is malformed, expired, or fails verification."""
 
 
-def issue_session(user_id: str, *, ttl_seconds: int | None = None) -> str:
+def issue_session(
+    user_id: str, *, ttl_seconds: int | None = None, token_version: int = 0
+) -> str:
     now = int(time.time())
     ttl = settings.session_ttl_seconds if ttl_seconds is None else ttl_seconds
     payload = {
@@ -25,6 +33,7 @@ def issue_session(user_id: str, *, ttl_seconds: int | None = None) -> str:
         "iss": settings.session_issuer,
         "iat": now,
         "exp": now + ttl,
+        "tv": int(token_version or 0),
     }
     return jwt.encode(payload, settings.session_secret, algorithm="HS256")
 

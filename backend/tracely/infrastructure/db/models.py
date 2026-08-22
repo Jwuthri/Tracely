@@ -196,6 +196,10 @@ class User(Base):
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     display_name: Mapped[str] = mapped_column(String(256), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Stamped into every session token as `tv` and checked on each request; bumping it ends every
+    # session issued before now (see `auth/tokens.py`). Sessions are stateless, so this counter is
+    # the only thing that can revoke one.
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     memberships: Mapped[list["Membership"]] = relationship(back_populates="user")

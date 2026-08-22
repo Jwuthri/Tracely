@@ -272,7 +272,11 @@ async def register(
         display_name=body.display_name,
         workspace_name=body.workspace_name,
     )
-    return SessionOut(token=tokens.issue_session(user.id), user_id=user.id, project_id=project.id)
+    return SessionOut(
+        token=tokens.issue_session(user.id, token_version=user.token_version),
+        user_id=user.id,
+        project_id=project.id,
+    )
 
 
 @local_router.post("/auth/change-password")
@@ -290,8 +294,12 @@ async def change_password(
     if not passwords.verify_password(body.current_password, user.password_hash):
         raise HTTPException(401, "current password is incorrect")
     user.password_hash = passwords.hash_password(body.new_password)
+    # Changing a password signs out every OTHER device — the standard meaning of the action, and
+    # the only lever a user has if they think someone is in their account. The fresh token below
+    # keeps THIS device signed in; without it the caller would log themselves out.
+    user.token_version = (user.token_version or 0) + 1
     await session.commit()
-    return {"ok": True}
+    return {"ok": True, "token": tokens.issue_session(user.id, token_version=user.token_version)}
 
 
 @local_router.post("/auth/forgot-password", dependencies=[Depends(limit("forgot", 5))])
@@ -323,7 +331,9 @@ async def reset_password(
         raise HTTPException(400, "this reset link is invalid or has expired")
     principal = await select_membership(user.id, None, session, kind="local")
     return SessionOut(
-        token=tokens.issue_session(user.id), user_id=user.id, project_id=principal.project_id
+        token=tokens.issue_session(user.id, token_version=user.token_version),
+        user_id=user.id,
+        project_id=principal.project_id,
     )
 
 
@@ -335,7 +345,9 @@ async def login(body: LoginIn, session: AsyncSession = Depends(get_session)) -> 
         raise HTTPException(401, "invalid email or password")
     principal = await select_membership(user.id, None, session, kind="local")
     return SessionOut(
-        token=tokens.issue_session(user.id), user_id=user.id, project_id=principal.project_id
+        token=tokens.issue_session(user.id, token_version=user.token_version),
+        user_id=user.id,
+        project_id=principal.project_id,
     )
 
 
@@ -504,7 +516,11 @@ async def accept_invitation(
         password=body.password,
         display_name=body.display_name,
     )
-    return SessionOut(token=tokens.issue_session(user.id), user_id=user.id, project_id=project.id)
+    return SessionOut(
+        token=tokens.issue_session(user.id, token_version=user.token_version),
+        user_id=user.id,
+        project_id=project.id,
+    )
 
 
 # ── clerk mode ────────────────────────────────────────────────────────────────

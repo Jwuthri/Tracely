@@ -57,14 +57,29 @@ def test_seeding_service_skips_dev_key_in_prod(monkeypatch):
     # Refresh settings + reimport (config has @lru_cache around get_settings).
     from tracely import config as cfg
 
-    cfg.get_settings.cache_clear()
-    cfg.settings = cfg.get_settings()
-    seeding = importlib.reload(importlib.import_module("tracely.services.seeding_service"))
-    assert seeding.settings.is_prod, "test sanity: prod env must be applied"
+    # Put the ORIGINAL object back at the end, rather than building a replacement from the
+    # env. Every module that did `from tracely.config import settings` at import time holds this
+    # exact instance; a rebuilt one silently disagrees with them — including on SESSION_SECRET,
+    # which monkeypatch has not restored yet while this test body is still running. That split is
+    # invisible until something signs a token with one and verifies it with the other.
+    original = cfg.settings
+    try:
+        cfg.get_settings.cache_clear()
+        cfg.settings = cfg.get_settings()
+        seeding = importlib.reload(importlib.import_module("tracely.services.seeding_service"))
+        assert seeding.settings.is_prod, "test sanity: prod env must be applied"
+    finally:
+        cfg.settings = original
+        cfg.get_settings.cache_clear()
+        importlib.reload(importlib.import_module("tracely.services.seeding_service"))
 
-    # Clean up — restore non-prod state so other tests aren't affected by lru_cache spill.
-    monkeypatch.setenv("TRACELY_ENV", "dev")
-    monkeypatch.setenv("AUTH_MODE", "dev")
-    cfg.get_settings.cache_clear()
-    cfg.settings = cfg.get_settings()
-    importlib.reload(importlib.import_module("tracely.services.seeding_service"))
+
+def test_settings_singleton_survives_this_module(monkeypatch):
+    """Guard the guard: the reload test above must leave `tracely.config.settings` as the SAME
+    object every other module imported, or a token signed via one binding fails to verify via the
+    other — which is how a passing test file broke an unrelated one."""
+    from tracely import config as cfg
+    from tracely.auth import tokens
+
+    assert tokens.settings is cfg.settings
+    assert cfg.settings.session_secret == tokens.settings.session_secret

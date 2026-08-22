@@ -14,9 +14,9 @@ Security properties this module is responsible for:
 - **Lookup by hash.** The raw token is never stored, never logged, and never returned by the API;
   it exists only in the link the user receives.
 
-Not handled here: existing sessions are stateless HS256 JWTs with no revocation list, so a reset
-does NOT sign out other devices. Anyone who already holds a valid session keeps it until it
-expires. Revoking would need a token version on `users` checked at verify time.
+- **Consuming a reset ends every existing session.** `consume_reset` bumps `users.token_version`,
+  which strands every token issued before it (`auth/tokens.py`). The caller is handed a fresh one,
+  so the person doing the reset stays signed in and everybody else is out.
 """
 
 from __future__ import annotations
@@ -87,6 +87,10 @@ async def consume_reset(
         return None
 
     user.password_hash = hash_password(new_password)
+    # End every session that already exists. Someone resetting their password is usually doing it
+    # BECAUSE they think somebody else is in the account; leaving that person's 7-day token alive
+    # makes the reset theatre.
+    user.token_version = (user.token_version or 0) + 1
     grant.used_at = now
     # Burn every other outstanding grant for this user: a reset means "I am taking this account
     # back", so any older link still sitting in a mailbox must stop working now.

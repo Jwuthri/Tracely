@@ -79,6 +79,12 @@ async def _resolve_local_jwt(
     ).scalar_one_or_none()
     if not user or not user.is_active:
         raise AuthError(401, "invalid session")
+    # Revocation: a password change or reset bumps `token_version`, which strands every token
+    # issued before it — including one an intruder is holding, which is the entire point of
+    # taking the account back. Tokens minted before this claim existed read as 0 and still match
+    # the column default.
+    if int(claims.get("tv", 0)) != int(user.token_version or 0):
+        raise AuthError(401, "session ended — sign in again")
     return await select_membership(user.id, x_project, session, kind="local")
 
 

@@ -37,10 +37,11 @@ whitelisted · MCP + assistant tools re-enter the routers with the caller's own 
 
 ## Still open, ranked
 
-1. **Stateless sessions, no revocation.** Password change/reset and member removal do not evict
-   an attacker's existing session (it lasts up to 7 days; membership *is* re-checked per request,
-   so removal does revoke workspace access — but not the account). Fix: `token_version` on
-   `users`, bumped on password change/reset, checked in `_resolve_local_jwt`. One migration.
+1. ~~**Stateless sessions, no revocation.**~~ **Fixed 2026-08-21** — `users.token_version`
+   (migration 0028) is stamped into every session as `tv` and checked in `_resolve_local_jwt`;
+   a password change or reset bumps it, ending every other session. The caller is handed a fresh
+   token so they aren't logged out by their own action, and tokens minted before the claim existed
+   read as 0 and keep working, so deploying signs nobody out (`test_session_revocation.py`).
 2. **`tracely_dev_key` is live on any non-prod deployment in local mode.** A reachable staging
    box has a well-known root-ish key (now: read + ingest only, after this pass). Seed it only when
    `AUTH_MODE=dev`.
