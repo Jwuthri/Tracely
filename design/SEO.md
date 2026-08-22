@@ -1,4 +1,4 @@
-# SEO plan — tracely-studio.xyz
+# SEO plan — tracely-ai.com
 
 Working document. Phase 1 shipped 2026-08-11 (commit `93dff69`). Phase 2 (keyword research) completed
 2026-08-12 against live DataForSEO data — **185 of 500 OpenSEO credits spent, 315 remaining.**
@@ -186,7 +186,7 @@ That's the single highest-value backlink action available, and it's a PR to a do
 outreach. Pair each one with the matching `/integrations/<framework>` page from Tier 3.
 
 **2. Package registries.** `pypi.org` and `npmjs.com` both link to Langfuse. `tracely-ai` is on
-PyPI already — make sure the package metadata points at `tracely-studio.xyz`, not just the repo.
+PyPI already — make sure the package metadata points at `tracely-ai.com`, not just the repo.
 Free link, already earned, possibly not claimed.
 
 **3. Self-host and OSS directories.** `selfhost.directory`, `saashub.com`, `webcatalog.io`,
@@ -246,7 +246,7 @@ is needed sooner, that's Phase 4, not more pages.
 
 ## 5. Deferred, on purpose
 
-- **`doc.tracely-studio.xyz` → `/docs`** — real win (docs attract the links; on a subdomain that
+- **`doc.tracely-ai.com` → `/docs`** — real win (docs attract the links; on a subdomain that
   authority doesn't fully flow to root) but a genuine migration with redirects. Revisit once the
   docs have inbound links worth consolidating.
 - **MDX blog pipeline** — at post #10.
@@ -261,7 +261,7 @@ is needed sooner, that's Phase 4, not more pages.
 1. **Link Search Console inside OpenSEO** — unlocks `get_search_console_performance`, `inspect_urls`,
    `get_search_opportunities`. Without it I work from third-party estimates.
 2. **Submit the sitemap** in GSC → Sitemaps; Request Indexing on the homepage.
-3. **Inspect `doc.tracely-studio.xyz`** — those 11 pages just got titles for the first time.
+3. **Inspect `doc.tracely-ai.com`** — those 11 pages just got titles for the first time.
 4. **Bing Webmaster Tools** — import from GSC. Also feeds ChatGPT's web search.
 5. **Approve the comparison-page claims** before they publish. I can describe what Langfuse and
    LangSmith do; publicly asserting a competitor's limitation is your call.

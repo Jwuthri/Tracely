@@ -53,8 +53,8 @@ export default async function BillingPage() {
           <p className="px-4 py-4 text-[13.5px] leading-relaxed text-fg-muted">
             This deployment has no trace limits and no billing — every feature is yours already.
             The hosted cloud at{" "}
-            <a href="https://tracely-studio.xyz" className="text-signal hover:underline">
-              tracely-studio.xyz
+            <a href="https://tracely-ai.com" className="text-signal hover:underline">
+              tracely-ai.com
             </a>{" "}
             runs the same code with a free plan and managed infrastructure.
           </p>

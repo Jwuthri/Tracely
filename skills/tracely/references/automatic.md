@@ -244,7 +244,7 @@ conversation:
 Everything else is inferred. Failures need no special handling: an ERROR span status, a recorded
 `exception` event, or an `error.type` attribute all mark the span failed.
 
-The full indexed-attribute list is in the API reference: <https://doc.tracely-studio.xyz/api-reference>.
+The full indexed-attribute list is in the API reference: <https://doc.tracely-ai.com/api-reference>.
 
 ## Runnable examples
 

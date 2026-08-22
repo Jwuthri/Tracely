@@ -73,9 +73,9 @@ Every item here costs $0. Verified 2026-08-15: OpenAlternative is no longer on t
 
 ```
 Name:        Tracely
-URL:         https://tracely-studio.xyz
+URL:         https://tracely-ai.com
 GitHub:      https://github.com/Jwuthri/Tracely
-Docs:        https://doc.tracely-studio.xyz
+Docs:        https://doc.tracely-ai.com
 License:     MIT · self-hostable · Python SDK: pip install tracely-ai
 
 Tagline (60):  Production agent failures become CI regression tests
@@ -180,12 +180,12 @@ Both are PR/CLI flows, not web forms. Verified 2026-08-15.
 ### 8a. MCP registry (~30 min)
 
 `server.json` is already written at the repo root. It declares the remote server at
-`https://api.tracely-studio.xyz/mcp` (streamable HTTP — matches `api/mcp_server.py`).
+`https://api.tracely-ai.com/mcp` (streamable HTTP — matches `api/mcp_server.py`).
 
 Use **GitHub auth**, not DNS auth: DNS requires an apex TXT record and an Ed25519 key, and macOS
 ships LibreSSL which can't generate one without `brew install openssl@3`. GitHub auth is an OAuth
 prompt. The trade-off is the name — GitHub auth forces `io.github.jwuthri/tracely`; DNS auth would
-let you own `xyz.tracely-studio/tracely`. Not worth the yak-shave now; you can republish under the
+let you own `com.tracely-ai/tracely`. Not worth the yak-shave now; you can republish under the
 domain name later if it ever matters.
 
 ```bash
@@ -194,7 +194,7 @@ mcp-publisher login github      # opens an OAuth prompt; needs no repo scopes
 mcp-publisher publish           # reads ./server.json
 ```
 
-Preconditions: `https://api.tracely-studio.xyz/mcp` must be publicly reachable. It answers 401
+Preconditions: `https://api.tracely-ai.com/mcp` must be publicly reachable. It answers 401
 without an `Authorization: Bearer <ingest-key>` header — that's fine and normal for remote servers,
 but the host has to resolve and respond. Check before publishing.
 
@@ -222,8 +222,8 @@ tags:
   - langchain
 urls:
   repo: https://github.com/Jwuthri/Tracely
-  website: https://tracely-studio.xyz
-  docs: https://doc.tracely-studio.xyz
+  website: https://tracely-ai.com
+  docs: https://doc.tracely-ai.com
 license: MIT
 description:
   Auto-instruments AI agent frameworks and LLM SDKs (OpenAI, Anthropic, LangChain, LlamaIndex,

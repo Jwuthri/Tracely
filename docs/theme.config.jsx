@@ -2,8 +2,8 @@ import { useRouter } from "next/router";
 import { useConfig } from "nextra-theme-docs";
 
 const REPO = "https://github.com/Jwuthri/Tracely";
-const SITE = "https://tracely-studio.xyz";
-const DOCS = "https://doc.tracely-studio.xyz";
+const SITE = "https://tracely-ai.com";
+const DOCS = "https://doc.tracely-ai.com";
 
 // The app's sidebar mark (frontend/app/components/Sidebar.tsx), reused so docs and product share a face.
 const Logo = () => (
@@ -47,7 +47,7 @@ const config = {
     content: (
       <span style={{ fontSize: 13 }}>
         {/* Links back to the marketing origin on every page: docs pages are the ones that earn
-            inbound links, and this is how that authority reaches tracely-studio.xyz. */}
+            inbound links, and this is how that authority reaches tracely-ai.com. */}
         <a href={SITE}>Tracely</a> — trace-native CI/CD for AI agents · the recorded run{" "}
         <em>is</em> the test.
       </span>

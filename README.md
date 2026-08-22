@@ -14,7 +14,7 @@ that would ship them again — and tells you the moment any of it happens.
 <code>production trace</code> → <code>failure detection</code> → <code>regression test</code> → <code>CI gate</code> → <code>alert</code>
 </p>
 
-[**Website**](https://tracely-studio.xyz) · [**Docs**](https://doc.tracely-studio.xyz) · [**Product guide**](https://doc.tracely-studio.xyz/product) · [**Agent skill**](#teach-your-coding-agent-tracely) · [**Guided tour**](guides/OVERVIEW.md) · [**2-min demo**](guides/DEMO.md) · [**Design dossier**](design/README.md)
+[**Website**](https://tracely-ai.com) · [**Docs**](https://doc.tracely-ai.com) · [**Product guide**](https://doc.tracely-ai.com/product) · [**Agent skill**](#teach-your-coding-agent-tracely) · [**Guided tour**](guides/OVERVIEW.md) · [**2-min demo**](guides/DEMO.md) · [**Design dossier**](design/README.md)
 
 [![CI](https://github.com/Jwuthri/Tracely/actions/workflows/ci.yml/badge.svg)](https://github.com/Jwuthri/Tracely/actions/workflows/ci.yml) [![PyPI](https://img.shields.io/pypi/v/tracely-ai?logo=pypi&logoColor=white)](https://pypi.org/project/tracely-ai/) [![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](https://pypi.org/project/tracely-ai/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Stars](https://img.shields.io/github/stars/Jwuthri/Tracely?style=flat&logo=github)](https://github.com/Jwuthri/Tracely/stargazers)
 
@@ -142,18 +142,18 @@ over-flagging judge *before* you let it gate a release.
 | | What it does | Where |
 |---|---|---|
 | **Ingest** | OTLP/HTTP from any language; blob-first durability (S3 before the queue); agent semantics as indexed columns; three message conventions normalized | [`backend/`](backend/README.md) |
-| **Evaluators** | Columns on the trace table. Structural checks (no model) + LLM judges at conversation / run / span level, multi-output (score, boolean, number, text, JSON schema), basic or `@VARIABLE` advanced prompts with live preview, batch or sequential, per-agent/env targeting, deterministic sampling, advisory verdicts | [Docs](https://doc.tracely-studio.xyz/product/traces) |
-| **Failure clusters** | Structural signature + semantic embedding clustering, taxonomy, suggested evaluators, promote-to-case | [Docs](https://doc.tracely-studio.xyz/product/clusters) |
-| **Regression cases** | Hermetic fixture bundles, fail-to-pass contracts, assertions, reference trajectory, replay history | [Docs](https://doc.tracely-studio.xyz/product/cases) |
-| **Scenarios** | Multi-turn conversations Tracely drives at your agent's own endpoint, or an adversarial goal a red-team model pursues (goal achieved = FAIL) | [Docs](https://doc.tracely-studio.xyz/product/scenarios) |
-| **CI gates** | `tracely simulate` / `replay` / `gate` + a GitHub Action: commit status, PR comment, non-zero exit | [Docs](https://doc.tracely-studio.xyz/product/gates) |
-| **Alerts** | Trigger + visual flow: conditions, Slack, email, webhooks with headers, an LLM step, Python expressions. Event triggers fire inline; thresholds poll a window. Test runs show what each step actually sent | [Docs](https://doc.tracely-studio.xyz/product/alerts) |
-| **Trends & analysis** | Daily traces/failures/gate pass-rate, latency + cost, per-agent cross-metric meta-analysis | [Docs](https://doc.tracely-studio.xyz/product/trends) |
-| **Judge calibration** | Label judge verdicts against human review; per-evaluator agreement, missed failures vs over-flagging | [Docs](https://doc.tracely-studio.xyz/product/calibration) |
-| **Conversation intelligence** | Rolling per-turn summary (backs the judge's `@HISTORY`), declared agent catalog, state deltas, Replay + Fleet views, shareable read-only links | [Docs](https://doc.tracely-studio.xyz/product/traces) |
-| **In-app assistant** | ⌘J — an agent over *your* workspace: reads traces, creates evaluators, scenarios, cases and alerts, as you. ⌘K jumps anywhere | [Docs](https://doc.tracely-studio.xyz/product/assistant) |
-| **MCP server** | The API doubles as an MCP endpoint (`/mcp`) so a coding agent drives the workspace with an ordinary ingest key | [Docs](https://doc.tracely-studio.xyz/mcp) |
-| **Auth & teams** | `dev` (open) · `local` (email/password + invites) · `clerk`. Organizations, workspaces, seats, API keys, per-workspace OpenRouter key | [Docs](https://doc.tracely-studio.xyz/product/settings) |
+| **Evaluators** | Columns on the trace table. Structural checks (no model) + LLM judges at conversation / run / span level, multi-output (score, boolean, number, text, JSON schema), basic or `@VARIABLE` advanced prompts with live preview, batch or sequential, per-agent/env targeting, deterministic sampling, advisory verdicts | [Docs](https://doc.tracely-ai.com/product/traces) |
+| **Failure clusters** | Structural signature + semantic embedding clustering, taxonomy, suggested evaluators, promote-to-case | [Docs](https://doc.tracely-ai.com/product/clusters) |
+| **Regression cases** | Hermetic fixture bundles, fail-to-pass contracts, assertions, reference trajectory, replay history | [Docs](https://doc.tracely-ai.com/product/cases) |
+| **Scenarios** | Multi-turn conversations Tracely drives at your agent's own endpoint, or an adversarial goal a red-team model pursues (goal achieved = FAIL) | [Docs](https://doc.tracely-ai.com/product/scenarios) |
+| **CI gates** | `tracely simulate` / `replay` / `gate` + a GitHub Action: commit status, PR comment, non-zero exit | [Docs](https://doc.tracely-ai.com/product/gates) |
+| **Alerts** | Trigger + visual flow: conditions, Slack, email, webhooks with headers, an LLM step, Python expressions. Event triggers fire inline; thresholds poll a window. Test runs show what each step actually sent | [Docs](https://doc.tracely-ai.com/product/alerts) |
+| **Trends & analysis** | Daily traces/failures/gate pass-rate, latency + cost, per-agent cross-metric meta-analysis | [Docs](https://doc.tracely-ai.com/product/trends) |
+| **Judge calibration** | Label judge verdicts against human review; per-evaluator agreement, missed failures vs over-flagging | [Docs](https://doc.tracely-ai.com/product/calibration) |
+| **Conversation intelligence** | Rolling per-turn summary (backs the judge's `@HISTORY`), declared agent catalog, state deltas, Replay + Fleet views, shareable read-only links | [Docs](https://doc.tracely-ai.com/product/traces) |
+| **In-app assistant** | ⌘J — an agent over *your* workspace: reads traces, creates evaluators, scenarios, cases and alerts, as you. ⌘K jumps anywhere | [Docs](https://doc.tracely-ai.com/product/assistant) |
+| **MCP server** | The API doubles as an MCP endpoint (`/mcp`) so a coding agent drives the workspace with an ordinary ingest key | [Docs](https://doc.tracely-ai.com/mcp) |
+| **Auth & teams** | `dev` (open) · `local` (email/password + invites) · `clerk`. Organizations, workspaces, seats, API keys, per-workspace OpenRouter key | [Docs](https://doc.tracely-ai.com/product/settings) |
 | **Ops** | Beat self-check (queue depth, worker liveness, ingest freshness) + `/health/queue`, optional Sentry, optional trace quota + Stripe billing | [`guides/DEPLOY.md`](guides/DEPLOY.md) |
 
 Near-term plan: [design/part2-tracely/11-prd-next-steps.md](design/part2-tracely/11-prd-next-steps.md) ·
@@ -287,7 +287,7 @@ non-Python services can push the catalog with `POST /api/sessions/{conversation_
 
 </details>
 
-Full instrumentation guide → **[doc.tracely-studio.xyz](https://doc.tracely-studio.xyz)** · [`sdk/README.md`](sdk/README.md)
+Full instrumentation guide → **[doc.tracely-ai.com](https://doc.tracely-ai.com)** · [`sdk/README.md`](sdk/README.md)
 
 ---
 
@@ -300,7 +300,7 @@ wire it, depending on how your CI can reach your agent.
 <details open>
 <summary><b>Option A — let Tracely call your agent</b> (no agent code in CI, any language)</summary>
 
-Register your agent's HTTP endpoint once, author [scenarios](https://doc.tracely-studio.xyz/product/scenarios) —
+Register your agent's HTTP endpoint once, author [scenarios](https://doc.tracely-ai.com/product/scenarios) —
 multi-turn conversations, or an adversarial goal a red-team model improvises against — and Tracely
 drives them itself. **Nothing to install, import or shim**, so a TypeScript or Go service gates exactly
 like a Python one.
@@ -397,9 +397,9 @@ each step actually sent, after templating.
 
 <img src=".github/assets/alerts.png" alt="The alerts list — a gallery of use cases, and rules showing their trigger and their flow as a strip of steps" width="100%" />
 
-The same rules are reachable from the [in-app assistant](https://doc.tracely-studio.xyz/product/assistant)
+The same rules are reachable from the [in-app assistant](https://doc.tracely-ai.com/product/assistant)
 (*"Slack me when the refund judge fails a conversation"*) and from the MCP server, so an agent can
-arm one for you. [Alerts guide →](https://doc.tracely-studio.xyz/product/alerts)
+arm one for you. [Alerts guide →](https://doc.tracely-ai.com/product/alerts)
 
 ---
 
@@ -416,7 +416,7 @@ claude mcp add --transport http tracely http://localhost:8000/mcp \
 Then: *"look at the last 20 traces, find what's failing, and add an evaluation column that catches
 it."* Tools over traces, failure clusters, evaluators and trends — scoped to the key's workspace,
 same as every other call. On hosted Tracely the endpoint is
-`https://api.tracely-studio.xyz/mcp`. [Docs](https://doc.tracely-studio.xyz/mcp)
+`https://api.tracely-ai.com/mcp`. [Docs](https://doc.tracely-ai.com/mcp)
 
 ---
 
@@ -539,7 +539,7 @@ cd frontend && pnpm test && pnpm build      # vitest + tsc typecheck + lint
 
 <div align="center">
 
-**[tracely-studio.xyz](https://tracely-studio.xyz)** · [Docs](https://doc.tracely-studio.xyz) · [Product guide](https://doc.tracely-studio.xyz/product) · [Star on GitHub](https://github.com/Jwuthri/Tracely)
+**[tracely-ai.com](https://tracely-ai.com)** · [Docs](https://doc.tracely-ai.com) · [Product guide](https://doc.tracely-ai.com/product) · [Star on GitHub](https://github.com/Jwuthri/Tracely)
 
 If Tracely is useful to you, a ⭐ helps other people find it.
 

@@ -13,7 +13,7 @@ production trace → failure detection → regression test → CI gate
 ```
 
 The trace is the source of truth. Evaluators, failure clusters, regression cases, gates and trends
-are all **derived from it** — there are no hand-authored datasets. Docs: <https://doc.tracely-studio.xyz>.
+are all **derived from it** — there are no hand-authored datasets. Docs: <https://doc.tracely-ai.com>.
 
 ## Pick the path first
 
@@ -38,7 +38,7 @@ compose — manual spans nest inside auto-instrumented traces in the same tree.
 import tracely_sdk as tracely   # pip install "tracely-ai[openai]"  ([anthropic] [langchain] [all])
 
 tracely.init(
-    endpoint="http://localhost:8000",   # hosted: https://api.tracely-studio.xyz
+    endpoint="http://localhost:8000",   # hosted: https://api.tracely-ai.com
     api_key="tracely_dev_key",          # an ingest key — Settings → API keys. The key IS the workspace.
     service_name="support-agent",
     env="prod",                         # prod | staging | ci | dev — the gating axis
@@ -167,7 +167,7 @@ runs and hermetic replay: **`references/ci-gate.md`**.
 Every backend serves MCP at `/mcp` — read traces, inspect clusters, create evaluators, no glue code.
 
 ```bash
-claude mcp add --transport http tracely https://api.tracely-studio.xyz/mcp \
+claude mcp add --transport http tracely https://api.tracely-ai.com/mcp \
   --header "Authorization: Bearer $TRACELY_KEY"
 ```
 
@@ -198,4 +198,4 @@ suspiciously green: **`references/troubleshooting.md`** — symptom → cause �
 | `references/troubleshooting.md` | Something isn't showing up or the gate is lying. |
 
 Self-hosting (`docker compose up -d --build --wait` → UI :3001, API :8000, dev key
-`tracely_dev_key`) and Railway one-click: <https://doc.tracely-studio.xyz/self-hosting>.
+`tracely_dev_key`) and Railway one-click: <https://doc.tracely-ai.com/self-hosting>.
