@@ -211,3 +211,10 @@ export const IconBook = (p: P) => (
     <path d="M4 20.5V5.5M8 7h8M8 10.5h5" />
   </svg>
 );
+
+export const IconBell = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" />
+    <path d="M10.3 20a2 2 0 0 0 3.4 0" />
+  </svg>
+);

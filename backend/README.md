@@ -213,12 +213,80 @@ The package is layered: **domain** (pure logic, no I/O), **infrastructure** (DB 
 | `RollingSummaryService` | `build_for_thread` — the per-span accumulate loop (verbatim vs LLM-compressed; budget-folding). |
 | `MetaAnalysisService` | `analyze_and_save` — compute stats + LLM synthesis + merge + persist a per-agent meta-analysis. |
 | `ConversationAgentsService` | `for_thread` — read the declared agent catalog (guarded; degrades to spans). |
+| `MonitoringService` | `evaluate_all` / `evaluate_one` — the **polled** half of alerting (threshold over a window, beat-driven). Its module also owns `notify_event`, the **event** half the pipeline calls inline. |
 | `seeding_service` | `main()` — default project + ingest key + recommended evaluators. |
 
 ### `tracely/workers/tasks.py`
 Three Celery tasks, each a thin dispatch into a service class: `ingest_otlp_blob` → `IngestionService` (then debounce-enqueues evaluation), `evaluate_run` → `EvaluationService` (then folds the turn into the thread's `RollingSummaryService`, best-effort), `rebuild_clusters` → `FailureIntelService`.
 
-On Celery beat: `evaluate_monitors` and `selfcheck` every 5 min, and `prune_chats` nightly — the last drops judge-conversation checkpoints nothing can read again. LangGraph writes one checkpoint per step and each re-serializes the whole transcript, so a long sequential column grows its storage quadratically and never gives it back; left alone it becomes the largest table in the deployment by an order of magnitude. It keeps every conversation's latest checkpoint and holds an hour's grace on live ones, so it is safe against a running worker (`infrastructure/llm/checkpointer.py`).
+On Celery beat: `evaluate_monitors` (the *polled* alerts only — see Alerts below) and `selfcheck` every 5 min, and `prune_chats` nightly — the last drops judge-conversation checkpoints nothing can read again. LangGraph writes one checkpoint per step and each re-serializes the whole transcript, so a long sequential column grows its storage quadratically and never gives it back; left alone it becomes the largest table in the deployment by an order of magnitude. It keeps every conversation's latest checkpoint and holds an hour's grace on live ones, so it is safe against a running worker (`infrastructure/llm/checkpointer.py`).
+
+### Alerts (`monitors` + `monitor_steps` + `monitor_executions`)
+
+An alert rule is **when** + **what happens**. The when is `monitors.condition`; the what is a DAG of
+`monitor_steps` whose graph lives in `monitors.flow_layout` as React Flow's own `{nodes, edges}` JSON
+— read by the engine itself, so there is one source of truth and no join to reconstruct a graph.
+Edges are deliberately not a table. A step's **id is the canvas node id**, so an edit keeps it and
+an edge points straight at a row.
+
+**When.** Two families, and the difference is the trigger:
+
+| Family | Types | Fired by | Latency |
+|---|---|---|---|
+| **event** | `gate_failed`, `trace_failed`, `cluster_new` | the pipeline, inline (`monitoring_service.notify_event`) | immediate |
+| **polled** | `fail_rate_over`, `score_below`, `trace_failure_rate` | `evaluate_monitors` beat task → `MonitoringService.evaluate_all` | ≤5 min |
+
+The three event hooks are one call each, all best-effort in a try/except: `GateService._notify_gate`
+(after a run finalizes, on `FAIL` **or** `NO_COVERAGE` — the suite that could not run is the
+quietly-green failure), `EvaluationService._notify_trace_failed` (non-advisory FAILs only, so the
+alert agrees with the badge), and `StructuralClusteringService._notify_new_cluster` (the created
+branch only). An observer must never fail the thing it observes.
+
+Matching is pure and tested: `domain/monitoring/conditions.py` holds `evaluate_condition` (windows,
+`min_samples`, strict-inequality thresholds) and `event_matches` (`target_agent` by slug **or** id,
+plus optional `env` / `score_name` / `contains`, ANDed). `contains` is a case-insensitive substring
+of the event's failure text — the "page me when a conversation errors with *xyz*" knob. The beat
+skips event monitors (`is_event_condition`) and `evaluate_condition` refuses them, so a mis-typed
+condition stays silent instead of paging on an empty window.
+
+**What happens.** `services/alert_flow_service.run_flow` walks the DAG and writes one
+`MonitorExecution` per run:
+
+1. `domain/alerting/flow.py` resolves the order — dedupe edges → BFS reachability from
+   `__rule_trigger__` → Kahn with sorted-id tie-breaks → fall back to `order_index` when there are
+   no usable edges (which is what makes an API-created rule run). A node unreachable from the
+   trigger is **parked**: saved, shown on the canvas, not executed. A cycle fails the run with a
+   plain-English error. `frontend/app/lib/ruleFlow.ts` implements the same three stages — they must
+   agree or a rule runs differently than it looked on screen.
+2. `domain/alerting/context.py` builds the one variable namespace every template renders against
+   (`alert.*`, `agent.slug`, `trace.*`, `gate.*`, `cluster.*`, `metric.*`, `scores`,
+   `failing_evaluators`, `failure_reason`). `BASE_INPUTS` is that contract, filtered per trigger for
+   the chip panel; `tests/test_alert_flow.py` pins catalog ⇄ context so they cannot drift.
+   `services/alert_events.py` assembles the event, and **both** the pipeline hooks and `/test` use
+   those builders — a test that built its own context would test the wrong thing.
+3. Each step is rendered and run. Six types: `condition` (a Jinja gate; falsy short-circuits the run
+   to `skipped`), `slack`, `send_email` (Resend), `webhook` (any verb, `[{key, value}]` headers →
+   real headers, templated body), `llm_prompt` (`provider.use_project_key` + `llm_enabled()` inside
+   the wrap, optional runtime pydantic model from the user's `output_schema`, `array` → `list[str]`
+   or strict providers reject the schema) and `python_expression` (`simpleeval` allowlist, never
+   `eval`). Upstream outputs are **positional**: before each step the engine recomputes its
+   ancestors and sets `steps = [{result}, …]`, so `steps[0]` means "my first upstream step on this
+   branch" — and the canvas's Prior-steps chips are built from the same walk.
+4. Every runner returns `(result, error, rendered_config)`. That third element — the POST-Jinja value
+   of every field actually sent — is what makes a run self-explanatory in the UI without re-running
+   anything, and it is what `step_results` stores alongside `ancestor_step_ids`.
+
+Templates are `jinja2.sandbox.SandboxedEnvironment` because they are user input from a browser, and
+every customer-supplied URL passes `assert_public_url` at save time *and* immediately before the
+request (a templated URL can only be checked at the second one).
+
+`services/alert_assistant_service.py` drafts a whole rule from a sentence: one
+`run_structured_agent` call under `use_project_key`, given the trigger list, the step-config shapes
+and the chip catalog, returning trigger + filters + steps which the router turns into a linear
+layout. It never emits a destination — the user pastes their own.
+
+A rule with **no steps** falls back to `channels` (`infrastructure/notifications/`: slack, webhook,
+email), which is what every row created before flows existed still uses.
 
 ### `tracely/otel/` — OTLP → event mapper
 | Module | Purpose |
@@ -285,6 +353,10 @@ On Celery beat: `evaluate_monitors` and `selfcheck` every 5 min, and `prune_chat
 | `POST /auth/register` · `/login` · `/change-password` · `POST/GET /auth/invitations` · `DELETE /auth/invitations/{id}` · `POST /auth/invitations/accept` | `auth.py` | local-mode auth + invitations. |
 | `POST /auth/sync` | `auth.py` | Clerk-mode user sync. |
 | `DELETE /api/project/data` | `admin.py` | wipe the project: every trace/score in ClickHouse + all derived registry rows (agents, cases, gates, clusters, meta-analyses, summaries, annotations). Keeps configuration — keys, users, evaluators, monitors. Requires `{"confirm": "DELETE"}`. |
+| `GET /api/monitors` · `POST /api/monitors` · `GET/PATCH/DELETE /api/monitors/{id}` | `monitors.py` | alert rule CRUD, including `steps` + `flow_layout` (steps are replaced wholesale when present — the canvas is the source of truth while you edit). Writes need `require_user`: a leaked CI key must not re-point where a workspace's alerts go. |
+| `GET /api/monitors/step-types` · `/inputs/schema?trigger=` · `/inputs/sample?trigger=&subject_id=` · `/subjects?trigger=` | `monitors.py` | what the editor needs: each step type's declared outputs, the chip catalog for a trigger, that catalog joined with one real subject's values, and the subjects a rule can be tested against. Declared **before** `/{monitor_id}` — a path parameter registered first swallows every literal after it. |
+| `POST /api/monitors/generate` | `monitors.py` | a sentence → a drafted rule (trigger, filters, wired steps). Workspace LLM key; 400 when there is none. |
+| `GET /api/monitors/{id}/executions` · `POST /api/monitors/{id}/test` | `monitors.py` | the rule's runs with their per-step audit trail · run it now against a chosen subject (real side effects, the same code path the alert uses). A rule with no flow falls back to the channel behaviour: evaluate the window, or send a sample alert. |
 | `GET /api/health` | `health.py` | readiness — `200` healthy / `503` when ClickHouse or Postgres is unreachable. |
 | `GET /health/queue` | `health.py` | ops self-check on demand: `degraded` + `problems` from `domain/ops/selfcheck.py` (the same verdict the 5-min beat task logs and alerts on). Always `200` — a backlog must not make the orchestrator kill the API. |
 | `GET/POST/DELETE /mcp` | `mcp_server.py` | MCP (streamable HTTP): ~11 tools over traces, clusters, evaluators and trends for a coding agent. Not a router — each tool calls the endpoints above in-process over an ASGI transport, forwarding the caller's key, so there is no second implementation of anything and no DB access here. |

@@ -13,6 +13,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+import structlog
 from sqlalchemy import desc, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -20,6 +21,8 @@ from sqlalchemy.orm import Session
 from tracely.config import settings
 from tracely.domain.failure.signature import FailureSignature
 from tracely.infrastructure.db.models import ClusterMember, FailureCluster
+
+log = structlog.get_logger()
 
 # ponytail: only the N most recently active clusters of an agent are considered for a fuzzy
 # merge. Older ones are re-formed by Analyze anyway; raise it if agents run many failure modes.
@@ -58,6 +61,7 @@ class StructuralClusteringService:
                 cl = self._create(project_id, agent_id, sig, now)
                 self._record_member(cl, trace_id, now, summary)
                 self.session.commit()
+                self._notify_new_cluster(cl)
                 return cl.id
             except IntegrityError:
                 # Two workers raced on the same brand-new signature; the other insert won the
@@ -70,6 +74,19 @@ class StructuralClusteringService:
         self._record_member(cl, trace_id, now, summary)
         self.session.commit()
         return cl.id
+
+    def _notify_new_cluster(self, cl: FailureCluster) -> None:
+        """A signature no trace has produced before is a NEW failure mode in production — the one
+        alert that is genuinely trace-native, and the reason a cluster is worth a page while the
+        1000th instance of a known one is not. Best-effort: an alerting hiccup must never break the
+        eval that found the failure."""
+        try:
+            from tracely.services.alert_events import cluster_event
+            from tracely.services.monitoring_service import notify_event
+
+            notify_event(cl.project_id, cluster_event(self.session, cl))
+        except Exception as exc:
+            log.warning("cluster_notify_failed", cluster_id=cl.id, error=str(exc))
 
     # ── internals ─────────────────────────────────────────────────────────────
 

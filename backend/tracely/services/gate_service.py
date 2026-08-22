@@ -255,6 +255,8 @@ class GateService:
             gate.status = case_status
             gate.finished_at = datetime.now(timezone.utc)
         self.session.commit()
+        if finalize:
+            self._notify_gate(gate)
         return gate
 
     def grade_scenarios(
@@ -353,7 +355,24 @@ class GateService:
         gate.finished_at = datetime.now(timezone.utc)
         self.session.commit()
         log.info("scenario_gate", gate_id=gate.id, status=gate.status, **summary)
+        self._notify_gate(gate)
         return gate
+
+    def _notify_gate(self, gate: GateRun) -> None:
+        """Fire the "the gate failed" event monitors (`/settings/alerts`) once the run is final.
+
+        `NO_COVERAGE` pages too: a suite that could not run is the quietly-green failure this
+        product exists to prevent, and it is exactly the case nobody notices in CI output.
+        Best-effort — alerting must never fail the gate it is reporting on."""
+        if gate.status not in ("FAIL", "NO_COVERAGE"):
+            return
+        try:
+            from tracely.services.alert_events import gate_event
+            from tracely.services.monitoring_service import notify_event
+
+            notify_event(gate.project_id, gate_event(self.session, gate))
+        except Exception as exc:
+            log.warning("gate_notify_failed", gate_id=gate.id, error=str(exc))
 
     def grade_standalone_scenario(
         self,

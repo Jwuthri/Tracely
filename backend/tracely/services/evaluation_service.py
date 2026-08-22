@@ -305,6 +305,8 @@ class EvaluationService:
         fail_results = [r for r in results if r.verdict == "FAIL"]
         if fail_results and root.get("agent_id"):
             self._cluster_failure(project_id, root["agent_id"], trace_id, fail_results, spans)
+        if fail_results:
+            self._notify_trace_failed(project_id, trace_id, fail_results)
 
         conv_count = 0
         if conv_specs:
@@ -812,6 +814,33 @@ class EvaluationService:
         except Exception as exc:  # table missing / DB hiccup -> no evals
             log.warning("evaluator_load_failed", error=str(exc))
             return []
+
+    @staticmethod
+    def _notify_trace_failed(project_id: str, trace_id: str, fail_results: list[EvalResult]) -> None:
+        """Fire the "a conversation just broke" event monitors (`/settings/alerts`).
+
+        Advisory evaluators are excluded for the same reason they never flip a verdict
+        (`domain/evaluation/verdict.py`): an advisory FAIL is not a failing turn, and paging on one
+        would make the alert disagree with the badge. Best-effort in its own session — a flaky
+        Slack webhook must not fail the eval that just wrote the score."""
+        try:
+            from tracely.services.alert_events import trace_event
+            from tracely.services.monitoring_service import notify_event
+
+            with SyncSessionLocal() as s:
+                advisory = set(repositories.advisory_score_names(s, project_id))
+                failing = [
+                    {"name": r.name, "comment": r.comment}
+                    for r in fail_results
+                    if r.name not in advisory
+                ]
+                if not failing:
+                    return
+                # One builder, shared with the `/test` path — a test that assembled its own
+                # context would be a test of the wrong thing.
+                notify_event(project_id, trace_event(s, project_id, trace_id, failing=failing))
+        except Exception as exc:
+            log.warning("monitor_notify_failed", trace_id=trace_id, error=str(exc))
 
     @staticmethod
     def _cluster_failure(

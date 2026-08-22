@@ -314,6 +314,53 @@ export async function getAgentEndpoint(agentRef: string): Promise<AgentEndpoint 
   return getJsonOrNull<AgentEndpoint>(`/api/agents/${encodeURIComponent(agentRef)}/endpoint`);
 }
 
+/** A workspace alert. One row = one condition + the channels it notifies. `condition.type` is
+ *  either a windowed threshold (evaluated every 5 min by the worker) or an event the pipeline
+ *  fires the moment it happens — see `domain/monitoring/conditions.py`. */
+export type Monitor = {
+  id: string;
+  name: string;
+  description: string;
+  /** Agent slug (or id) this alert is scoped to. "" = the whole workspace. */
+  target_agent: string;
+  condition: {
+    type: string;
+    score_name?: string;
+    threshold?: number;
+    window_minutes?: number;
+    min_samples?: number;
+    /** Event conditions only: case-insensitive substring of the failure text. */
+    contains?: string;
+    env?: string;
+  };
+  channels: { type: string; url?: string; to?: string; headers?: Record<string, string> }[];
+  /** The action, as a flow: ordered steps whose graph lives in `flow_layout`. Empty = the legacy
+   *  channel list above still does the notifying. */
+  steps?: {
+    id: string;
+    order_index: number;
+    name: string;
+    step_type: string;
+    config: Record<string, unknown>;
+  }[];
+  /** React Flow's own `{nodes, edges}`. The API synthesises a chain when a rule has none. */
+  flow_layout?: { nodes: unknown[]; edges: unknown[] } | null;
+  enabled: boolean;
+  min_interval_seconds: number;
+  last_evaluated_at: string | null;
+  last_fired_at: string | null;
+  last_fired_summary: string;
+  created_at: string | null;
+};
+
+export async function getMonitors(): Promise<Monitor[]> {
+  return getJson<Monitor[]>(`/api/monitors`);
+}
+
+export async function getMonitor(monitorId: string): Promise<Monitor | null> {
+  return getJsonOrNull<Monitor>(`/api/monitors/${encodeURIComponent(monitorId)}`);
+}
+
 export type Stats = {
   traces: number;
   spans: number;
@@ -330,8 +377,14 @@ export async function getStats(): Promise<Stats> {
 
 /** Evaluator rows for this project (the traces table's columns). Only the fields the
  *  activation checklist reads — the editor fetches the full shape client-side. */
-export async function getEvaluators(): Promise<{ id: string; enabled: boolean }[]> {
-  return getJson<{ id: string; enabled: boolean }[]>(`/api/evaluators`);
+/** The workspace's evaluation columns. Narrow on purpose — the callers need the count, the
+ *  enabled flag and (on /settings/alerts) the score name an alert can watch. */
+export async function getEvaluators(): Promise<
+  { id: string; enabled: boolean; name?: string; score_name?: string; level?: string }[]
+> {
+  return getJson<{ id: string; enabled: boolean; name?: string; score_name?: string; level?: string }[]>(
+    `/api/evaluators`,
+  );
 }
 
 // Per-evaluator LLM-judge cost over the last `days` — server-component shape (the browser

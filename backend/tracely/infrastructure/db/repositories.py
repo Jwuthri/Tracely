@@ -37,6 +37,8 @@ from tracely.infrastructure.db.models import (
     Membership,
     MetaAnalysis,
     Monitor,
+    MonitorExecution,
+    MonitorStep,
     Organization,
     OrgMembership,
     Project,
@@ -1264,6 +1266,47 @@ def monitor_delete(s: Session, project_id: str, monitor_id: str) -> bool:
     s.delete(m)
     s.commit()
     return True
+
+
+def monitor_steps_replace(s: Session, monitor: Monitor, steps: list[dict]) -> None:
+    """Replace a monitor's steps wholesale with the canvas's list.
+
+    Delete-all-then-reinsert, and the ids come BACK (a step id is the canvas node id, so an edit
+    keeps it). That is why the delete has to be flushed before the inserts: same primary keys in
+    one flush is an identity-map conflict, and SQLAlchemy raises rather than ordering it for you.
+    """
+    s.execute(delete(MonitorStep).where(MonitorStep.monitor_id == monitor.id))
+    s.flush()
+    for i, step in enumerate(steps):
+        s.add(
+            MonitorStep(
+                id=str(step.get("id") or uuid4()),
+                monitor_id=monitor.id,
+                order_index=int(step.get("order_index", i)),
+                name=str(step.get("name") or f"Step {i + 1}"),
+                step_type=str(step.get("step_type") or ""),
+                config=step.get("config") or {},
+            )
+        )
+    s.flush()
+    s.expire(monitor, ["steps"])
+
+
+def monitor_executions(
+    s: Session, project_id: str, monitor_id: str, limit: int = 20
+) -> list[MonitorExecution]:
+    """A monitor's runs, newest first — the "what did this alert actually do" log."""
+    return list(
+        s.execute(
+            select(MonitorExecution)
+            .where(
+                MonitorExecution.project_id == project_id,
+                MonitorExecution.monitor_id == monitor_id,
+            )
+            .order_by(desc(MonitorExecution.started_at))
+            .limit(limit)
+        ).scalars()
+    )
 
 
 def enabled_monitors_across_projects(s: Session) -> list[Monitor]:

@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import time
 from typing import Any
+from uuid import uuid4
 
 from tracely.api.internal_client import api_call
 
@@ -359,6 +360,117 @@ def build_tools(headers: dict[str, str]) -> list:
             "errors": [f for f in frames if f.get("type") in ("target_error", "error")],
         }
 
+    # ── alerts: tell me without me looking ──────────────────────────────────
+
+    @tool
+    async def list_alerts() -> Any:
+        """The workspace's alerts, with each one's current state (`last_fired_at`,
+        `last_fired_summary`). An alert pushes one Tracely signal to Slack, email or a webhook."""
+        return await call("GET", "/api/monitors")
+
+    @tool
+    async def create_alert(
+        name: str,
+        trigger: str,
+        destination: str,
+        action: str = "slack",
+        agent: str = "",
+        contains: str = "",
+        score_name: str = "",
+        env: str = "",
+        message: str = "",
+        threshold: float = 0.0,
+        window_minutes: int = 60,
+        min_samples: int = 20,
+        min_interval_seconds: int = 900,
+    ) -> Any:
+        """Create an alert: a trigger plus a one-step flow that notifies `destination`.
+
+        `action` is `slack` (an incoming-webhook URL), `email` (an address) or `webhook` (your own
+        endpoint, POSTed a JSON body). `message` is the notification text and may use Jinja
+        variables — `{alert.summary}`, `{alert.url}`, `{failure_reason}`, `{agent.slug}`,
+        `{gate.status}`, `{cluster.label}` — each wrapped in DOUBLE braces. Leave it empty for a
+        sensible default.
+
+        Event triggers fire the moment the thing happens; filters are optional and ANDed:
+        - `gate_failed` — a CI gate finished FAIL or NO_COVERAGE. Filters: `env`, `contains`.
+        - `trace_failed` — a live turn failed a non-advisory evaluator. Filters: `score_name`,
+          `contains` (case-insensitive substring of the evaluator names AND the judge's reason —
+          this is how "tell me when a conversation leaks PII" is expressed).
+        - `cluster_new` — a failure signature nothing has produced before. Filter: `contains`.
+
+        Threshold triggers are evaluated over a sliding window every 5 minutes and need
+        `threshold` (0..1) plus `window_minutes` / `min_samples`:
+        - `fail_rate_over` / `score_below` — one evaluator (`score_name` required).
+        - `trace_failure_rate` — every trace in the workspace.
+
+        `agent` scopes to one agent (slug); `min_interval_seconds` rate-limits (0 = every time).
+        Confirm the destination with the user first — this sends real messages. The user can then
+        open the rule in Settings → Alerts and draw more steps onto it (conditions, an LLM step, a
+        webhook with its own headers).
+        """
+        condition: dict[str, Any] = {"type": trigger}
+        if contains:
+            condition["contains"] = contains
+        if score_name:
+            condition["score_name"] = score_name
+        if env:
+            condition["env"] = env
+        if trigger in ("fail_rate_over", "score_below", "trace_failure_rate"):
+            condition["threshold"] = threshold
+            condition["window_minutes"] = window_minutes
+            condition["min_samples"] = min_samples
+
+        text = message or "🚨 {{ alert.name }}\n{{ alert.summary }}\n{{ alert.url }}"
+        if action == "email":
+            step_config: dict[str, Any] = {
+                "to_template": destination,
+                "subject_template": "[Tracely] {{ alert.name }}",
+                "body_template": text,
+            }
+            step_type = "send_email"
+        elif action == "webhook":
+            step_config = {
+                "url": destination,
+                "method": "POST",
+                "headers": [],
+                "body_template": '{"summary": "{{ alert.summary }}", "url": "{{ alert.url }}"}',
+            }
+            step_type = "webhook"
+        else:
+            step_config = {"url": destination, "text_template": text}
+            step_type = "slack"
+
+        # A step id is a global primary key (it doubles as the canvas node id), so it has to be
+        # unique per rule — a constant collided on the second alert the assistant ever made.
+        step_id = f"s-{uuid4()}"
+        return await call(
+            "POST",
+            "/api/monitors",
+            json={
+                "name": name,
+                "target_agent": agent,
+                "condition": condition,
+                "steps": [
+                    {"id": step_id, "order_index": 0, "name": f"Notify {action}",
+                     "step_type": step_type, "config": step_config}
+                ],
+                "flow_layout": {
+                    "nodes": [
+                        {"id": "__rule_trigger__", "type": "trigger",
+                         "position": {"x": 60, "y": 140}, "data": {"label": trigger}},
+                        {"id": step_id, "type": "ruleStep", "position": {"x": 360, "y": 140},
+                         "data": {"name": f"Notify {action}", "step_type": step_type}},
+                    ],
+                    "edges": [
+                        {"id": f"e-__rule_trigger__-{step_id}", "source": "__rule_trigger__",
+                         "target": step_id}
+                    ],
+                },
+                "min_interval_seconds": min_interval_seconds,
+            },
+        )
+
     # ── scenarios: emulated conversations that gate a PR ─────────────────────
 
     @tool
@@ -492,6 +604,7 @@ def build_tools(headers: dict[str, str]) -> list:
         list_evaluators, list_evaluator_templates, create_evaluator, update_evaluator,
         run_evaluation,
         list_scenarios, create_scenario, import_scenario, run_scenario,
+        list_alerts, create_alert,
         promote_trace, promote_cluster, replay_case,
         delete_evaluator, delete_scenario, delete_case, delete_clusters, delete_conversations,
     )]

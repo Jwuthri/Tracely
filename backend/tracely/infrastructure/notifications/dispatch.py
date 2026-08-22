@@ -1,15 +1,17 @@
 """Fan an alert out across a monitor's configured channels — one place per-channel routing
 lives, so the service + the API's `/test` endpoint share the exact same dispatch logic.
 
-`channels` is the `Monitor.channels` JSON list. Each entry has `type` ∈ {`slack`, `webhook`} +
-its own URL/headers. Unknown channel types are logged and skipped (forward-compat: adding
-PagerDuty later is one entry here, no migration).
+`channels` is the `Monitor.channels` JSON list. Each entry has `type` ∈ {`slack`, `webhook`,
+`email`} plus its own address: `url` (+ optional `headers`) for the two POST sinks, `to` for
+email. Unknown channel types are logged and skipped (forward-compat: adding PagerDuty later is
+one entry here, no migration).
 """
 
 from __future__ import annotations
 
 import structlog
 
+from tracely.infrastructure.notifications.email import send_email_alert
 from tracely.infrastructure.notifications.slack import send_slack
 from tracely.infrastructure.notifications.webhook import send_webhook
 from tracely.infrastructure.net import UnsafeURL, assert_public_url
@@ -30,6 +32,18 @@ def dispatch_alert(
     ok = fail = skipped = 0
     for ch in channels or []:
         ctype = str(ch.get("type") or "").lower()
+        if ctype == "email":
+            # No SSRF check here: an address is not a URL we fetch, it is a recipient Resend
+            # delivers to.
+            to = str(ch.get("to") or "").strip()
+            if not to:
+                skipped += 1
+                continue
+            if send_email_alert(to, title=title, summary=summary, view_url=view_url):
+                ok += 1
+            else:
+                fail += 1
+            continue
         url = str(ch.get("url") or "")
         if not url:
             skipped += 1

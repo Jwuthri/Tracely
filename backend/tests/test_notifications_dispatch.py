@@ -86,3 +86,37 @@ def test_empty_channels_returns_zeros(monkeypatch):
     monkeypatch.setattr(d, "send_webhook", lambda *a, **k: True)
     assert d.dispatch_alert([], title="t", summary="s") == {"ok": 0, "fail": 0, "skipped": 0}
     assert d.dispatch_alert(None, title="t", summary="s") == {"ok": 0, "fail": 0, "skipped": 0}  # type: ignore[arg-type]
+
+
+# ── email channel ─────────────────────────────────────────────────────────────
+def test_email_channel_uses_to_not_url(monkeypatch):
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        d, "send_email_alert", lambda to, **kw: sent.append((to, kw["title"])) or True
+    )
+    monkeypatch.setattr(d, "send_slack", lambda *a, **k: True)
+    counts = d.dispatch_alert(
+        [{"type": "email", "to": "oncall@acme.com"}, {"type": "slack", "url": "https://hooks.slack.com/x"}],
+        title="Gate failed",
+        summary="CI gate FAIL on support-bot",
+        view_url="https://tracely.app/gates/abc",
+    )
+    assert counts == {"ok": 2, "fail": 0, "skipped": 0}
+    assert sent == [("oncall@acme.com", "Gate failed")]
+
+
+def test_email_channel_without_address_is_skipped(monkeypatch):
+    # An address is not a URL: `assert_public_url` must not run on it, and a blank one is a skip
+    # (config mistake), never a delivery failure.
+    monkeypatch.setattr(d, "send_email_alert", lambda *a, **k: True)
+    assert d.dispatch_alert([{"type": "email", "to": ""}], title="t", summary="s") == {
+        "ok": 0, "fail": 0, "skipped": 1,
+    }
+
+
+def test_email_unconfigured_counts_as_fail_not_crash(monkeypatch):
+    # RESEND_API_KEY unset → the sink returns False. The monitor still fired; delivery didn't.
+    monkeypatch.setattr(d, "send_email_alert", lambda *a, **k: False)
+    assert d.dispatch_alert([{"type": "email", "to": "a@b.com"}], title="t", summary="s") == {
+        "ok": 0, "fail": 1, "skipped": 0,
+    }

@@ -8,6 +8,7 @@ export default {
   scenarios: "Scenarios",
   calibration: "Judge calibration",
   gates: "CI gates",
+  alerts: "Alerts",
   assistant: "Assistant, search & quest",
   settings: "Settings",
 };

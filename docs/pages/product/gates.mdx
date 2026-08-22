@@ -51,3 +51,5 @@ Each command posts a commit status and a PR comment and exits non-zero on anythi
 <Callout type="info">
   The gate is deliberately a *fail-to-pass* check on real production failures, not a score threshold: a release is blocked because a specific thing that broke last Tuesday would break again, and the comment on the PR names it.
 </Callout>
+
+Want it in Slack as well as on the PR — including the run that could not execute at all? [Alerts](/product/alerts) fire on `FAIL` and on `NO_COVERAGE`.

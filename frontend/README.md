@@ -48,6 +48,7 @@ app/
     dashboard/      # the dashboard — "/" belongs to marketing now
     settings/
       api-keys/     # API key management
+      alerts/       # workspace alerts: list, /new, /[monitorId] — the flow builder
       team/         # member list + InviteManager
       account/      # account settings + change password (local mode)
 ```
@@ -78,6 +79,9 @@ All are **Server Components** unless noted; each lists the `lib/api.ts` calls it
 | `/gates/[gateId]` | `getGate` | Gate detail — status banner, soft warnings, per-case verdicts. |
 | `/trends` | `getTrends` | Insights — stat cards + `Bars` charts (daily traces/failures, gate pass/fail) + `MetaAnalysisPanel` (per-agent cross-metric analysis). |
 | `/settings/api-keys` | — | API key management (create/revoke ingest keys). |
+| `/settings/alerts` | `getMonitors` | Alert rules — a use-case gallery that opens a pre-drawn flow, plus each rule's trigger, its flow as a strip, arm toggle and last-fired line (`AlertsList`). |
+| `/settings/alerts/new` | `getAgents`, `getEvaluators` | A new rule, optionally seeded from `?recipe=<i>` (ids are minted here, so a recipe is data, not a half-saved rule). |
+| `/settings/alerts/[monitorId]` | `getMonitor`, `getAgents`, `getEvaluators` | The flow builder: React Flow canvas + docked inspector, the assistant panel, a real test run and the last ten runs (`RuleEditor`). |
 | `/settings/team` | — | Team members list + `InviteManager` (send/revoke invitations). |
 | `/settings/data` | `getStats` | What the project holds (traces/spans/agents/cases) + the `WipeDataPanel` danger zone (delete all project data, typed confirmation). |
 | `/settings/account` | — | Account settings + `ChangePasswordForm` (local auth mode). |
@@ -85,6 +89,8 @@ All are **Server Components** unless noted; each lists the `lib/api.ts` calls it
 ## Data layer
 
 - **`app/lib/api.ts`** — server-side fetchers + all shared types. One function per backend endpoint (`getSessions`, `getSession`, `getTrace`, `getClusters`, `getCases`, `getGates`, `getTrends`, `getStats`, …) plus the type model the whole UI shares: `SpanOut`, `EvalScore`, `Thread`/`ThreadTurn`/`FullTurn`/`ConvNode` (the conversation→turn→span tree), `EvalCase`, `FailureCluster`, `GateRun`, `Stats`, `Trends`.
+- **`app/lib/alerts.ts`** — the trigger half: `TRIGGERS` (the six condition types, their family and which fields each shows), `RECIPES` (the gallery, each with a starter flow), `triggerSummary`, and `toBody`/`fromMonitor`/`draftProblem`. `toBody` sends only the fields the chosen trigger uses — a leftover `threshold` on an event condition would read as a filter nobody set. Unit-tested in `alerts.test.ts`.
+- **`app/lib/ruleFlow.ts`** — the flow half, and **the file that has to match the backend exactly**: dedupe edges → BFS reachability from `__rule_trigger__` → Kahn with sorted-id tie-breaks, plus ancestors (positional `steps[i]`), `flowToStepDrafts`, `buildFlowFromRule`, the step palette and the `{{ token }}` splitter. `domain/alerting/flow.py` implements the same three stages; if they drift, a rule runs differently than it looked on screen. Tested in `ruleFlow.test.ts` against the same cases as `backend/tests/test_alert_flow.py`.
 - **`app/lib/evaluators.ts`** — evaluator CRUD helpers + types (`EvaluatorRow`, `EvaluatorTemplate`, `EvaluatorLevel`), the models/cost lookups, and `resolvePromptPreview`. Wraps the `/api/evaluators/*` proxies for client-side fetches.
 - **`app/lib/templateVariables.ts`** — the client mirror of the backend `@VARIABLE` catalog (names, descriptions, applicable levels, nested props) + the `@VARIABLE` regex; drives the advanced editor's highlighting + autocomplete.
 - **`app/lib/usage.ts`** — pure token/cost derivation, shared by the table **and** the detail-page headers so they compute identically. `spanUsage`/`turnUsage`/`convUsage` aggregate input/output/thinking tokens; `rateFor` prices them from a per-model rate table; `usageSummary`/`fmtUsd` format. `total_tokens` = input + output (matches the backend total); thinking tokens are surfaced separately.
@@ -120,6 +126,13 @@ All are **Server Components** unless noted; each lists the `lib/api.ts` calls it
 | `OnboardingQuest.tsx` | The gamified onboarding checklist — a progress-ring launcher in the `Topbar` opening a dropdown (panel portalled to `<body>`: the topbar is a `sticky z-20` stacking context). Steps derive from `/api/onboarding` counts + visited routes; daily challenges, score and streak live in `localStorage`. |
 | `Markdown.tsx` | Minimal dependency-free Markdown renderer (used by previews + the meta-analysis panel). |
 | `ChangePasswordForm.tsx` | Account-settings change-password form (local auth mode). |
+| `alerts/AlertsList.tsx` | The `/settings/alerts` body: the use-case gallery (a click opens a pre-drawn flow) and the rule list — trigger, scope, the flow as a strip of step chips, arm toggle, last fired. |
+| `alerts/RuleEditor.tsx` | The builder page body: name/description/arm, the canvas, the assistant panel, Save, a real test run and the run history. Owns the trigger draft; the canvas owns the graph and hands over a save payload on demand, so there is no second copy of the flow to drift. |
+| `alerts/RuleFlowCanvas.tsx` · `useRuleFlow.ts` · `nodes.tsx` | The canvas: `ReactFlowProvider` + the pane, all state and handlers in the hook (the components are markup), and the two node types + the step picker. The trigger node is undeletable by filtering the *change*, nothing may connect INTO it, and clicking an edge blurs the inspector first so Backspace deletes the edge rather than a character. |
+| `alerts/InspectorPanel.tsx` · `StepConfigForm.tsx` · `TriggerConfigForm.tsx` | The docked inspector: input chips │ config form │ declared outputs. Selecting the When node swaps the middle column for the trigger's own form, so configuring the trigger is the same gesture as configuring a step. |
+| `alerts/VariableFields.tsx` | Template fields: a draggable variable chip, and the input/textarea that accept one. A native field with transparent text over an `aria-hidden` mirror that highlights `{{ tokens }}` — no editor library, and Backspace next to a token removes the whole token. |
+| `alerts/AssistantPanel.tsx` | "Describe the alert you want" → a drafted flow pushed onto the live canvas via `replaceFlow`. It hands the page a draft and edits nothing itself. |
+| `alerts/ExecutionCard.tsx` | One run, per step: what it **sent** (every field after templating) and what it **returned**. The rendered-config half is why a run explains itself without re-running. |
 | `InviteManager.tsx` | Team invite flow (send invitation by email, list pending invitations, revoke). |
 | `DateRangePicker.tsx` | Date range filter for the traces explorer. |
 | `ui.tsx` | `Badge`, `verdictVariant`/`statusVariant`, `TypeChip` (span-type chip), `StatCard`. |

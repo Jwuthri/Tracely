@@ -27,6 +27,8 @@ _TABLES = [
     models.Membership.__table__,
     models.Invitation.__table__,
     models.Evaluator.__table__,
+    models.Monitor.__table__,
+    models.MonitorStep.__table__,
 ]
 
 
@@ -55,12 +57,11 @@ async def engine(tmp_path):
 @pytest.fixture
 def sync_db(tmp_path, monkeypatch, engine):
     import tracely.api.routers.evaluators as evaluators_router
+    import tracely.api.routers.monitors as monitors_router
 
-    monkeypatch.setattr(
-        evaluators_router,
-        "SyncSessionLocal",
-        sessionmaker(create_engine(f"sqlite:///{tmp_path}/test.db")),
-    )
+    maker = sessionmaker(create_engine(f"sqlite:///{tmp_path}/test.db"))
+    monkeypatch.setattr(evaluators_router, "SyncSessionLocal", maker)
+    monkeypatch.setattr(monitors_router, "SyncSessionLocal", maker)
 
 
 async def test_a_write_tool_mutates_real_state(client, sync_db, make_workspace, tools):
@@ -104,6 +105,66 @@ async def test_a_rejected_write_comes_back_as_text_not_an_exception(
     assert "unknown structural check" in out  # the model can act on this
 
 
+async def test_create_alert_builds_the_condition_the_backend_expects(
+    client, sync_db, make_workspace, tools
+):
+    """The tool's flat arguments have to land as the nested `condition` the router validates —
+    and only the keys THIS trigger uses, or the alert carries filters nobody set."""
+    _proj, user, _key = await make_workspace("tools-alert", "tools_key_alert", "alert@x.test")
+    t = tools(tokens.issue_session(user.id))
+
+    made = await t["create_alert"].ainvoke(
+        {
+            "name": "PII in production",
+            "trigger": "trace_failed",
+            "contains": "pii",
+            "destination": "oncall@acme.com",
+            "action": "email",
+            "min_interval_seconds": 0,
+        }
+    )
+    assert made["condition"] == {"type": "trace_failed", "contains": "pii"}
+    # The tool creates a real FLOW, so the rule the assistant makes is the same kind of object the
+    # canvas edits — one mechanism, not a second notification path.
+    assert [(s["step_type"], s["config"]["to_template"]) for s in made["steps"]] == [
+        ("send_email", "oncall@acme.com")
+    ]
+    assert made["flow_layout"]["edges"][0]["source"] == "__rule_trigger__"
+
+    threshold = await t["create_alert"].ainvoke(
+        {
+            "name": "Quality regression",
+            "trigger": "fail_rate_over",
+            "score_name": "tracely.run.quality",
+            "threshold": 0.2,
+            "destination": "https://hooks.slack.com/services/T/B/x",
+        }
+    )
+    assert threshold["condition"] == {
+        "type": "fail_rate_over",
+        "score_name": "tracely.run.quality",
+        "threshold": 0.2,
+        "window_minutes": 60,
+        "min_samples": 20,
+    }
+    assert {a["name"] for a in await t["list_alerts"].ainvoke({})} == {
+        "PII in production", "Quality regression",
+    }
+
+
+async def test_an_ingest_key_cannot_point_an_alert_anywhere(client, sync_db, make_workspace, tools):
+    """Creating an alert is a `require_user` route: a leaked CI key must not be able to aim a
+    workspace's alerts at a channel of its own — and the refusal comes back as text."""
+    await make_workspace("tools-alert-key", "tools_key_alert_ro", "alertkey@x.test")
+    t = tools("tools_key_alert_ro")
+
+    out = await t["create_alert"].ainvoke(
+        {"name": "mine now", "trigger": "cluster_new", "destination": "https://hooks.slack.com/x"}
+    )
+    assert isinstance(out, str) and out.startswith("error: Tracely API 403")
+    assert await t["list_alerts"].ainvoke({}) == []  # reading is still fine
+
+
 async def test_no_tool_argument_is_named_config(tools):
     """`StructuredTool._arun` eats an argument called `config` — the tool then fails at call time,
     inside a live turn, with a missing-argument TypeError. Nothing catches that at import."""
@@ -132,6 +193,7 @@ async def test_the_toolbox_covers_the_product(tools):
         "create_evaluator", "run_evaluation",  # columns, and backfilling them
         "create_scenario", "import_scenario", "run_scenario",  # emulated conversations
         "promote_trace", "promote_cluster", "replay_case",  # regression cases
+        "create_alert", "list_alerts",  # "tell me when this happens"
         "delete_conversations",  # the destructive end, gated by the system prompt
     } <= names
 

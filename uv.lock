@@ -5081,6 +5081,15 @@ wheels = [
 ]
 
 [[package]]
+name = "simpleeval"
+version = "1.0.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b4/9d/e7c9309940794dd3073cba2e5101df5874d84243595ce63b1e1c8f9b9c76/simpleeval-1.0.7.tar.gz", hash = "sha256:1e10e5f9fec597814444e20c0892ed15162fa214c8a88f434b5b077cf2fef85b", size = 30250, upload-time = "2026-03-16T10:53:03.464Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0f/2f/f32aa85591882378bb43caa09363f3ed97df399369a5144c7f19f2275bc0/simpleeval-1.0.7-py3-none-any.whl", hash = "sha256:97ac271bfd8f2af9e7b9a36ceea67617f26fa873f9d5ae1922f64d4c1442534b", size = 18792, upload-time = "2026-03-16T10:53:02.103Z" },
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5536,6 +5545,7 @@ dependencies = [
     { name = "greenlet" },
     { name = "hdbscan" },
     { name = "httpx" },
+    { name = "jinja2" },
     { name = "langchain" },
     { name = "langchain-openai" },
     { name = "langgraph" },
@@ -5549,6 +5559,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "scikit-learn" },
+    { name = "simpleeval" },
     { name = "sqlalchemy" },
     { name = "stripe" },
     { name = "structlog" },
@@ -5570,6 +5581,7 @@ requires-dist = [
     { name = "greenlet", specifier = ">=3.0" },
     { name = "hdbscan", specifier = ">=0.8.38" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "jinja2", specifier = ">=3.1" },
     { name = "langchain", specifier = ">=1.3" },
     { name = "langchain-openai", specifier = ">=1.2" },
     { name = "langgraph", specifier = ">=1.0" },
@@ -5583,6 +5595,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.3" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.8" },
     { name = "scikit-learn", specifier = ">=1.4" },
+    { name = "simpleeval", specifier = ">=1.0" },
     { name = "sqlalchemy", specifier = ">=2.0.30" },
     { name = "stripe", specifier = ">=11" },
     { name = "structlog", specifier = ">=24.1" },

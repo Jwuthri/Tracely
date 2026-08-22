@@ -1,0 +1,45 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly.
+labels: [bug]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Backend / API
+        - Workers (ingest, evaluation, failure intel)
+        - Frontend / dashboard
+        - SDK / CLI (tracely-ai)
+        - CI gate / GitHub Action
+        - MCP server / in-app assistant
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what you got. Logs and screenshots welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Commit SHA / Docker image tag / `pip show tracely-ai` version.
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Python / Node version, how you run it (docker compose, `make backend`, Railway…).

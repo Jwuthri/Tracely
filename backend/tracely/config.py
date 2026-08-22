@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -302,6 +302,18 @@ class Settings(BaseSettings):
     email_from: str = "Tracely <onboarding@resend.dev>"
     # Public base URL of the frontend; used to build the accept-invite link inside invite emails.
     app_base_url: str = "http://localhost:3001"
+
+    @field_validator("allow_private_urls", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, v: object) -> object:
+        """An empty string means "not configured", not "invalid".
+
+        This setting is deliberately tri-state (`None` = allowed outside prod), and every way of
+        passing env vars through a template renders an unset variable as `""` — the compose
+        `x-app-env` anchor (`${ALLOW_PRIVATE_URLS:-}`) and a blank Railway variable both do. Without
+        this, one unset optional flag stops the whole process from booting.
+        """
+        return None if isinstance(v, str) and v.strip() == "" else v
 
     @model_validator(mode="after")
     def _validate_auth(self) -> "Settings":

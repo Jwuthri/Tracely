@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import type { Me } from "@/app/lib/auth/types";
 import { AccountMenu } from "./AccountMenu";
 import { DOCS_URL } from "@/app/lib/site";
-import { IconActivity, IconBolt, IconBook, IconCard, IconDatabase, IconGate, IconGrid, IconLayers, IconScale, IconSettings, IconShield, IconTrend, IconUsers } from "./icons";
+import { IconActivity, IconBell, IconBolt, IconBook, IconCard, IconDatabase, IconGate, IconGrid, IconLayers, IconScale, IconSettings, IconShield, IconTrend, IconUsers } from "./icons";
 
 type NavItem = { href: string; label: string; Icon: typeof IconGrid; exact?: boolean; external?: boolean };
 
@@ -38,6 +38,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     group: "Configure",
     items: [
       { href: "/settings/api-keys", label: "API keys", Icon: IconSettings },
+      { href: "/settings/alerts", label: "Alerts", Icon: IconBell },
       { href: "/settings/data", label: "Data", Icon: IconDatabase },
       { href: "/settings/team", label: "Team", Icon: IconUsers },
       // The ONLY route to billing — deliberately not duplicated in the AccountMenu dropdown,

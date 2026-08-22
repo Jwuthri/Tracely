@@ -141,3 +141,85 @@ def test_zero_min_samples_clamps_to_one():
         _samples(["FAIL"]),
     )
     assert v.fires is True
+
+
+# ── event conditions ──────────────────────────────────────────────────────────
+# Event monitors are fired by the pipeline, not the beat. `event_matches` IS the "does this alert
+# go out?" decision, so every filter gets a test: an over-broad match pages the team for someone
+# else's agent, an over-narrow one silently never fires.
+
+from tracely.domain.monitoring.conditions import (  # noqa: E402
+    event_matches,
+    is_event_condition,
+)
+
+
+GATE_EVENT = {
+    "type": "gate_failed",
+    "agent": "support-bot",
+    "agent_id": "a-uuid",
+    "env": "ci",
+    "text": "CI gate FAIL on support-bot (ci) — 3 failed / 9 passed · refund flow regressed",
+    "score_names": [],
+}
+TRACE_EVENT = {
+    "type": "trace_failed",
+    "agent": "support-bot",
+    "agent_id": "a-uuid",
+    "env": "",
+    "text": "tracely.run.grounded PII leaked in the confirmation message",
+    "score_names": ["tracely.run.grounded"],
+}
+
+
+def test_event_type_must_match():
+    assert event_matches({"type": "gate_failed"}, GATE_EVENT) is True
+    assert event_matches({"type": "trace_failed"}, GATE_EVENT) is False
+
+
+def test_bare_event_condition_matches_everything_of_its_type():
+    # No filters = "every failing gate in this workspace" — the common case, must not need a knob.
+    assert event_matches({"type": "gate_failed"}, GATE_EVENT) is True
+
+
+def test_target_agent_scopes_by_slug_or_id():
+    assert event_matches({"type": "gate_failed"}, GATE_EVENT, "support-bot") is True
+    assert event_matches({"type": "gate_failed"}, GATE_EVENT, "a-uuid") is True
+    assert event_matches({"type": "gate_failed"}, GATE_EVENT, "billing-bot") is False
+
+
+def test_env_filter_narrows_gate_alerts():
+    assert event_matches({"type": "gate_failed", "env": "ci"}, GATE_EVENT) is True
+    assert event_matches({"type": "gate_failed", "env": "staging"}, GATE_EVENT) is False
+
+
+def test_score_name_filter_matches_the_failing_evaluator():
+    spec = {"type": "trace_failed", "score_name": "tracely.run.grounded"}
+    assert event_matches(spec, TRACE_EVENT) is True
+    assert event_matches({**spec, "score_name": "tracely.run.tone"}, TRACE_EVENT) is False
+
+
+def test_contains_is_case_insensitive_substring_of_text():
+    # "page me when a conversation errors with xyz" — the headline use case.
+    assert event_matches({"type": "trace_failed", "contains": "pii"}, TRACE_EVENT) is True
+    assert event_matches({"type": "trace_failed", "contains": "PII leaked"}, TRACE_EVENT) is True
+    assert event_matches({"type": "trace_failed", "contains": "timeout"}, TRACE_EVENT) is False
+
+
+def test_filters_are_anded():
+    spec = {"type": "trace_failed", "contains": "pii", "score_name": "tracely.run.tone"}
+    assert event_matches(spec, TRACE_EVENT) is False  # contains hits, score_name doesn't
+
+
+def test_is_event_condition_separates_the_two_families():
+    assert is_event_condition({"type": "gate_failed"}) is True
+    assert is_event_condition({"type": "cluster_new"}) is True
+    assert is_event_condition({"type": "fail_rate_over"}) is False
+    assert is_event_condition({}) is False
+
+
+def test_polled_evaluator_refuses_an_event_type():
+    # Belt and braces: if an event monitor ever reaches the beat it stays SILENT rather than
+    # paging on an empty window.
+    v = evaluate_condition({"type": "gate_failed"}, _samples(["FAIL"] * 10))
+    assert v.fires is False and v.skipped_reason == "unknown_condition"

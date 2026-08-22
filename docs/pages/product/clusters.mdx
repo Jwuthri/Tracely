@@ -39,3 +39,10 @@ Stage 2 needs the workspace's OpenRouter key; without one the button is disabled
 <Callout type="info">
   A cluster is a *view* over the scores. Change an evaluator — make a check advisory, tighten a threshold — and the next clustering reflects it; there is no separate list of issues to keep in sync.
 </Callout>
+
+## Told, not found
+
+A cluster being *new* is the signal worth interrupting someone for: it means a failure mode nobody
+has triaged just appeared in production. Set that up once under
+[Alerts](/product/alerts) — trigger **New failure mode**, one Slack channel — and this page becomes
+somewhere you arrive already knowing why.

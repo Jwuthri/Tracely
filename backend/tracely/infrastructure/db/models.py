@@ -716,7 +716,10 @@ class Monitor(Base):
       `trace_failure_rate` — `{window_minutes, min_samples, threshold}` — overall failing-trace
         rate (advisory FAILs excluded) over the window must stay BELOW threshold.
 
-    `channels` (JSON list): `[{type: 'slack', url}, {type: 'webhook', url, headers?}]`."""
+    `channels` (JSON list): `[{type: 'slack', url}, {type: 'webhook', url, headers?}]` — the
+    simple action, used when the monitor has no `steps`. With steps, the action is a **flow**:
+    an ordered DAG of `MonitorStep`s whose graph lives in `flow_layout` (React Flow's own
+    `{nodes, edges}` JSON, read by the engine itself — see `domain/alerting/flow.py`)."""
 
     __tablename__ = "monitors"
     __table_args__ = (
@@ -736,7 +739,70 @@ class Monitor(Base):
     last_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_fired_summary: Mapped[str] = mapped_column(String(500), default="")
+    # React Flow's `{nodes, edges}`, stored opaquely. `edges` is the only part the engine reads.
+    flow_layout: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    steps: Mapped[list["MonitorStep"]] = relationship(
+        back_populates="monitor",
+        cascade="all, delete-orphan",
+        order_by="MonitorStep.order_index",
+        lazy="selectin",
+    )
+
+
+class MonitorStep(Base):
+    """One executable step of a monitor's flow. `id` doubles as the canvas node id, so an edge in
+    `Monitor.flow_layout` points straight at this row — no id translation on save.
+
+    `config` shape per `step_type` (every string field is a Jinja template):
+      `condition`         — `{expression}`; falsy short-circuits the whole run to `skipped`.
+      `webhook`           — `{url, method, headers: [{key, value}], body_template}`.
+      `slack`             — `{url, text_template}`.
+      `send_email`        — `{to_template, subject_template, body_template, body_is_html}`.
+      `llm_prompt`        — `{model, system_prompt, user_prompt_template, temperature,
+                             output_schema: [{name, type, description}]}`.
+      `python_expression` — `{expression}`, one allowlisted expression (no `eval`).
+    """
+
+    __tablename__ = "monitor_steps"
+    __table_args__ = (Index("ix_monitor_steps_monitor_order", "monitor_id", "order_index"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    monitor_id: Mapped[str] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    name: Mapped[str] = mapped_column(String(120))
+    step_type: Mapped[str] = mapped_column(String(32))
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    monitor: Mapped["Monitor"] = relationship(back_populates="steps")
+
+
+class MonitorExecution(Base):
+    """One run of a monitor's flow. `step_results` is the audit trail — per step: the result, the
+    error, the ancestors whose outputs it could read, and `rendered_config`, the POST-Jinja value
+    of every field actually sent. That last one is what makes a run self-explanatory: you see that
+    `{{ trace.url }}` resolved to a real link without re-running anything."""
+
+    __tablename__ = "monitor_executions"
+    __table_args__ = (
+        Index("ix_monitor_executions_monitor_started", "monitor_id", "started_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    monitor_id: Mapped[str] = mapped_column(ForeignKey("monitors.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    trigger_type: Mapped[str] = mapped_column(String(40), default="")
+    subject_id: Mapped[str] = mapped_column(String(120), default="")
+    status: Mapped[str] = mapped_column(String(16))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    step_results: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_test: Mapped[bool] = mapped_column(Boolean, default=False)

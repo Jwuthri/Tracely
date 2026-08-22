@@ -141,6 +141,32 @@ class TraceReader:
             by_tid[tid].append((name, comment))
         return by_tid
 
+    def recent_failing_traces(self, project_id: str, limit: int = 20) -> list[dict]:
+        """Recent traces that a non-advisory-agnostic FAIL landed on, newest first, with enough to
+        label them in a picker: `[{trace_id, ts, agent_id, input}]`.
+
+        Serves the alert editor's "test this rule against a real turn" dropdown — testing a
+        "conversation broke" rule against a passing turn renders an empty failure and teaches the
+        user nothing. Advisory filtering is deliberately NOT applied here: the picker offers
+        candidates, and `alert_events.trace_event` is what applies the verdict policy.
+        """
+        rows = self.client.query(
+            "SELECT e.trace_id, max(e.start_time) AS ts, any(e.agent_id) AS agent_id, "
+            "  argMin(e.input, e.start_time) AS input "
+            "FROM events e FINAL "
+            "INNER JOIN ("
+            "  SELECT DISTINCT trace_id FROM scores FINAL WHERE project_id = {p:String} "
+            "  AND verdict = 'FAIL' AND is_deleted = 0"
+            ") s ON s.trace_id = e.trace_id "
+            "WHERE e.project_id = {p:String} AND e.internal_kind = '' "
+            "GROUP BY e.trace_id ORDER BY ts DESC LIMIT {n:UInt32}",
+            parameters={"p": project_id, "n": limit},
+        ).result_rows
+        return [
+            {"trace_id": tid, "ts": str(ts), "agent_id": aid, "input": inp}
+            for tid, ts, aid, inp in rows
+        ]
+
     def scores_by_trace(
         self, project_id: str, trace_ids: Iterable[str]
     ) -> dict[str, list[dict]]:
