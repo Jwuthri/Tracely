@@ -9,6 +9,7 @@ import { Spark } from "@/app/components/Bars";
 import { ClusterMeter, TaxonomyChip, clusterTone, compactCount } from "@/app/components/ClusterMeter";
 import { IgnoreCluster } from "@/app/components/IgnoreCluster";
 import { RowLink } from "@/app/components/RowLink";
+import { TimeAgo } from "@/app/components/TimeAgo";
 
 function SectionHead({ title, href }: { title: string; href: string }) {
   return (
@@ -19,6 +20,13 @@ function SectionHead({ title, href }: { title: string; href: string }) {
       </a>
     </div>
   );
+}
+
+/** A trace is red if it errored or an evaluator failed it, green once something graded it, and
+ *  grey while it is still unevaluated — a grey dot is "no verdict yet", not "passed". */
+function dotColor(t: { has_error?: number; eval?: string | null }): string {
+  if (t.has_error || t.eval === "FAIL") return "bg-fail";
+  return t.eval === "PASS" ? "bg-ok" : "bg-fg-faint/40";
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
@@ -165,15 +173,26 @@ export default async function Dashboard() {
               <a
                 key={t.trace_id}
                 href={`/traces/${t.trace_id}`}
-                className="flex items-center justify-between border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-hilite/[0.025]"
+                className="flex items-center justify-between gap-3 border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-hilite/[0.025]"
               >
                 <span className="flex min-w-0 items-center gap-2.5">
-                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.has_error ? "bg-fail" : "bg-ok"}`} />
-                  <span className="truncate text-[13px] text-fg">{t.root_name || "trace"}</span>
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotColor(t)}`} />
+                  {/* an unnamed trace is identified by its id — the old fallback printed the
+                      word "trace" on every row, which named nothing */}
+                  <span className={`truncate text-[13px] ${t.root_name ? "text-fg" : "font-mono text-[12px] text-fg-muted"}`}>
+                    {t.root_name || `${t.trace_id.slice(0, 12)}…`}
+                  </span>
                 </span>
-                <span className="flex shrink-0 items-center gap-3 font-mono text-[11px] text-fg-faint">
+                <span className="flex shrink-0 items-center gap-2.5 font-mono text-[11px] text-fg-faint">
                   <span>{t.spans} spans</span>
-                  {t.has_error ? <Badge variant="fail">error</Badge> : null}
+                  <TimeAgo ts={t.ts} />
+                  {/* the eval verdict was in the payload all along and nothing showed it —
+                      "did this trace pass" is the one thing the product exists to answer */}
+                  {t.has_error ? (
+                    <Badge variant="fail">error</Badge>
+                  ) : t.eval ? (
+                    <Badge variant={t.eval === "FAIL" ? "fail" : "ok"}>{t.eval}</Badge>
+                  ) : null}
                 </span>
               </a>
             ))

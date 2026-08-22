@@ -75,7 +75,14 @@ async def traces_overview(project_id: str, limit: int, advisory: Sequence[str] =
         SELECT trace_id,
                min(start_time)                       AS ts,
                count()                               AS spans,
-               anyIf(name, parent_span_id = '')      AS root_name,
+               -- The parentless span names the trace, but there isn't always one: if the app's
+               -- spans hang off a parent that was never exported to us (another instrumentation's
+               -- server span, say), every span here has a parent and this went empty — which the
+               -- dashboard then rendered as the literal word "trace" on every row. Fall back to
+               -- the earliest span, which is the closest thing to a root we hold.
+               if(anyIf(name, parent_span_id = '') != '',
+                  anyIf(name, parent_span_id = ''),
+                  argMin(name, start_time))          AS root_name,
                {_TRACE_AGENT}                        AS agent_id,
                maxIf(1, level = 'ERROR')             AS has_error
         -- FINAL, like every other read: without it a span re-delivered by a retrying exporter is
