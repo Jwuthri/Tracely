@@ -9,8 +9,9 @@ import { SelectBox } from "./SelectBox";
 import { TimeAgo } from "./TimeAgo";
 import { Badge } from "./ui";
 import { ClusterMeter, TaxonomyChip, clusterTone, compactCount } from "./ClusterMeter";
+import { IgnoreCluster } from "./IgnoreCluster";
 
-const GRID = "grid grid-cols-[32px_64px_1fr_120px_120px_28px] items-center gap-3";
+const GRID = "grid grid-cols-[32px_64px_1fr_120px_120px_52px] items-center gap-3";
 
 function clusterVariant(s: string): "warn" | "ok" | "neutral" {
   if (s === "OPEN") return "warn";
@@ -134,7 +135,10 @@ export function ClusterList({ clusters }: { clusters: FailureCluster[] }) {
               </Badge>
             </span>
             <TimeAgo ts={c.last_seen_at} className="text-right font-mono text-[11.5px] text-fg-faint" />
-            <IconChevron className="h-4 w-4 justify-self-end text-fg-faint transition-colors group-hover:text-signal" />
+            <span className="flex items-center justify-end gap-0.5">
+              {c.status === "OPEN" && <IgnoreCluster clusterId={c.id} />}
+              <IconChevron className="h-4 w-4 shrink-0 text-fg-faint transition-colors group-hover:text-signal" />
+            </span>
           </RowLink>
         ))
       )}

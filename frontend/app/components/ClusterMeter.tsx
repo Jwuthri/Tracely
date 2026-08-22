@@ -30,12 +30,23 @@ export function clusterTone(taxonomy: string | null | undefined): Tone {
   return TONE[KEYWORDS.find(([re]) => re.test(t))?.[1] ?? "execution"];
 }
 
-/** The taxonomy as a chip rather than grey text lost at the right edge. */
+/** The taxonomy as a chip rather than grey text lost at the right edge.
+ *
+ * The slot is a FIXED width, not the chip's natural one: the chip sits beside a `flex-1` meter,
+ * so a longer taxonomy ("tool execution error") stole width from its own meter and every row
+ * ended up with a differently-scaled bar. Meters are only worth drawing if they share a
+ * baseline across rows. */
 export function TaxonomyChip({ taxonomy, tone }: { taxonomy: string; tone: Tone }) {
-  if (!taxonomy) return null;
   return (
-    <span className={clsx("shrink-0 rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider", tone.chip)}>
-      {taxonomy}
+    <span className="flex w-[148px] shrink-0 justify-end">
+      {taxonomy ? (
+        <span
+          title={taxonomy}
+          className={clsx("truncate rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider", tone.chip)}
+        >
+          {taxonomy}
+        </span>
+      ) : null}
     </span>
   );
 }

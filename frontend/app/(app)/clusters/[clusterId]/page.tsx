@@ -4,6 +4,7 @@ import { SuggestedEvaluatorCard } from "@/app/components/SuggestedEvaluatorCard"
 import { CopyId } from "@/app/components/CopyId";
 import { Badge } from "@/app/components/ui";
 import { IconArrowLeft } from "@/app/components/icons";
+import { TimeAgo } from "@/app/components/TimeAgo";
 
 function clusterVariant(s: string): "warn" | "ok" | "neutral" {
   if (s === "OPEN") return "warn";
@@ -114,27 +115,50 @@ export default async function ClusterPage({ params }: { params: Promise<{ cluste
               : `(${members.length})`}
           </span>
         </div>
-        {members.map((m, i) => (
-          <div key={i} className="border-b border-line/50 px-4 py-2.5 text-[12.5px] last:border-0">
-            <div className="flex items-center justify-between gap-3">
-              <span className="flex items-center gap-2.5">
-                <a href={`/traces/${m.trace_id}`} className="font-mono text-[12px] text-signal hover:underline">
-                  {m.trace_id.slice(0, 16)}…
-                </a>
-                {m.is_medoid && <Badge variant="signal">representative</Badge>}
-                {m.latency_ms ? <span className="font-mono text-[10.5px] text-fg-faint">{fmtMs(m.latency_ms)}</span> : null}
-              </span>
-              <CopyId value={m.trace_id} label="trace id" />
+        {members.map((m, i) => {
+          // What actually distinguishes one member from another. `summary` only exists once a
+          // cluster has been LLM-analyzed and a crash trace has no input, so falling through to
+          // the raw error / judge reason is what keeps every row saying something.
+          const why = m.summary || m.failed?.find((f) => f.reason)?.reason || m.error;
+          return (
+            <div key={i} className="group border-b border-line/50 px-4 py-3 text-[12.5px] last:border-0 hover:bg-hilite/[0.02]">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="flex min-w-0 items-baseline gap-2.5">
+                  <a href={`/traces/${m.trace_id}`} className="font-mono text-[12px] text-signal hover:underline">
+                    {m.trace_id.slice(0, 12)}…
+                  </a>
+                  {m.is_medoid && <Badge variant="signal">representative</Badge>}
+                  {m.failed?.map((f) => (
+                    <span key={f.name} className="shrink-0 rounded border border-fail/25 bg-fail/10 px-1.5 py-0.5 font-mono text-[10px] text-fail">
+                      {f.name.replace(/^tracely\.(run|tool|span)\./, "")}
+                    </span>
+                  ))}
+                </span>
+                <span className="flex shrink-0 items-baseline gap-2.5 font-mono text-[10.5px] text-fg-faint">
+                  {m.latency_ms ? <span>{fmtMs(m.latency_ms)}</span> : null}
+                  {m.ts && <TimeAgo ts={m.ts} />}
+                  <CopyId value={m.trace_id} label="trace id" />
+                </span>
+              </div>
+              {m.input && (
+                <p className="mt-2 flex items-start gap-1.5 text-[12px] text-fg-muted">
+                  <span className="shrink-0 select-none font-mono text-[10px] uppercase text-fg-faint">ask</span>
+                  <span className="line-clamp-2">{m.input}</span>
+                </p>
+              )}
+              {why && (
+                <p className="mt-1.5 flex items-start gap-1.5 text-[12px] leading-relaxed text-fg-muted">
+                  <span className="shrink-0 select-none font-mono text-[10px] uppercase text-fail/70">why</span>
+                  <span className="line-clamp-3">{why}</span>
+                </p>
+              )}
+              {/* the raw exception, when it isn't already the line above */}
+              {m.error && why !== m.error && (
+                <p className="mt-1.5 truncate font-mono text-[11px] text-fail/80">{m.error}</p>
+              )}
             </div>
-            {m.input && (
-              <p className="mt-1.5 flex items-start gap-1.5 text-[12px] text-fg-muted">
-                <span className="shrink-0 select-none text-fg-faint">👤</span>
-                <span className="truncate">{m.input}</span>
-              </p>
-            )}
-            {m.summary && <p className="mt-1 text-[11.5px] leading-relaxed text-fg-faint">{m.summary}</p>}
-          </div>
-        ))}
+          );
+        })}
       </section>
 
       {c.signature && (

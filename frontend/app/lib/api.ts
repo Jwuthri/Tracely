@@ -419,6 +419,11 @@ export type ClusterMember = {
   summary?: string;
   input?: string;
   latency_ms?: number;
+  ts?: string;
+  /** earliest non-empty span status_message — for crash clusters this IS the failure */
+  error?: string;
+  /** the FAIL scores that put this trace in the cluster, with the judge's reason */
+  failed?: { name: string; reason?: string }[];
 };
 
 // A creatable evaluator draft (built-in structural check or LLM-judge rubric) the cluster view

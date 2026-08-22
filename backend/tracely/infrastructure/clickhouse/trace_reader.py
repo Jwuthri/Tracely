@@ -228,20 +228,29 @@ class TraceReader:
     def member_meta(
         self, project_id: str, trace_ids: Iterable[str]
     ) -> dict[str, dict[str, Any]]:
-        """Per-member facts used by the cluster detail view: timestamp, latency, input snippet.
-        Returns `{trace_id: {ts, latency_ms, input}}`. Drops trace_ids no longer present in
-        events (wiped, or aged out by ClickHouse TTL)."""
+        """Per-member facts used by the cluster detail view: timestamp, latency, input snippet,
+        error message. Returns `{trace_id: {ts, latency_ms, input, error}}`. Drops trace_ids no
+        longer present in events (wiped, or aged out by ClickHouse TTL).
+
+        `error` is the earliest non-empty `status_message` in the trace — for a crash cluster
+        that IS the failure ("ValueError: kaboom"), and those traces often carry no input at all,
+        so without it the cluster's member list has nothing to say about any of them."""
         uniq = sorted({t for t in trace_ids if t})
         if not uniq:
             return {}
         rows = self.client.query(
             "SELECT trace_id, min(start_time) AS ts, "
             "dateDiff('millisecond', min(start_time), max(coalesce(end_time, start_time))) AS lat, "
-            "argMinIf(input, start_time, input != '') AS inp "
+            "argMinIf(input, start_time, input != '') AS inp, "
+            "argMinIf(coalesce(status_message, ''), start_time, "
+            "  coalesce(status_message, '') != '') AS err "
             "FROM events FINAL WHERE project_id = {p:String} AND trace_id IN {t:Array(String)} "
             "GROUP BY trace_id",
             parameters={"p": project_id, "t": uniq},
         ).result_rows
         # input is left raw here; routers/services that want a readable snippet should pass it
         # through `tracely.infrastructure.text.message_text`.
-        return {r[0]: {"ts": r[1], "latency_ms": float(r[2]), "input": r[3]} for r in rows}
+        return {
+            r[0]: {"ts": r[1], "latency_ms": float(r[2]), "input": r[3], "error": r[4]}
+            for r in rows
+        }

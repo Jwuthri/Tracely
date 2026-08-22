@@ -126,6 +126,15 @@ async def get_cluster(
             all_ids = [m.trace_id for m in repo.cluster_members(s, cl.id)]
             page = repo.cluster_members(s, cl.id, limit=cap)
             meta = reader.member_meta(project_id, [m.trace_id for m in page])
+            # WHY each member failed. `summary` is only written when the cluster went through LLM
+            # analysis, and a crash trace carries no input at all — so with neither of these the
+            # member list is 25 opaque trace ids, which is no help in deciding what to do.
+            fails = {
+                tid: [sc for sc in scores if sc.get("verdict") == "FAIL"]
+                for tid, scores in reader.scores_by_trace(
+                    project_id, [m.trace_id for m in page]
+                ).items()
+            }
             # Drop members whose trace no longer exists in events (wiped, or aged out by
             # ClickHouse TTL retention) so the detail shows real linked traces.
             shown = [
@@ -135,6 +144,12 @@ async def get_cluster(
                     "summary": m.summary,
                     "input": message_text(meta[m.trace_id].get("input", "")),
                     "latency_ms": meta[m.trace_id].get("latency_ms", 0.0),
+                    "ts": meta[m.trace_id].get("ts"),
+                    "error": meta[m.trace_id].get("error", ""),
+                    "failed": [
+                        {"name": sc["name"], "reason": sc.get("comment", "")}
+                        for sc in fails.get(m.trace_id, [])
+                    ],
                 }
                 for m in page
                 if m.trace_id in meta

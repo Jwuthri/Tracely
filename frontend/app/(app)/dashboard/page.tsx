@@ -7,6 +7,8 @@ import { IconChevron } from "@/app/components/icons";
 import { OpsStrip } from "@/app/components/OpsPanel";
 import { Spark } from "@/app/components/Bars";
 import { ClusterMeter, TaxonomyChip, clusterTone, compactCount } from "@/app/components/ClusterMeter";
+import { IgnoreCluster } from "@/app/components/IgnoreCluster";
+import { RowLink } from "@/app/components/RowLink";
 
 function SectionHead({ title, href }: { title: string; href: string }) {
   return (
@@ -43,7 +45,7 @@ function TopClusters({ clusters }: { clusters: FailureCluster[] }) {
         {top.map((c) => {
           const tone = clusterTone(c.taxonomy);
           return (
-            <a
+            <RowLink
               key={c.id}
               href={`/clusters/${c.id}`}
               className="group flex gap-3.5 rounded-lg px-2.5 py-2.5 transition-colors hover:bg-hilite/[0.03]"
@@ -67,7 +69,8 @@ function TopClusters({ clusters }: { clusters: FailureCluster[] }) {
                   <TaxonomyChip taxonomy={c.taxonomy ?? ""} tone={tone} />
                 </span>
               </span>
-            </a>
+              <IgnoreCluster clusterId={c.id} />
+            </RowLink>
           );
         })}
       </div>
