@@ -1,0 +1,187 @@
+---
+description: "Trace Claude Code sessions into Tracely: point its native OTLP exporter at your workspace today, and what lands next — a claude_code.* mapper, prompt/response content, and gating your CLAUDE.md with scenarios."
+---
+
+import { Callout } from "nextra/components";
+
+# Claude Code
+
+Claude Code is an agent, and Tracely takes agent traces over plain OTLP — so it can send you its
+sessions directly, with no SDK, no wrapper and no code of ours in the middle.
+
+This page is honest about what works **today** and what is **planned**, because the useful half is
+one env block and the polished half isn't built yet.
+
+| Tier | What you get | Status |
+|---|---|---|
+| **0** | Sessions land as traces, right now | **works today** |
+| **1** | They look native: agent, conversation, GENERATION/TOOL spans | planned |
+| **2** | Prompts, responses and tool I/O — so evaluators, clusters and alerts apply | planned |
+| **3** | Gate your `CLAUDE.md`, skills and hooks in CI with scenarios | planned |
+
+---
+
+## Tier 0 — send Claude Code's own OTLP traces (today)
+
+Claude Code has a native OpenTelemetry exporter, and distributed tracing is available behind a beta
+flag. Tracely's ingest endpoint is a standard OTLP/HTTP receiver, so the two connect with
+environment variables only.
+
+Add this to `~/.claude/settings.json` (all sessions) or a project's `.claude/settings.json`
+(that repo only):
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA": "1",
+    "OTEL_TRACES_EXPORTER": "otlp",
+    "OTEL_METRICS_EXPORTER": "none",
+    "OTEL_LOGS_EXPORTER": "none",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:8000",
+    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer tracely_dev_key",
+    "OTEL_LOG_TOOL_DETAILS": "1"
+  }
+}
+```
+
+Point `OTEL_EXPORTER_OTLP_ENDPOINT` at your Tracely **API host** — the exporter appends `/v1/traces`
+itself. Hosted: `https://api.tracely-studio.xyz`. Self-hosted docker-compose: `http://localhost:8000`.
+The header value is one of your workspace's [ingest keys](/product/settings) — the same key the SDK
+sends, and the thing that decides which workspace the session lands in.
+
+Restart Claude Code, run a prompt, then open **Traces**. You get one trace per turn, with the span
+tree Claude Code emits:
+
+```
+claude_code.interaction          one user turn
+├── claude_code.llm_request      a call to the model
+├── claude_code.hook             a hook that ran
+└── claude_code.tool             a tool invocation
+    ├── claude_code.tool.blocked_on_user   waiting for your permission
+    └── claude_code.tool.execution         the tool actually running
+```
+
+**What that is good for already:** the shape and timing of a session — which tools ran, how long each
+took, how much of a turn was spent waiting for you to approve something, where a turn stalled.
+
+**What it is not yet:** the spans arrive under Claude Code's own attribute names, so Tracely files
+them under the fallback agent and types them generically. There is no prompt or response text on the
+trace, so [evaluators](/evaluations) have nothing to grade. Tier 1 and Tier 2 fix those.
+
+<Callout type="warning">
+  Telemetry sends what you and Claude Code say to each other — prompts, file paths, and tool
+  arguments that can contain source code. Turn it on per project rather than globally if that
+  matters, and read the content flags (`OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES`,
+  `OTEL_LOG_TOOL_CONTENT`, `OTEL_LOG_RAW_API_BODIES`) before enabling them —
+  [Claude Code's monitoring docs](https://code.claude.com/docs/en/monitoring-usage) list every one.
+</Callout>
+
+### If you can't use the beta flag
+
+Distributed tracing is beta. Two fallbacks, neither needing anything from us:
+
+- **Hook-based exporters.** [`opentelemetry-hooks`](https://github.com/o11y-dev/opentelemetry-hooks)
+  turns Claude Code's hook events into OTLP spans and takes any OTLP endpoint — the same two
+  variables above (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`) point it at Tracely.
+- **Your own hook.** Claude Code's [hooks](https://code.claude.com/docs/en/hooks) hand a script
+  `session_id`, `tool_name`, `tool_input`, token counts and a transcript path on stdin. A `Stop`
+  hook that POSTs OTLP JSON to `/v1/traces` is a hundred-odd lines. Two traps if you write one: OTLP
+  JSON ids are **base64**, not hex (protobuf's canonical mapping — hex silently decodes to a
+  garbage id nothing can look up), and a hook must never block, so exit 0 whatever happens.
+
+---
+
+## Tier 1 — make it look native *(planned)*
+
+A small mapper on the ingest side, so a Claude Code session reads like any other agent in Tracely
+instead of like raw OTel:
+
+| Claude Code | Becomes |
+|---|---|
+| `claude_code.interaction` | the **AGENT** root span of a turn |
+| `claude_code.llm_request` | a **GENERATION** span, with model and `gen_ai.usage.*` tokens |
+| `claude_code.tool` / `.tool.execution` | a **TOOL** span, named for the tool |
+| `claude_code.hook` | a **CHAIN** span |
+| `session.id` | `tracely.conversation.id` — turns group into one conversation thread |
+| project directory | the agent slug, so `claude-code · my-repo` is its own agent |
+
+Then the ordinary product applies: conversation threads on **Traces**, per-developer cost and latency
+on **Trends**, and the timeline/replay views you already use for your own agents.
+
+Planned alongside it: `tracely claude-code install`, which writes the settings block above for you
+and prints what it enabled.
+
+---
+
+## Tier 2 — the text, so evaluation works *(planned)*
+
+Claude Code puts prompts, assistant responses and tool results in OTLP **log records**
+(`claude_code.user_prompt`, `claude_code.assistant_response`, `claude_code.tool_result`), not on the
+spans. Tracely only ingests traces today, which is why a Tier 0 trace has structure but no content.
+
+The plan is to accept OTLP logs at `/v1/logs` and stitch each record onto the span it belongs to
+using the correlation ids Claude Code already emits (`prompt.id`, `message.uuid`,
+`client_request_id`, `tool_use_id`). Once the I/O is on the trace, the rest of Tracely comes for
+free:
+
+- **Evaluators as columns** over your sessions — *did it edit files it wasn't asked to touch*, *did a
+  failing command get retried instead of reported*, *did it leave a TODO where a test should be*.
+- **Failure clusters** across sessions, so the same mistake in twenty different repos is one issue.
+- **[Alerts](/product/alerts)** — Slack me when a session trips the policy judge, or when a new
+  failure mode shows up in how the agent works.
+- **[Judge calibration](/product/calibration)**, because a judge you point at your own coding
+  sessions is one you should check before you trust it.
+
+The alternative route is a transcript-reading hook, the way other tools do it. We would rather not:
+Claude Code's docs say the JSONL format is internal and changes between versions, and an integration
+that breaks on a Tuesday upgrade is worse than one that waits for the protocol.
+
+---
+
+## Tier 3 — gate your CLAUDE.md *(planned)*
+
+This is the part that is Tracely rather than another dashboard. `claude -p --output-format
+stream-json` is a driveable, non-interactive Claude Code, which makes it an agent endpoint like any
+other — so [scenarios](/product/scenarios) can drive it and a [CI gate](/product/gates) can block
+the pull request:
+
+- a scenario per behaviour you rely on — *"asked to fix one test, it doesn't refactor three files"*,
+  *"it runs the linter before saying it's done"*
+- the suite runs on every change to `CLAUDE.md`, a skill, a hook or an MCP server config
+- the gate fails the PR that quietly makes your agent worse
+
+Prompt files are code that nobody tests. This is the same trace → detect → freeze → gate loop the
+rest of the product runs on, pointed at your own tooling.
+
+<Callout type="info">
+  What will **not** transfer: hermetic replay and promoted [regression cases](/product/cases). Those
+  work because Tracely can re-run *your* agent against recorded fixtures; a live Claude Code session
+  is not replayable that way. Scenarios are the substitute — they drive a fresh session and grade
+  the outcome.
+</Callout>
+
+---
+
+## Reference
+
+| Variable | Purpose |
+|---|---|
+| `CLAUDE_CODE_ENABLE_TELEMETRY=1` | Master switch for all telemetry |
+| `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1` | Required for spans (traces) |
+| `OTEL_TRACES_EXPORTER=otlp` | Send spans; `OTEL_METRICS_EXPORTER` / `OTEL_LOGS_EXPORTER=none` keeps the rest quiet until Tier 2 |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` (recommended) or `http/json` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Your Tracely **API host** — the exporter appends `/v1/traces` |
+| `OTEL_EXPORTER_OTLP_HEADERS` | `Authorization=Bearer <ingest-key>` |
+| `OTEL_TRACES_EXPORT_INTERVAL` | Flush interval, default 5000 ms |
+| `OTEL_LOG_TOOL_DETAILS=1` | Tool names and parameters on the telemetry |
+| `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` | Truncation limit for content, default 61440 |
+
+Docs: [Claude Code monitoring](https://code.claude.com/docs/en/monitoring-usage) ·
+[hooks](https://code.claude.com/docs/en/hooks) ·
+[headless / stream-json](https://code.claude.com/docs/en/headless)
+
+Already using Tracely from inside Claude Code? That's the other direction — the
+[MCP server](/mcp) lets it read your traces, and the [agent skill](/skill) teaches it how to
+instrument your own agents.

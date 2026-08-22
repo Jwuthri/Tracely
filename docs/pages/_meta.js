@@ -14,5 +14,6 @@ export default {
   cli: "CI gate CLI",
   mcp: "MCP server",
   skill: "Agent skill",
+  "claude-code": "Trace Claude Code",
   "self-hosting": "Self-hosting",
 };
