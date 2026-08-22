@@ -1,7 +1,7 @@
 // The public origin, in one place: metadataBase, the sitemap, robots.txt and the JSON-LD all read
 // it, and a wrong value there silently breaks every absolute URL Google and Slack resolve.
-export const SITE_URL = "https://tracely-studio.xyz";
-export const DOCS_URL = "https://doc.tracely-studio.xyz";
+export const SITE_URL = "https://tracely-ai.com";
+export const DOCS_URL = "https://doc.tracely-ai.com";
 export const GITHUB_URL = "https://github.com/Jwuthri/Tracely";
 
 /** The homepage's search-facing title. Leads with what people type, not with the positioning line. */

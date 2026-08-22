@@ -17,6 +17,10 @@ works on any host running the same two containers.
 > [`.env.railway.example`](../deploy/railway/.env.railway.example). Either way, come back here to
 > harden it for production.
 
+> **Moving the site to a new domain?** The `tracely-studio.xyz` → `tracely-ai.com` move is
+> written up as a reusable runbook in [`guides/DOMAIN_MIGRATION.md`](DOMAIN_MIGRATION.md) —
+> hostname map, the 308 redirect that keeps the old backlinks alive, and the env vars to flip.
+
 ---
 
 ## 1. The prod refuse-to-boot guards

@@ -8,11 +8,11 @@
     "url": "https://github.com/Jwuthri/Tracely",
     "source": "github"
   },
-  "websiteUrl": "https://tracely-studio.xyz",
+  "websiteUrl": "https://tracely-ai.com",
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://api.tracely-studio.xyz/mcp"
+      "url": "https://api.tracely-ai.com/mcp"
     }
   ]
 }

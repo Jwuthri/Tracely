@@ -7,7 +7,7 @@ Work top-down: most "Tracely is broken" reports are one of the first four rows.
 | Symptom | Cause | Fix |
 |---|---|---|
 | No trace at all after a script run | Process exited before the exporter flushed | `tracely.flush()` before exit — always in scripts, tests, Lambdas, CLI runs |
-| No trace, no error | Wrong `endpoint` — it must be the **API** host, not the UI | `http://localhost:8000` (API), not `:3001` (UI). Hosted: `https://api.tracely-studio.xyz` |
+| No trace, no error | Wrong `endpoint` — it must be the **API** host, not the UI | `http://localhost:8000` (API), not `:3001` (UI). Hosted: `https://api.tracely-ai.com` |
 | `401` / traces vanish | Wrong or missing ingest key | The key **is** the workspace: Settings → API keys. Self-host dev seed is `tracely_dev_key` |
 | Traces appear seconds late | Normal — evaluation is debounced ~4s to absorb late spans | Wait, then refresh |
 | Spans arrive, nothing renders | Hand-written OTLP with **hex** span ids | OTLP span ids are **base64**. Hex doesn't error, it yields a 24-byte id nothing can look up. Use a real OTLP exporter |

@@ -118,7 +118,7 @@ body::before {
   color: var(--fg);
 }
 
-/* "Product ↗" — the way back to tracely-studio.xyz from any docs page */
+/* "Product ↗" — the way back to tracely-ai.com from any docs page */
 .nextra-nav-container nav a.tracely-site-link {
   font-size: 13px;
   white-space: nowrap;

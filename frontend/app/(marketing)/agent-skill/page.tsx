@@ -232,7 +232,7 @@ export default function Page() {
           both, once
         </div>
         <pre className="overflow-x-auto p-5 font-mono text-[12.5px] leading-[1.75] text-signal-soft">
-          {`${INSTALL}\nclaude mcp add --transport http tracely https://api.tracely-studio.xyz/mcp \\\n  --header "Authorization: Bearer $TRACELY_KEY"`}
+          {`${INSTALL}\nclaude mcp add --transport http tracely https://api.tracely-ai.com/mcp \\\n  --header "Authorization: Bearer $TRACELY_KEY"`}
         </pre>
       </div>
       <p className={prose.p}>

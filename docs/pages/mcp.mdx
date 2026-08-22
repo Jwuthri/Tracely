@@ -13,7 +13,7 @@ an evaluation column — without you leaving the editor or writing a line of API
 ## Connect
 
 ```bash
-claude mcp add --transport http tracely https://api.tracely-studio.xyz/mcp \
+claude mcp add --transport http tracely https://api.tracely-ai.com/mcp \
   --header "Authorization: Bearer $TRACELY_KEY"
 ```
 
@@ -26,7 +26,7 @@ Any MCP client works. The generic config, for the ones that take JSON:
   "mcpServers": {
     "tracely": {
       "type": "http",
-      "url": "https://api.tracely-studio.xyz/mcp",
+      "url": "https://api.tracely-ai.com/mcp",
       "headers": { "Authorization": "Bearer ${TRACELY_KEY}" }
     }
   }

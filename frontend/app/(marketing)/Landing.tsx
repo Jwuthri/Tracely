@@ -12,10 +12,10 @@ gsap.registerPlugin(useGSAP, ScrollTrigger);
 
 const GITHUB = "https://github.com/Jwuthri/Tracely";
 const APP = "/dashboard"; // same app — the authed shell lives in the (app) route group
-const DOCS = "https://doc.tracely-studio.xyz";
+const DOCS = "https://doc.tracely-ai.com";
 const LINKEDIN = "https://www.linkedin.com/in/julien-wuthrich-a75156119/";
 const INSTALL = 'pip install "tracely-ai[openai]"';
-const API = "https://api.tracely-studio.xyz"; // the hosted backend — self-hosters swap in their own
+const API = "https://api.tracely-ai.com"; // the hosted backend — self-hosters swap in their own
 
 /* ---------------------------------- ui bits ---------------------------------- */
 
