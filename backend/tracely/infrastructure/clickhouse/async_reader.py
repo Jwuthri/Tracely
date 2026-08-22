@@ -113,7 +113,8 @@ async def trace_spans(project_id: str, trace_id: str) -> list[dict]:
     res = await client.query(
         """
         SELECT span_id, parent_span_id, name, type, level, status_message,
-               start_time, end_time, agent_id, agent_run_id, turn_id, step_name,
+               start_time, end_time, completion_start_time,
+               agent_id, agent_run_id, turn_id, step_name,
                model_id, input, output, metadata, conversation_id,
                toUInt64(arraySum(mapValues(usage_details)))               AS tokens,
                toFloat64(arraySum(mapValues(cost_details)))               AS cost
