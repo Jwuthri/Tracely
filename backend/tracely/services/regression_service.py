@@ -169,6 +169,16 @@ class RegressionService:
 
     @staticmethod
     def _build_assertions(traj: Trajectory) -> dict:
+        """What the fixed agent must do, derived from the trace that broke.
+
+        Deliberately tool NAMES, never tool ARGUMENTS. The reference here is a production failure,
+        not a golden run: asserting the recorded args would assert the bug, and an agent fixed to
+        pass the right ones would fail this case for ever. A trace whose only fault was bad
+        arguments therefore yields a case its own source PASSES — `_record_fail_to_pass` leaves
+        that DRAFT and unvalidated, which is the honest answer ("this one can't discriminate")
+        rather than a gate that is green on a bug or red on a fix. Arg-level cases need a
+        human-authored expectation on the assertions blob; see migration 0029.
+        """
         # Required tools = everything the agent executed PLUS any tool the model requested but
         # never ran (the silent-failure gap). The case asserts the fixed agent actually calls it.
         ref_tools = required_tools(traj)
@@ -221,7 +231,7 @@ class RegressionService:
             origin="MANUAL", source_trace_id=trace_id, source_span_id=root.get("span_id", ""),
             agent_version_first_failed=root.get("agent_version_id") or None,
             fixture_bundle_s3_key=fixture_key, reference_trajectory=trajectory_json,
-            assertions=assertions, match_mode="superset", tool_args_mode="exact",
+            assertions=assertions, match_mode="superset",
             fail_to_pass_validated=False, version=1, created_by="ui",
         )
         self.session.add(case)

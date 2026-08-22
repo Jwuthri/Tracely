@@ -342,7 +342,6 @@ class EvaluationCase(Base):
     reference_trajectory: Mapped[dict] = mapped_column(JSON, default=dict)
     assertions: Mapped[dict] = mapped_column(JSON, default=dict)
     match_mode: Mapped[str] = mapped_column(String(16), default="superset")
-    tool_args_mode: Mapped[str] = mapped_column(String(16), default="exact")
     fail_to_pass_validated: Mapped[bool] = mapped_column(Boolean, default=False)
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_by: Mapped[str] = mapped_column(String(128), default="ui")

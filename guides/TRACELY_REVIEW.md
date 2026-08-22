@@ -128,7 +128,7 @@ Resolved: ~~all-SKIP passes the gate~~ (§0a #1); ~~no PII redaction~~ (added th
 
 **Still true:**
 - **Auto-instrument and hermetic replay are different styles.** A customer who used `instrument="auto"` gets faithful *recording* but cannot replay hermetically (their code makes real calls; OpenInference instrumentors aren't intercepted by `fixtures()`). Either ship a fixture-serving shim or document the manual-seam requirement + a migration recipe.
-- **Fail-to-pass wedge is narrow.** Promotion validates missing/errored tools; `tool_args_mode="exact"` is stored but **never enforced** (`contract.py`, `regression_service.py:202`). A wrong-arg trace can't become a discriminating case.
+- **Fail-to-pass wedge is narrow.** Promotion validates missing/errored tools, so a wrong-arg trace can't become a discriminating case — it promotes to a case its own source passes and stays DRAFT. ~~`tool_args_mode="exact"` is stored but never enforced~~ → column dropped in 0029 (enforcing it would assert the bug; see §5 P2).
 - **Brittle CI timing** — `--cmd` replay still `time.sleep(8)`; `--entrypoint` proceeds after a 45s poll even on timeout.
 - **Loose version pinning** — provider extras are unbounded. *(Nuance the original missed: the OpenInference instrumentors are now a mix of pre- and post-1.0 — anthropic 1.0.6, crewai 1.1.9, mistralai 2.0.4, etc. — so a blanket `<1.0` cap would break resolution; pins must be per-package against the current major.)*
 - Minor: LLM fixture entries are written as `"input"` but read as `"args"` (`fixtures.py:73`) — currently harmless because LLM replay is order-matched, not arg-matched; latent if arg-keyed LLM replay is ever turned on.
@@ -163,7 +163,7 @@ Resolved: ~~no CI~~ (§0a #6); ~~fake healthcheck~~ (§0a #5); ~~no `acks_late`~
 - [ ] **Eval $/1k-traces surface** + a duplicate-call cache keyed on `(score_name, model, prompt_hash, content_hash)`; populate `execution_trace_id`.
 
 ### P2 — correctness polish / maintainability
-- [ ] **Enforce `tool_args_mode="exact"`** (or stop storing it) to widen the fail-to-pass wedge to wrong-arg traces.
+- [x] ~~**Enforce `tool_args_mode="exact"`**~~ — *dropped, not enforced (migration 0029).* Enforcing it would be backwards: the reference trajectory is a production FAILURE, so matching its args exactly asserts the bug and fails the fixed agent for ever. A wrong-arg trace already promotes to a case its source passes, which `_record_fail_to_pass` leaves DRAFT/unvalidated — the honest outcome. Arg-level discrimination needs a human-authored expectation on the assertions blob, not this column.
 - [ ] **Finish the `TraceTable.tsx` split** (in flight) — ensure `IO.tsx`/`JsonView.tsx` consume the shared `trace-table/format` module; memoize the row tree.
 - [ ] **Per-package SDK version caps** (against current majors — not a blanket `<1.0`).
 - [ ] **Catalog templates:** give threshold-only templates a real score field or drop the dead threshold.
