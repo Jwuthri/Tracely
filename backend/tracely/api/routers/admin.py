@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from tracely.api.auth import get_project_id, require_role
+from tracely.api.auth import get_project_id, require_role, require_user
 from tracely.auth import Principal
 from tracely.infrastructure.blob import s3
 from tracely.infrastructure.clickhouse import async_reader, deletes
@@ -32,7 +32,7 @@ class WipeBody(BaseModel):
     confirm: str = ""
 
 
-@router.delete("/project/data")
+@router.delete("/project/data", dependencies=[Depends(require_user)])
 async def wipe_project_data(body: WipeBody, project_id: str = Depends(get_project_id)) -> dict:
     """Delete every trace, score and everything derived from them in this project.
 
@@ -62,7 +62,7 @@ async def wipe_project_data(body: WipeBody, project_id: str = Depends(get_projec
     return {"deleted": {**events, **registry, **({"judge_chats": chats} if chats else {})}}
 
 
-@router.post("/project/agents/prune")
+@router.post("/project/agents/prune", dependencies=[Depends(require_user)])
 async def prune_unused_agents(project_id: str = Depends(get_project_id)) -> dict:
     """Delete registered agents that have no spans and nothing referencing them.
 
@@ -136,7 +136,7 @@ async def delete_workspace(
     return {"deleted": deleted, "switch_to": siblings[0]}
 
 
-@router.post("/project/seed")
+@router.post("/project/seed", dependencies=[Depends(require_user)])
 async def seed_project_demo(project_id: str = Depends(get_project_id)) -> dict:
     """Populate this workspace with the demo dataset — traces, clusters, cases, gates, scenarios.
 
@@ -179,7 +179,7 @@ async def get_llm_key(project_id: str = Depends(get_project_id)) -> OpenRouterKe
     return OpenRouterKeyOut(configured=await run_in_threadpool(work))
 
 
-@router.put("/project/llm-key", response_model=OpenRouterKeyOut)
+@router.put("/project/llm-key", response_model=OpenRouterKeyOut, dependencies=[Depends(require_user)])
 async def set_llm_key(
     body: OpenRouterKeyIn, project_id: str = Depends(get_project_id)
 ) -> OpenRouterKeyOut:
@@ -205,7 +205,7 @@ async def set_llm_key(
     return OpenRouterKeyOut(configured=True)
 
 
-@router.delete("/project/llm-key", response_model=OpenRouterKeyOut)
+@router.delete("/project/llm-key", response_model=OpenRouterKeyOut, dependencies=[Depends(require_user)])
 async def clear_llm_key(project_id: str = Depends(get_project_id)) -> OpenRouterKeyOut:
     """Clear the workspace key — every LLM-backed feature stops running for this project."""
 

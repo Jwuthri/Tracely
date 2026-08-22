@@ -36,7 +36,7 @@ export default function AcceptInvitePage() {
   }
 
   return (
-    <AuthShell title="Accept your invitation" subtitle="Set a password to join the workspace.">
+    <AuthShell title="Accept your invitation" subtitle="Set a password to join — or enter your existing Tracely password if this email already has an account.">
       <form onSubmit={onSubmit} className="space-y-4">
         <FormError>
           {!token ? "Missing invitation token — open the link from your invite." : err}

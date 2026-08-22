@@ -512,7 +512,9 @@ async def test_leaving_lands_you_in_your_remaining_workspace(client, hosted):
     )
     btoken = boss.json()["token"]
     company = (await client.get("/auth/me", headers=_bearer(btoken))).json()
-    mtoken, muid = await _invite_and_accept(client, btoken, "nomad@x.test")
+    # nomad already has an account, so the invite is accepted with THEIR password — an invite
+    # token alone can't log anyone into an existing account (see test_invite_takeover.py).
+    mtoken, muid = await _invite_and_accept(client, btoken, "nomad@x.test", password="hunter2-pw")
 
     # You leave the org backing your ACTIVE workspace — the header is what the frontend's
     # active-workspace cookie forwards, and without it "which org?" is whichever is oldest.

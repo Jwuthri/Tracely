@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from tracely.api.auth import get_principal, require_role
+from tracely.api.ratelimit import limit
 from tracely.api.dto.auth import (
     AcceptInviteIn,
     ChangePasswordIn,
@@ -250,7 +251,7 @@ async def list_members(
 
 # ── local mode ────────────────────────────────────────────────────────────────
 
-@local_router.post("/auth/register", response_model=SessionOut)
+@local_router.post("/auth/register", response_model=SessionOut, dependencies=[Depends(limit("register", 5))])
 async def register(
     body: RegisterIn, session: AsyncSession = Depends(get_session)
 ) -> SessionOut:
@@ -293,7 +294,7 @@ async def change_password(
     return {"ok": True}
 
 
-@local_router.post("/auth/forgot-password")
+@local_router.post("/auth/forgot-password", dependencies=[Depends(limit("forgot", 5))])
 async def forgot_password(
     body: ForgotPasswordIn, session: AsyncSession = Depends(get_session)
 ) -> dict:
@@ -311,7 +312,7 @@ async def forgot_password(
     return {"ok": True, "message": "If that email has an account, a reset link is on its way."}
 
 
-@local_router.post("/auth/reset-password", response_model=SessionOut)
+@local_router.post("/auth/reset-password", response_model=SessionOut, dependencies=[Depends(limit("reset", 10))])
 async def reset_password(
     body: ResetPasswordIn, session: AsyncSession = Depends(get_session)
 ) -> SessionOut:
@@ -326,7 +327,7 @@ async def reset_password(
     )
 
 
-@local_router.post("/auth/login", response_model=SessionOut)
+@local_router.post("/auth/login", response_model=SessionOut, dependencies=[Depends(limit("login", 20))])
 async def login(body: LoginIn, session: AsyncSession = Depends(get_session)) -> SessionOut:
     user = await queries.local_user_by_email(session, body.email.lower().strip())
     ok = passwords.verify_password(body.password, user.password_hash if user else None)
@@ -493,14 +494,14 @@ async def remove_member(
     return {"ok": True, "switch_to": switch_to}
 
 
-@local_router.post("/auth/invitations/accept", response_model=SessionOut)
+@local_router.post("/auth/invitations/accept", response_model=SessionOut, dependencies=[Depends(limit("accept", 10))])
 async def accept_invitation(
     body: AcceptInviteIn, session: AsyncSession = Depends(get_session)
 ) -> SessionOut:
     user, project = await provisioning.accept_invitation(
         session,
         raw_token=body.token,
-        password_hash=passwords.hash_password(body.password),
+        password=body.password,
         display_name=body.display_name,
     )
     return SessionOut(token=tokens.issue_session(user.id), user_id=user.id, project_id=project.id)

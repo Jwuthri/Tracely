@@ -430,10 +430,18 @@ async def accept_invitation(
     session: AsyncSession,
     *,
     raw_token: str,
-    password_hash: str,
+    password: str,
     display_name: str = "",
 ) -> tuple[User, Project]:
-    """Atomically consume a valid invite and create (or re-attach) the member. Raises AuthError."""
+    """Atomically consume a valid invite and create (or re-attach) the member. Raises AuthError.
+
+    Takes the raw password, not a hash, because of the re-attach case: the invite token is shown to
+    the INVITER, so when the invited email already has an account, accepting must prove knowledge
+    of that account's password — otherwise inviting someone is a way to log in as them, with every
+    workspace they can reach. That check happens BEFORE the token is consumed, so a wrong guess
+    leaves the invite pending for the real person."""
+    from tracely.auth import passwords  # lazy: argon2 stays out of the clerk/dev import path
+
     inv = (
         await session.execute(
             select(Invitation).where(Invitation.token_hash == hash_token(raw_token))
@@ -443,6 +451,13 @@ async def accept_invitation(
         raise AuthError(400, "invalid or used invitation")
     if _as_utc(inv.expires_at) <= datetime.now(timezone.utc):
         raise AuthError(400, "invitation expired")
+    user = (
+        await session.execute(
+            select(User).where(User.source == "local", User.email == inv.email)
+        )
+    ).scalar_one_or_none()
+    if user is not None and not passwords.verify_password(password, user.password_hash):
+        raise AuthError(401, "that email already has an account — accept with its password")
     # single-use: flip PENDING -> ACCEPTED, asserting we won any race
     res = await session.execute(
         update(Invitation)
@@ -453,13 +468,8 @@ async def accept_invitation(
         raise AuthError(400, "invalid or used invitation")
     if not inv.organization_id:
         raise AuthError(400, "invalid or used invitation")
-    user = (
-        await session.execute(
-            select(User).where(User.source == "local", User.email == inv.email)
-        )
-    ).scalar_one_or_none()
     if user is None:
-        user = _new_local_user(inv.email, password_hash, display_name)
+        user = _new_local_user(inv.email, passwords.hash_password(password), display_name)
         session.add(user)
         await session.flush()
     existing = (

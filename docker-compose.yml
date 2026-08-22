@@ -107,6 +107,8 @@ x-app-env: &app-env
   # Multi-tenant signup: off means the first registrant claims the deployment and everyone else
   # arrives by invite (the safe self-host default).
   ALLOW_PUBLIC_SIGNUP: ${ALLOW_PUBLIC_SIGNUP:-false}
+  # Agent endpoints / monitor webhooks on private addresses. Unset = allowed outside prod.
+  ALLOW_PRIVATE_URLS: ${ALLOW_PRIVATE_URLS:-}
   REQUIRE_PROJECT_LLM_KEY: ${REQUIRE_PROJECT_LLM_KEY:-false}
   STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
   STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}

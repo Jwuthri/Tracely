@@ -118,6 +118,7 @@ backend-only flag reads counters nobody writes, and the limit silently never fir
 BILLING_ENABLED=true
 ALLOW_PUBLIC_SIGNUP=true           # multi-tenant signup; see "Accounts" below
 REQUIRE_PROJECT_LLM_KEY=true       # server LLM keys never serve customer work — see below
+ALLOW_PRIVATE_URLS=false           # agent endpoints / webhooks may not hit private IPs (prod default)
 FREE_TRACE_LIMIT=20000             # per organization, per UTC month
 PRO_TRACE_LIMIT=1000000
 FREE_WORKSPACE_LIMIT=3             # per company org (personal accounts are always 1)

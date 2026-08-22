@@ -13,6 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import sessionmaker
 
+from tracely.auth import tokens
 from tracely.infrastructure.db import models
 from tracely.infrastructure.db.base import Base
 from tracely.services import assistant_tools
@@ -64,8 +65,10 @@ def sync_db(tmp_path, monkeypatch, engine):
 
 async def test_a_write_tool_mutates_real_state(client, sync_db, make_workspace, tools):
     """The whole point: no second implementation of anything — the tool is the endpoint."""
-    await make_workspace("tools-crud", "tools_key_crud", "crud@x.test")
-    t = tools("tools_key_crud")
+    _proj, user, _key = await make_workspace("tools-crud", "tools_key_crud", "crud@x.test")
+    # As the signed-in user, the way the dashboard runs it: the delete at the end is a
+    # `require_user` route, which an ingest key can't reach (test_ingest_key_scope.py).
+    t = tools(tokens.issue_session(user.id))
 
     created = await t["create_evaluator"].ainvoke(
         {

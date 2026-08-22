@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from tracely.api.auth import get_project_id
+from tracely.api.auth import get_project_id, require_user
 from tracely.domain.evaluation.evaluators import TEMPLATES
 from tracely.domain.evaluation.evaluators.llm_judge import OUTPUT_TYPES
 from tracely.domain.evaluation.generation import generate_evaluator_config
@@ -384,7 +384,7 @@ async def update_evaluator(
     return res
 
 
-@router.delete("/evaluators/{evaluator_id}")
+@router.delete("/evaluators/{evaluator_id}", dependencies=[Depends(require_user)])
 async def delete_evaluator(
     evaluator_id: str, project_id: str = Depends(get_project_id)
 ) -> dict:

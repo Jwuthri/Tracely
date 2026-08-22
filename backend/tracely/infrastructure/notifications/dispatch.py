@@ -12,6 +12,7 @@ import structlog
 
 from tracely.infrastructure.notifications.slack import send_slack
 from tracely.infrastructure.notifications.webhook import send_webhook
+from tracely.infrastructure.net import UnsafeURL, assert_public_url
 
 log = structlog.get_logger()
 
@@ -31,6 +32,12 @@ def dispatch_alert(
         ctype = str(ch.get("type") or "").lower()
         url = str(ch.get("url") or "")
         if not url:
+            skipped += 1
+            continue
+        try:
+            assert_public_url(url)  # a channel is a POST from inside our network
+        except UnsafeURL as exc:
+            log.warning("channel_url_rejected", url=url, error=str(exc))
             skipped += 1
             continue
         if ctype == "slack":

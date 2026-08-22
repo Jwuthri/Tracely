@@ -15,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from tracely.api.advisory import advisory_score_names
 from tracely.config import settings
-from tracely.api.auth import get_project_id
+from tracely.api.auth import get_project_id, require_user
 from tracely.domain.traces.replay import build_replay
 from tracely.domain.evaluation.verdict import rollup_verdict
 from tracely.infrastructure.clickhouse import async_reader, deletes
@@ -248,7 +248,7 @@ class DeleteSessionsBody(BaseModel):
     threads: list[str]
 
 
-@router.delete("/sessions")
+@router.delete("/sessions", dependencies=[Depends(require_user)])
 async def delete_sessions(
     body: DeleteSessionsBody, project_id: str = Depends(get_project_id)
 ) -> dict:

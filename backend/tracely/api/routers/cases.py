@@ -12,7 +12,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from starlette.concurrency import run_in_threadpool
 
 from tracely.api.advisory import advisory_score_names
-from tracely.api.auth import get_project_id
+from tracely.api.auth import get_project_id, require_user
 from tracely.infrastructure.clickhouse import async_reader
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
@@ -128,7 +128,7 @@ async def get_case(case_id: str, project_id: str = Depends(get_project_id)) -> d
     return res
 
 
-@router.delete("/cases/{case_id}")
+@router.delete("/cases/{case_id}", dependencies=[Depends(require_user)])
 async def delete_case(case_id: str, project_id: str = Depends(get_project_id)) -> dict:
     """Delete a regression case and its replay history. The source trace stays — promote it again
     to recreate the case."""

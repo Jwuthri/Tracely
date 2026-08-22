@@ -41,6 +41,13 @@ async def get_principal(
         )
     except AuthError as e:
         raise HTTPException(status_code=e.status, detail=e.detail) from None
+    finally:
+        # Hand the connection back NOW. FastAPI keeps this generator dependency open until the
+        # response is sent, so without this every request pinned a Postgres connection for its
+        # whole life — on top of the sync one the handler takes in the threadpool — and a page
+        # of parallel fetches hit `too many clients already`. A closed session is reusable: the
+        # /auth/* handlers that share this instance simply check out a fresh connection.
+        await session.close()
 
 
 async def get_project_id(principal: Principal = Depends(get_principal)) -> str:
@@ -56,3 +63,10 @@ def require_role(
         return principal
 
     return _require
+
+
+# Any signed-in human — what an ingest key is NOT. Put on routes that destroy data or set secrets:
+# the key lives in CI logs, `.env` files and MCP configs, and reading traces is all it is for.
+# Use as a route dependency (`dependencies=[Depends(require_user)]`) so handlers keep taking
+# `project_id` the ordinary way.
+require_user = require_role("OWNER", "ADMIN", "MEMBER")

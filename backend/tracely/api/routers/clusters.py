@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from tracely.api.auth import get_project_id
+from tracely.api.auth import get_project_id, require_user
 from tracely.config import settings
 from tracely.domain.evaluation.evaluator_suggestion import suggest_evaluator
 from tracely.domain.failure.histogram import histogram
@@ -197,7 +197,7 @@ class DeleteClustersBody(BaseModel):
     cluster_ids: list[str]
 
 
-@router.delete("/clusters")
+@router.delete("/clusters", dependencies=[Depends(require_user)])
 async def delete_clusters(
     body: DeleteClustersBody, project_id: str = Depends(get_project_id)
 ) -> dict:

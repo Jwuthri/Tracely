@@ -14,10 +14,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from tracely.api.auth import get_project_id
+from tracely.api.auth import get_project_id, require_user
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.db.models import Monitor
+from tracely.infrastructure.net import UnsafeURL, assert_public_url
 from tracely.services.monitoring_service import MonitoringService
 
 router = APIRouter(prefix="/api")
@@ -69,6 +70,10 @@ def _validate_channels(channels: list[dict]) -> None:
             )
         if not (ch.get("url") or "").strip():
             raise HTTPException(status_code=400, detail="channel.url is required")
+        try:
+            assert_public_url(ch["url"])
+        except UnsafeURL as exc:
+            raise HTTPException(status_code=400, detail=f"channel.url: {exc}") from None
 
 
 class MonitorCreate(BaseModel):
@@ -100,7 +105,7 @@ async def list_monitors(project_id: str = Depends(get_project_id)) -> list[dict]
     return await run_in_threadpool(work)
 
 
-@router.post("/monitors")
+@router.post("/monitors", dependencies=[Depends(require_user)])
 async def create_monitor(
     body: MonitorCreate, project_id: str = Depends(get_project_id)
 ) -> dict:
@@ -120,7 +125,7 @@ async def create_monitor(
     return await run_in_threadpool(work)
 
 
-@router.patch("/monitors/{monitor_id}")
+@router.patch("/monitors/{monitor_id}", dependencies=[Depends(require_user)])
 async def update_monitor(
     monitor_id: str,
     body: MonitorUpdate,
@@ -143,7 +148,7 @@ async def update_monitor(
     return res
 
 
-@router.delete("/monitors/{monitor_id}")
+@router.delete("/monitors/{monitor_id}", dependencies=[Depends(require_user)])
 async def delete_monitor(
     monitor_id: str, project_id: str = Depends(get_project_id)
 ) -> dict:
@@ -157,7 +162,7 @@ async def delete_monitor(
     return {"deleted": monitor_id}
 
 
-@router.post("/monitors/{monitor_id}/test")
+@router.post("/monitors/{monitor_id}/test", dependencies=[Depends(require_user)])
 async def test_monitor(
     monitor_id: str, project_id: str = Depends(get_project_id)
 ) -> dict:

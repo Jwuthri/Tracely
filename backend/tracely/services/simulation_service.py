@@ -33,6 +33,7 @@ from tracely.domain.simulation.turns import normalize_turns
 from tracely.infrastructure.blob import s3 as blobstore
 from tracely.infrastructure.db.models import AgentEndpoint, Scenario
 from tracely.infrastructure.llm.provider import decrypt_secret, llm_enabled, use_project_key
+from tracely.infrastructure.net import assert_public_url
 from tracely.services.ingestion_service import IngestionService
 from tracely.services.introspection_service import record
 
@@ -306,6 +307,7 @@ class SimulationService:
 
         client = self._client or httpx.Client(timeout=endpoint.timeout_s or 60)
         try:
+            assert_public_url(endpoint.url)  # re-checked per call: DNS may have moved since save
             resp = client.post(endpoint.url, json=body, headers=headers)
             if resp.status_code >= 400:
                 return "", session, f"HTTP {resp.status_code}: {resp.text[:200]}"

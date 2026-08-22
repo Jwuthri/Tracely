@@ -59,7 +59,12 @@ async def _resolve_ingest_key(key: str, session: AsyncSession) -> Principal:
     ).scalar_one_or_none()
     if not row:
         raise AuthError(401, "invalid ingest key")
-    return Principal(project_id=row.project_id, user_id=None, role=None, kind="ingest")
+    # A machine credential has no role, so `require_user` endpoints (wipe, secrets, deletes)
+    # refuse it — a key leaked from CI can't take the workspace with it. Dev mode is the one
+    # exception: it has no human auth at all, the UI itself runs on this key, and prod refuses
+    # to boot in it (`config._validate_auth`).
+    role = "OWNER" if settings.auth_mode == "dev" else None
+    return Principal(project_id=row.project_id, user_id=None, role=role, kind="ingest")
 
 
 async def _resolve_local_jwt(

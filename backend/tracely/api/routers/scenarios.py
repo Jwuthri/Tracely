@@ -12,13 +12,14 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException
 from starlette.concurrency import run_in_threadpool
 
-from tracely.api.auth import get_project_id
+from tracely.api.auth import get_project_id, require_user
 from tracely.domain.simulation import Turn, normalize_turns, serialize_turns, user_text
 from tracely.infrastructure.clickhouse import async_reader
 from tracely.infrastructure.db import repositories as repo
 from tracely.infrastructure.db.engine import SyncSessionLocal
 from tracely.infrastructure.db.models import Agent, AgentEndpoint, Scenario
 from tracely.infrastructure.llm.provider import encrypt_secret
+from tracely.infrastructure.net import UnsafeURL, assert_public_url
 from tracely.services.gate_service import GateService
 
 router = APIRouter(prefix="/api")
@@ -201,7 +202,7 @@ async def update_scenario(
     return payload
 
 
-@router.delete("/scenarios/{scenario_id}")
+@router.delete("/scenarios/{scenario_id}", dependencies=[Depends(require_user)])
 async def delete_scenario(scenario_id: str, project_id: str = Depends(get_project_id)):
     def work():
         with SyncSessionLocal() as s:
@@ -271,7 +272,7 @@ async def get_endpoint(agent_ref: str, project_id: str = Depends(get_project_id)
     return await run_in_threadpool(work)
 
 
-@router.put("/agents/{agent_ref}/endpoint")
+@router.put("/agents/{agent_ref}/endpoint", dependencies=[Depends(require_user)])
 async def set_endpoint(
     agent_ref: str, project_id: str = Depends(get_project_id), body: dict = Body(...)
 ):
@@ -284,8 +285,10 @@ async def set_endpoint(
     blaming the PR. Present-but-null resets a key to its default; absent keeps the stored value.
     """
     url = (body.get("url") or "").strip()
-    if not url.startswith(("http://", "https://")):
-        raise HTTPException(status_code=400, detail="url must be http(s)")
+    try:
+        assert_public_url(url)  # the worker would otherwise POST into our own network
+    except UnsafeURL as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     token = (body.get("token") or "").strip()
     try:
         encrypted = encrypt_secret(token) if token else ""

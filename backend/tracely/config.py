@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     # used to mint accounts. Hosted cloud turns it on — each signup gets its own personal
     # organization and workspace.
     allow_public_signup: bool = False
+    # Whether a workspace may point Tracely's outbound HTTP (agent endpoints, monitor webhooks) at
+    # loopback/private/link-local addresses. Unset = allowed everywhere except prod, where the
+    # worker shares a network with the datastores (see `infrastructure/net.py`).
+    allow_private_urls: bool | None = None
     # Populate every new workspace with the demo dataset (traces, clusters, cases, gates) so it
     # opens on a working product instead of empty pages. Best-effort and detached — it never
     # blocks or fails workspace creation. Turn off for deployments that want clean workspaces.
@@ -324,6 +328,10 @@ class Settings(BaseSettings):
     @property
     def is_prod(self) -> bool:
         return self.tracely_env.lower() in ("prod", "production")
+
+    @property
+    def private_urls_allowed(self) -> bool:
+        return (not self.is_prod) if self.allow_private_urls is None else self.allow_private_urls
 
     @property
     def resolved_clerk_jwks_url(self) -> str:
