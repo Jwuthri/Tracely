@@ -537,12 +537,18 @@ function ReviewCard({
           <VerdictButton active={human === "FAIL"} tone="fail" onClick={() => onLabel(human === "FAIL" ? null : "FAIL")}>
             fail <Kbd>f</Kbd>
           </VerdictButton>
+          {/* Hidden, not missing. A faint "show the judge's verdict" link read as absence — the one
+              thing the page exists to display, apparently broken — and it looked inconsistent next
+              to deterministic evaluators, which reveal immediately because there is no judgement to
+              be anchored by. Say what is happening and why, and make it a real button. */}
           {!revealed && (
             <button
               onClick={onReveal}
-              className="ml-auto font-mono text-[10.5px] text-fg-faint underline decoration-dotted hover:text-fg"
+              title="Hidden until you decide, so your label measures the judge rather than agreeing with it"
+              className="ml-auto flex items-center gap-2 rounded-lg border border-dashed border-line px-3 py-1.5 font-mono text-[10.5px] text-fg-muted transition-colors hover:border-signal/40 hover:text-fg"
             >
-              show the judge’s verdict
+              <span aria-hidden>👁</span>
+              judge verdict hidden — reveal <Kbd>r</Kbd>
             </button>
           )}
         </div>

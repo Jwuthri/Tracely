@@ -299,6 +299,23 @@ async def trace_failure_samples_in_window(
     return [{"verdict": r[0]} for r in res.result_rows]
 
 
+# A score is only reviewable while the run behind it is still readable. Calibration asks a human to
+# second-guess a verdict, and the evidence panel needs the spans to show what was judged — a score
+# whose trace was deleted by hand or aged out by the events TTL renders as an empty card with
+# nothing to grade. Nothing cascades scores when a trace goes (separate tables, no FK), so they pile
+# up: 40% of one workspace's queue was unreviewable. `internal_kind = ''` keeps Tracely's own eval /
+# sim runs out for the same reason every other listing does.
+#
+# ponytail: a subquery per call, not a join or a materialized flag. `events` is already the smaller
+# side after the project filter; revisit if the queue ever feels slow. FINAL is not strictly needed
+# for an existence test (an unmerged duplicate span is still the same trace present), but the read
+# rule holds without exceptions here — see `tests/test_ch_read_invariants.py`.
+_REVIEWABLE = (
+    "trace_id IN (SELECT trace_id FROM events FINAL "
+    "WHERE project_id = {p:String} AND internal_kind = '')"
+)
+
+
 async def evaluator_catalog(project_id: str) -> list[dict]:
     """Every evaluator that has produced a verdict-bearing online score, with its volume + fail count
     — the set of judges a reviewer can calibrate (independent of whether any have been labeled yet)."""
@@ -307,6 +324,9 @@ async def evaluator_catalog(project_id: str) -> list[dict]:
         "SELECT name, anyLast(evaluation_level) AS level, count() AS total, "
         "countIf(verdict = 'FAIL') AS fails "
         f"FROM scores FINAL WHERE project_id = {{p:String}} AND {_ONLINE} AND verdict != '' "
+        # Same filters as the queue below, or the header lies: "1 / 50" measured against rows the
+        # reviewer will never be shown is a denominator nobody can ever finish.
+        f"AND is_deleted = 0 AND {_REVIEWABLE} "
         "GROUP BY name ORDER BY total DESC",
         parameters={"p": project_id},
     )
@@ -323,6 +343,9 @@ async def evaluator_score_queue(
     is a judge decision (its target identity + verdict + rationale comment) a reviewer labels.
     Optionally narrowed to one verdict (`FAIL` — the ones that block a merge).
 
+    Only scores whose trace still exists are served (`_REVIEWABLE`): the reviewer is being asked to
+    judge a verdict against its evidence, and a deleted or TTL-expired trace has none.
+
     Ordered by a hash of the score id, i.e. a *random sample*, not newest-first. Two reasons: an
     agreement % is only an estimate of the judge's accuracy if the labeled rows are a random draw,
     and newest-first serves the reviewer a screen of consecutive runs from the same batch — twenty
@@ -334,6 +357,9 @@ async def evaluator_score_queue(
         "toString(created_at) AS created_at "
         f"FROM scores FINAL WHERE project_id = {{p:String}} AND {_ONLINE} "
         "AND name = {n:String} AND verdict != '' "
+        # `is_deleted` matters even under FINAL: it collapses versions of a row, it does not drop
+        # tombstoned ones — without this a deleted score is still served for review.
+        f"AND is_deleted = 0 AND {_REVIEWABLE} "
         "AND ({v:String} = '' OR verdict = {v:String}) "
         "ORDER BY cityHash64(id) LIMIT {lim:UInt32} OFFSET {off:UInt32}",
         parameters={
