@@ -34,6 +34,15 @@ const config = {
   darkMode: false,
   nextThemes: { defaultTheme: "dark", forcedTheme: "dark" },
   navigation: { prev: true, next: true },
+  // Docs sit on their own subdomain, so "back to the product" has to be a link — there is no
+  // shared shell to climb out through. The footer already carries one; this is the visible one.
+  navbar: {
+    extraContent: (
+      <a href={SITE} className="tracely-site-link">
+        Product ↗
+      </a>
+    ),
+  },
   footer: {
     content: (
       <span style={{ fontSize: 13 }}>

@@ -118,6 +118,19 @@ body::before {
   color: var(--fg);
 }
 
+/* "Product ↗" — the way back to tracely-studio.xyz from any docs page */
+.nextra-nav-container nav a.tracely-site-link {
+  font-size: 13px;
+  white-space: nowrap;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 10px;
+}
+.nextra-nav-container nav a.tracely-site-link:hover {
+  border-color: rgba(34, 211, 238, 0.4);
+  color: #22d3ee;
+}
+
 /* the wordmark block, mirroring the app sidebar's Mark + lockup */
 .tracely-logo {
   display: inline-flex;
