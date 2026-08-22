@@ -9,6 +9,8 @@ import { Callout } from "nextra/components";
 **Settings → Alerts.** An alert rule has two halves: **when** it fires, and **what happens** —
 drawn as a flow.
 
+<img className="screenshot" src="/screenshots/alerts-flow.png" alt="The alert flow builder: a When node wired through a condition, an LLM step and Slack, with the inspector below and the rule assistant beside it" />
+
 Rules are workspace-level and optionally scoped to a single agent.
 
 ## When — the trigger
@@ -89,13 +91,50 @@ When (conversation failed)
   → Slack        "{{ steps[0].result.note }} — {{ trace.url }}"
 ```
 
-## The assistant
+## The rule assistant
 
-The panel beside the canvas turns a sentence into a flow: *"Slack me when a conversation fails the
-PII judge, but only on support-bot"* draws the trigger, its filters and the steps. It never invents
-a destination — you paste your own Slack URL or address. A second sentence edits what is on the
-canvas rather than starting over. It runs on your workspace's OpenRouter key, like the other AI
-features.
+The panel beside the canvas turns a sentence into a flow. Type what you want, press **Draft the
+flow**, and the canvas redraws: the trigger, its filters, and the steps, wired.
+
+```
+"Slack me when a conversation fails the PII judge, but only on support-bot"
+→ When: Conversation failed · text contains "pii" · agent support-bot
+→ Slack: ⚠️ {{ failing_evaluators | join(', ') }} on {{ agent.slug }} …
+```
+
+It is good at the shape of a rule — which trigger, which filters, how many steps, what each
+template should read. Three things it deliberately does:
+
+- **It never invents a destination.** Every `url` and `to` comes back empty and it says so in its
+  reply, so a drafted rule can't post into someone else's Slack. You paste yours and save.
+- **It edits rather than restarts.** The rule as the canvas has it right now is sent with your
+  message, so *"add a condition so it only fires for the refund agent"* keeps the steps you already
+  configured.
+- **It picks filters over steps.** A trigger filter (evaluator, text, env, agent) stops the flow
+  from running at all, so it prefers one of those to a condition step whenever the trigger supports
+  it.
+
+What comes back is a draft on the canvas, not a saved rule: nothing exists until you press **Save**,
+and nothing fires until the rule is **armed**. Follow it with **Run test** to see the real messages
+before you leave.
+
+Things worth asking for:
+
+| Ask | What you get |
+|---|---|
+| *"Page our on-call webhook with a bearer token when the overall failure rate goes over 25%"* | The threshold trigger plus a webhook step with an `Authorization: Bearer` header ready for your token |
+| *"When a new failure mode appears, ask a model for a one-line triage note and post it to Slack"* | An LLM step with a declared output, and a Slack step reading `{{ steps[0].result }}` |
+| *"Email the team when a gate fails on main, but not on other branches"* | `CI gate failed` + an `env` filter, or a condition step on `{{ gate.git_ref }}` |
+| *"Only alert me about refunds"* | A `contains` filter on the trigger rather than a step |
+
+It runs on your workspace's OpenRouter key, like the other AI features — with no key configured the
+panel says so and the canvas still works by hand.
+
+<Callout type="info">
+  The [in-app assistant](/product/assistant) (⌘J) can also create the simple shape for you — one
+  trigger, one destination — from anywhere in the app: *"Slack me when the refund judge fails a
+  conversation"*. It hands back a link to the rule so you can open the builder and add steps.
+</Callout>
 
 ## Test it, then arm it
 
@@ -115,6 +154,8 @@ falsy is recorded as `skipped`, which is how you tell "the gate stopped it" from
 
 The list page opens with a gallery of use cases; each one opens as a working flow you finish by
 pasting one URL.
+
+<img className="screenshot" src="/screenshots/alerts.png" alt="The alerts list: a gallery of use cases and two rules showing their trigger and their flow as a strip of steps" />
 
 | Use case | Trigger | What it catches |
 |---|---|---|

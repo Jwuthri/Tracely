@@ -16,7 +16,8 @@ import {
 } from "./icons";
 import { Markdown } from "./Markdown";
 import { TimeAgo } from "./TimeAgo";
-import { streamAssistantTurn, toolLabel } from "@/app/lib/assistant";
+import { streamAssistantTurn } from "@/app/lib/assistant";
+import { ActivityLog, closeActivity, type Activity } from "./ActivityLog";
 
 /* The in-app assistant — a launcher in the bottom-right corner opening a chat panel, mounted
    once in the (app) layout so it survives navigation and knows which page you are on.
@@ -196,7 +197,7 @@ export function Assistant() {
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
-  const [activity, setActivity] = useState(""); // the tool running right now, if any
+  const [activity, setActivity] = useState<Activity[]>([]); // this turn's tool calls, as they land
   const [uploading, setUploading] = useState(0);
   const [notice, setNotice] = useState("");
   const [noKey, setNoKey] = useState(false);
@@ -264,7 +265,7 @@ export function Assistant() {
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
-  }, [messages, busy, view]);
+  }, [messages, busy, view, activity]);
   useEffect(() => {
     if (open && view === "chat") box.current?.focus();
   }, [open, view]);
@@ -306,7 +307,7 @@ export function Assistant() {
     setNotice("");
     setBusy(true);
     setNoKey(false);
-    setActivity("");
+    setActivity([]);
     stop(); // a previous turn should never outlive the one replacing it
     const ctl = new AbortController();
     inflight.current = ctl;
@@ -324,9 +325,12 @@ export function Assistant() {
           path: pathname ?? "",
         },
         (e) => {
-          if (e.type === "tool") return setActivity(toolLabel(e.name));
+          if (e.type === "tool")
+            return setActivity((a) => [...a, { name: e.name, at: Date.now(), state: "run" }]);
+          if (e.type === "tool_done")
+            return setActivity((a) => closeActivity(a, e.name, e.ok));
           if (e.type === "delta") {
-            setActivity("");
+            setActivity([]);
             const first = !started;
             started = true;
             return setMessages((m) =>
@@ -369,7 +373,7 @@ export function Assistant() {
     } finally {
       if (inflight.current === ctl) inflight.current = null;
       setBusy(false);
-      setActivity("");
+      setActivity([]);
     }
   }
 
@@ -535,10 +539,7 @@ export function Assistant() {
                 )}
                 {busy && (
                   <div className="flex flex-col gap-1.5">
-                    <Thinking />
-                    {activity && (
-                      <span className="pl-1 font-mono text-[10px] text-fg-faint">{activity}</span>
-                    )}
+                    {activity.length ? <ActivityLog items={activity} /> : <Thinking />}
                   </div>
                 )}
                 {noKey && (

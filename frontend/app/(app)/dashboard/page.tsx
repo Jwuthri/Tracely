@@ -6,6 +6,7 @@ import { Badge, StatCard, statusVariant, verdictVariant } from "@/app/components
 import { IconChevron } from "@/app/components/icons";
 import { OpsStrip } from "@/app/components/OpsPanel";
 import { Spark } from "@/app/components/Bars";
+import { ClusterMeter, TaxonomyChip, clusterTone } from "@/app/components/ClusterMeter";
 
 function SectionHead({ title, href }: { title: string; href: string }) {
   return (
@@ -22,8 +23,9 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div className="px-4 py-10 text-center text-[13px] text-fg-faint">{children}</div>;
 }
 
-/** Top open clusters as count-proportional bars — the dashboard's "what should I work on next".
- *  A cluster is already a ranked pile of identical failures, so the bar length IS the priority. */
+/** Top open clusters as count-proportional meters — the dashboard's "what should I work on
+ *  next". A cluster is already a ranked pile of identical failures, so the meter IS the
+ *  priority; the colour is the failure family, so the pile is legible before it is read. */
 function TopClusters({ clusters }: { clusters: FailureCluster[] }) {
   // "OPEN" is the only untriaged state — a cluster becomes "PROMOTED" once it has a regression
   // case, at which point it's handled and no longer work to pick up (see repositories.py).
@@ -37,23 +39,35 @@ function TopClusters({ clusters }: { clusters: FailureCluster[] }) {
   return (
     <section className="reveal card overflow-hidden" style={{ animationDelay: "200ms" }}>
       <SectionHead title="Biggest failure clusters" href="/clusters" />
-      <div className="space-y-3 px-4 py-4">
-        {top.map((c) => (
-          <a key={c.id} href={`/clusters/${c.id}`} className="group block">
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="truncate text-[13px] text-fg transition-colors group-hover:text-signal">
-                {c.label || c.signature}
+      <div className="space-y-1 p-2">
+        {top.map((c) => {
+          const tone = clusterTone(c.taxonomy);
+          return (
+            <a
+              key={c.id}
+              href={`/clusters/${c.id}`}
+              className="group flex gap-3.5 rounded-lg px-2.5 py-2.5 transition-colors hover:bg-hilite/[0.03]"
+            >
+              <span className="flex w-9 shrink-0 flex-col items-end pt-px leading-none">
+                <span className={`font-display text-[21px] font-extrabold tabular-nums ${tone.text}`}>{c.count}</span>
+                <span className="mt-1 font-mono text-[9px] uppercase tracking-wider text-fg-faint">
+                  {c.count === 1 ? "trace" : "traces"}
+                </span>
               </span>
-              <span className="shrink-0 font-mono text-[11px] text-fg-faint">
-                {c.taxonomy ? `${c.taxonomy} · ` : ""}
-                {c.count} {c.count === 1 ? "trace" : "traces"}
+              <span className="flex min-w-0 flex-1 flex-col gap-2">
+                {/* clamped to two lines, not one: these labels are LLM-written sentences, and
+                    truncating every one at the same column makes five rows look identical. */}
+                <span className="line-clamp-2 text-[13px] leading-snug text-fg-muted transition-colors group-hover:text-fg">
+                  {c.label || c.signature}
+                </span>
+                <span className="flex items-center gap-2.5">
+                  <ClusterMeter value={c.count} max={max} tone={tone} className="min-w-0 flex-1" />
+                  <TaxonomyChip taxonomy={c.taxonomy ?? ""} tone={tone} />
+                </span>
               </span>
-            </div>
-            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-ink-900">
-              <div className="h-full rounded-full bg-fail/60" style={{ width: `${(c.count / max) * 100}%` }} />
-            </div>
-          </a>
-        ))}
+            </a>
+          );
+        })}
       </div>
     </section>
   );

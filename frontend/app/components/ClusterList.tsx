@@ -8,6 +8,7 @@ import { RowLink } from "./RowLink";
 import { SelectBox } from "./SelectBox";
 import { TimeAgo } from "./TimeAgo";
 import { Badge } from "./ui";
+import { ClusterMeter, TaxonomyChip, clusterTone } from "./ClusterMeter";
 
 const GRID = "grid grid-cols-[32px_64px_1fr_120px_120px_28px] items-center gap-3";
 
@@ -26,6 +27,9 @@ export function ClusterList({ clusters }: { clusters: FailureCluster[] }) {
   const [error, setError] = useState("");
 
   const allSelected = clusters.length > 0 && selected.size >= clusters.length;
+  // meters are relative to the biggest cluster on this page — the point is "which of these do I
+  // pick up first", not an absolute share of every failure in the project.
+  const max = Math.max(1, ...clusters.map((c) => c.count));
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -109,10 +113,15 @@ export function ClusterList({ clusters }: { clusters: FailureCluster[] }) {
             className={`${GRID} group border-b border-line/50 px-4 py-3 transition-colors last:border-0 hover:bg-hilite/[0.025]`}
           >
             <SelectBox checked={selected.has(c.id)} onChange={() => toggle(c.id)} label={`Select "${c.label}"`} />
-            <span className="text-right font-display text-[20px] font-extrabold tabular-nums text-fail">{c.count}</span>
-            <span className="flex min-w-0 flex-col gap-0.5">
+            <span className={`text-right font-display text-[20px] font-extrabold tabular-nums ${clusterTone(c.taxonomy).text}`}>
+              {c.count}
+            </span>
+            <span className="flex min-w-0 flex-col gap-1.5">
               <span className="truncate text-[13.5px] text-fg">{c.label}</span>
-              <span className="font-mono text-[10.5px] text-fg-faint">{c.taxonomy}</span>
+              <span className="flex items-center gap-2.5">
+                <TaxonomyChip taxonomy={c.taxonomy} tone={clusterTone(c.taxonomy)} />
+                <ClusterMeter value={c.count} max={max} tone={clusterTone(c.taxonomy)} className="w-full max-w-[220px]" />
+              </span>
             </span>
             <span>
               <Badge variant={clusterVariant(c.status)} dot>

@@ -68,7 +68,7 @@ export function Sidebar({ me }: { me: Me | null }) {
   const path = usePathname();
   return (
     <aside className="sticky top-0 hidden h-screen w-[244px] shrink-0 flex-col border-r border-line bg-ink-900/80 backdrop-blur-md md:flex">
-      <div className="flex items-center gap-3 px-5 pb-6 pt-6">
+      <a href="/" className="flex items-center gap-3 px-5 pb-6 pt-6 transition-opacity hover:opacity-80">
         <Mark />
         <div className="leading-none">
           <div className="font-display text-[19px] font-extrabold tracking-tight text-fg">Tracely</div>
@@ -76,7 +76,7 @@ export function Sidebar({ me }: { me: Me | null }) {
             trace-native ci/cd
           </div>
         </div>
-      </div>
+      </a>
 
       <nav className="flex-1 space-y-7 px-3 py-1">
         {NAV.map((sec) => (

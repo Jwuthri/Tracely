@@ -64,8 +64,8 @@ export async function streamAssistantTurn(
   }
 }
 
-// "get_trace" → "get trace…" — what the widget shows while a tool is running. The tool names are
+// "get_trace" → "get trace" — how a tool call is named in the activity log. The tool names are
 // written to be read, so the only work here is undoing the underscores.
 export function toolLabel(name: string): string {
-  return `${name.replace(/_/g, " ")}…`;
+  return name.replace(/_/g, " ");
 }

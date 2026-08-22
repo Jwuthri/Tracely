@@ -146,6 +146,22 @@ def test_title_is_the_opening_question_cut_at_a_word():
     assert svc.title_for("") == "New conversation"
 
 
+def test_the_prompt_names_the_surfaces_the_assistant_can_send_people_to():
+    """A capability the prompt never mentions is a capability nobody discovers. The assistant is
+    the main way people find out a screen exists, so shipping one without naming it here is
+    shipping it half-hidden."""
+    for phrase in (
+        "Alerts",              # the page
+        "/settings/alerts",    # the link it should hand over
+        "rule assistant",      # the thing on that page that does the drawing
+        "create_alert",        # what it can do itself, without sending them anywhere
+        "Run test",            # how they check an alert reaches them
+        "/clusters/",
+        "/scenarios",
+    ):
+        assert phrase in svc.SYSTEM, f"the system prompt never mentions {phrase!r}"
+
+
 # ---------------------------------------------------------------- whose key
 
 

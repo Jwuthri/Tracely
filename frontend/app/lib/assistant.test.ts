@@ -72,7 +72,7 @@ describe("streamAssistantTurn", () => {
 
 describe("toolLabel", () => {
   it("reads the tool name back as words", () => {
-    expect(toolLabel("get_trace")).toBe("get trace…");
-    expect(toolLabel("run_evaluation")).toBe("run evaluation…");
+    expect(toolLabel("get_trace")).toBe("get trace");
+    expect(toolLabel("run_evaluation")).toBe("run evaluation");
   });
 });
