@@ -1,3 +1,4 @@
+import { DocLink } from "@/app/components/DocLink";
 import { getTrends } from "@/app/lib/api";
 import { StatCard } from "@/app/components/ui";
 import { Bars, Legend } from "@/app/components/Bars";
@@ -16,7 +17,7 @@ export default async function TrendsPage() {
     <div className="space-y-6">
       <header className="reveal flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-[26px] font-extrabold tracking-tight">Trends</h1>
+          <div className="flex items-center gap-3"><h1 className="font-display text-[26px] font-extrabold tracking-tight">Trends</h1><DocLink path="/product/trends" /></div>
           <p className="mt-1.5 max-w-2xl text-[14px] text-fg-muted">
             How your agents are doing over time — how often they fail, whether the gate is holding the line,
             and how quickly failures turn into regression tests.

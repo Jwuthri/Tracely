@@ -4,9 +4,12 @@ import clsx from "clsx";
 import { usePathname } from "next/navigation";
 import type { Me } from "@/app/lib/auth/types";
 import { AccountMenu } from "./AccountMenu";
-import { IconActivity, IconBolt, IconCard, IconDatabase, IconGate, IconGrid, IconLayers, IconScale, IconSettings, IconShield, IconTrend, IconUsers } from "./icons";
+import { DOCS_URL } from "@/app/lib/site";
+import { IconActivity, IconBolt, IconBook, IconCard, IconDatabase, IconGate, IconGrid, IconLayers, IconScale, IconSettings, IconShield, IconTrend, IconUsers } from "./icons";
 
-const NAV = [
+type NavItem = { href: string; label: string; Icon: typeof IconGrid; exact?: boolean; external?: boolean };
+
+const NAV: { group: string; items: NavItem[] }[] = [
   {
     group: "Observe",
     items: [
@@ -42,6 +45,11 @@ const NAV = [
       { href: "/settings/billing", label: "Usage & billing", Icon: IconCard },
     ],
   },
+  {
+    group: "Learn",
+    // How every screen works, with screenshots — each page also carries its own "Docs ↗" pill.
+    items: [{ href: `${DOCS_URL}/product`, label: "Documentation", Icon: IconBook, external: true }],
+  },
 ];
 
 function Mark() {
@@ -76,12 +84,14 @@ export function Sidebar({ me }: { me: Me | null }) {
               {sec.group}
             </div>
             <div className="space-y-0.5">
-              {sec.items.map(({ href, label, Icon, exact }) => {
-                const active = exact ? path === href : path === href || path.startsWith(href + "/");
+              {sec.items.map(({ href, label, Icon, exact, external }) => {
+                const active = !external && (exact ? path === href : path === href || path.startsWith(href + "/"));
                 return (
                   <a
                     key={href}
                     href={href}
+                    target={external ? "_blank" : undefined}
+                    rel={external ? "noreferrer" : undefined}
                     className={clsx(
                       "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] transition-colors",
                       active ? "bg-signal/10 text-fg" : "text-fg-muted hover:bg-hilite/[0.03] hover:text-fg",
@@ -97,6 +107,7 @@ export function Sidebar({ me }: { me: Me | null }) {
                       )}
                     />
                     {label}
+                    {external && <span className="ml-auto text-fg-faint" aria-hidden>↗</span>}
                   </a>
                 );
               })}

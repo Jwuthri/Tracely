@@ -1,3 +1,4 @@
+import { DocLink } from "@/app/components/DocLink";
 import { getAgents, getScenarios } from "@/app/lib/api";
 import { ScenariosManager } from "@/app/components/ScenariosManager";
 
@@ -13,7 +14,7 @@ export default async function ScenariosPage() {
   return (
     <div className="space-y-6">
       <header className="reveal">
-        <h1 className="font-display text-[26px] font-extrabold tracking-tight">Scenarios</h1>
+        <div className="flex items-center gap-3"><h1 className="font-display text-[26px] font-extrabold tracking-tight">Scenarios</h1><DocLink path="/product/scenarios" /></div>
         <p className="mt-1.5 max-w-3xl text-[14px] text-fg-muted">
           Multi-turn conversations Tracely drives against your agent&apos;s own endpoint. Each run
           lands as a real trace — graded by your evaluators, aggregated into the{" "}

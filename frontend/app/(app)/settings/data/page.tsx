@@ -1,3 +1,4 @@
+import { DocLink } from "@/app/components/DocLink";
 import { getStats } from "@/app/lib/api";
 import { DeleteWorkspacePanel } from "@/app/components/DeleteWorkspacePanel";
 import { ResetQuestPanel } from "@/app/components/ResetQuestPanel";
@@ -18,7 +19,7 @@ export default async function DataSettingsPage() {
   return (
     <div className="space-y-7">
       <header className="reveal">
-        <h1 className="font-display text-[24px] font-extrabold tracking-tight">Data</h1>
+        <div className="flex items-center gap-3"><h1 className="font-display text-[24px] font-extrabold tracking-tight">Data</h1><DocLink path="/product/settings#data" /></div>
         <p className="mt-1.5 text-[14px] text-fg-muted">
           What this project currently holds, how to fill it, and how to clear it out.
         </p>

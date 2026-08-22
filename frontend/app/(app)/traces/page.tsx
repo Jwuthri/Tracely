@@ -1,3 +1,4 @@
+import { DocLink } from "@/app/components/DocLink";
 import { getAgents, getSessions } from "@/app/lib/api";
 import { TracesExplorer } from "@/app/components/TracesExplorer";
 
@@ -9,7 +10,7 @@ export default async function TracesPage() {
   return (
     <div className="space-y-6">
       <header className="reveal">
-        <h1 className="font-display text-[26px] font-extrabold tracking-tight">Traces</h1>
+        <div className="flex items-center gap-3"><h1 className="font-display text-[26px] font-extrabold tracking-tight">Traces</h1><DocLink path="/product/traces" /></div>
         <p className="mt-1.5 text-[14px] text-fg-muted">
           Agent runs grouped into conversation threads — expand any conversation into its messages and steps.
         </p>

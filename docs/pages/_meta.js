@@ -1,6 +1,9 @@
 export default {
   index: "Introduction",
   quickstart: "Quickstart",
+  "-- product": { type: "separator", title: "Using the app" },
+  product: "Product guide",
+  "-- sdk": { type: "separator", title: "SDK & CLI" },
   automatic: "Automatic instrumentation",
   concepts: "Core concepts",
   evaluations: "Evaluations",

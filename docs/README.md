@@ -26,6 +26,8 @@ or `make docs` from the repo root for local dev.
 | Path | What |
 |---|---|
 | `pages/*.mdx` | the content (one file per nav entry) |
+| `pages/product/*.mdx` | the product guide — one page per dashboard screen, with screenshots; the app's **Docs ↗** pills deep-link here (`/product/<page>#<section>`), so keep headings stable |
+| `public/screenshots/` | the app screenshots the product guide embeds (1440×900 @1.5×, dark theme) |
 | `pages/_meta.js` | sidebar order + labels |
 | `pages/_app.jsx` | required Nextra app shell |
 | `theme.config.jsx` | logo, links, footer, colors |

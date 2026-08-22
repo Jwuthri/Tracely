@@ -1,0 +1,47 @@
+---
+description: "A tour of the Tracely app — every screen, what it is for, and how the pieces feed each other: traces → evaluations → failure clusters → regression cases → CI gates."
+---
+
+import { Callout } from "nextra/components";
+
+# Using the app
+
+The dashboard is organised as one loop, top to bottom in the sidebar:
+
+**Observe** → **Triage** → **Test** → **Ship**
+
+1. **Observe** — your agents send traces ([Traces](/product/traces)); every run is graded by the evaluator columns you configure; [Trends](/product/trends) shows how it moves over time.
+2. **Triage** — failing runs are grouped into issues ([Failure clusters](/product/clusters)) so you look at *kinds* of failure, not one trace at a time.
+3. **Test** — a failing production trace is frozen into a forever-running [regression case](/product/cases); [Scenarios](/product/scenarios) drive multi-turn conversations at your agent's own endpoint; [Judge calibration](/product/calibration) tells you whether the LLM judge can be trusted to block a merge.
+4. **Ship** — a pull request is gated on the agent's regression suite and scenarios ([CI gates](/product/gates)).
+
+<img className="screenshot" src="/screenshots/sidebar.png" alt="The sidebar: Observe, Triage, Test, Ship, Configure, Learn" style={{ maxWidth: 300 }} />
+
+<Callout type="info">
+  **Nothing here is hand-authored.** There is no dataset to maintain: evaluations, clusters, cases, gates and trends are all *derived* from the traces your agent already produces. Delete a trace and everything that came from it is gone too.
+</Callout>
+
+## Every screen links back here
+
+Each page — and each panel that does something non-obvious — carries a small **Docs ↗** pill next to its title. It opens the section of this guide that explains that feature: what it computes, what to click, and what the result means. The **Documentation** entry at the bottom of the sidebar opens this overview.
+
+## The screens
+
+| Page | Answers | Guide |
+|---|---|---|
+| Dashboard | "Is the loop closed?" — the activation checklist and headline counts | [Dashboard](/product/dashboard) |
+| Traces | "What did the agent do?" — conversation → message → step, with a grade per level | [Traces & conversations](/product/traces) |
+| Trends | "Is it getting better?" — failure rate, gate pass-rate, latency/cost, and how metrics move *together* | [Trends & cross-metric analysis](/product/trends) |
+| Failure clusters | "What *kinds* of failure do we have?" | [Failure clusters](/product/clusters) |
+| Regression cases | "Which production failures must never recur?" | [Regression cases](/product/cases) |
+| Scenarios | "Does the agent survive this conversation / this attack?" | [Scenarios](/product/scenarios) |
+| Judge calibration | "Does the LLM judge agree with a human?" | [Judge calibration](/product/calibration) |
+| CI gates | "Can this PR ship?" | [CI gates](/product/gates) |
+| Assistant · ⌘K · quest | Ask the workspace questions, jump anywhere, learn the product | [Assistant, search & quest](/product/assistant) |
+| Settings | Keys, data, team, billing | [Settings](/product/settings) |
+
+## Three shortcuts worth learning
+
+- **⌘K** — search conversations, issues, cases and gates from anywhere.
+- **⌘J** — open the assistant; it reads this workspace's traces and can create evaluators, scenarios and cases for you.
+- The **progress ring** in the top bar is the onboarding quest — twelve steps that walk the loop once, end to end.

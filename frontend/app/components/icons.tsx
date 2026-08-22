@@ -204,3 +204,10 @@ export const IconStack = (p: P) => (
     <path d="M4 7h16M4 12h16M4 17h10" />
   </svg>
 );
+
+export const IconBook = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z" />
+    <path d="M4 20.5V5.5M8 7h8M8 10.5h5" />
+  </svg>
+);

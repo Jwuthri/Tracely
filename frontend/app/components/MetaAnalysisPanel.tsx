@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { DocLink } from "@/app/components/DocLink";
 import { Badge } from "@/app/components/ui";
 
 type AgentRef = { id: string; slug: string; display_name: string };
@@ -126,6 +127,7 @@ export function MetaAnalysisPanel() {
         <div>
           <h2 className="flex items-center gap-2 text-[13px] font-semibold text-fg">
             <Spark /> Cross-metric analysis
+            <DocLink path="/product/trends#cross-metric-analysis" />
           </h2>
           <p className="mt-1 text-[12.5px] text-fg-muted">
             How an agent&apos;s metrics move together — correlations, outlier conversations, and

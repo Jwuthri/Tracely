@@ -1,3 +1,4 @@
+import { DocLink } from "@/app/components/DocLink";
 import {
   getAgents,
   getCases,
@@ -66,7 +67,7 @@ export default async function GatesPage({
     <div className="space-y-6">
       <header className="reveal flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-[26px] font-extrabold tracking-tight">CI gates</h1>
+          <div className="flex items-center gap-3"><h1 className="font-display text-[26px] font-extrabold tracking-tight">CI gates</h1><DocLink path="/product/gates" /></div>
           <p className="mt-1.5 max-w-2xl text-[14px] text-fg-muted">
             A PR is gated on the agent&apos;s regression suite — every promoted production failure
             must <span className="text-fg">not</span> recur. Runs in CI via the GitHub Action.

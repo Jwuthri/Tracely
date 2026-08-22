@@ -1,3 +1,4 @@
+import { DocLink } from "@/app/components/DocLink";
 import { DeleteOrganizationPanel } from "@/app/components/DeleteOrganizationPanel";
 import { InviteManager } from "@/app/components/InviteManager";
 import { MembersList } from "@/app/components/MembersList";
@@ -12,7 +13,7 @@ export default async function TeamPage() {
   return (
     <div className="space-y-7">
       <header className="reveal">
-        <h1 className="font-display text-[24px] font-extrabold tracking-tight">Team</h1>
+        <div className="flex items-center gap-3"><h1 className="font-display text-[24px] font-extrabold tracking-tight">Team</h1><DocLink path="/product/settings#team" /></div>
         <p className="mt-1.5 text-[14px] text-fg-muted">
           {personal
             ? "This is your personal account — it holds one workspace and can't be shared."

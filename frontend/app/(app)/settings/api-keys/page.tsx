@@ -1,3 +1,4 @@
+import { DocLink } from "@/app/components/DocLink";
 import { CopyId } from "@/app/components/CopyId";
 import { LlmKeyPanel } from "@/app/components/LlmKeyPanel";
 import { getMe } from "@/app/lib/auth";
@@ -14,7 +15,7 @@ export default async function ApiKeysPage() {
   return (
     <div className="space-y-7">
       <header className="reveal">
-        <h1 className="font-display text-[24px] font-extrabold tracking-tight">API keys</h1>
+        <div className="flex items-center gap-3"><h1 className="font-display text-[24px] font-extrabold tracking-tight">API keys</h1><DocLink path="/product/settings#api-keys" /></div>
         <p className="mt-1.5 text-[14px] text-fg-muted">
           The keys this workspace sends traces with, and the one it runs AI features on. Treat
           both like passwords.

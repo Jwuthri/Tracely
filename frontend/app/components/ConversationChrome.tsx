@@ -1,5 +1,6 @@
 "use client";
 
+import { DocLink } from "@/app/components/DocLink";
 import clsx from "clsx";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -29,7 +30,10 @@ export function ConversationHeader({
       </Link>
       <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-[22px] font-extrabold tracking-tight">Conversation</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="font-display text-[22px] font-extrabold tracking-tight">Conversation</h1>
+            <DocLink path="/product/traces#one-conversation-five-lenses" />
+          </div>
           <div className="mt-2 flex flex-wrap items-center gap-3 font-mono text-[11.5px] text-fg-faint">
             <CopyId value={threadId} label="thread id" />
             <span>{turns} turns</span>

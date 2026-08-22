@@ -1,3 +1,4 @@
+import { DocLink } from "@/app/components/DocLink";
 import { BillingActions } from "@/app/components/BillingActions";
 import { Meter } from "@/app/components/Meter";
 import { Badge } from "@/app/components/ui";
@@ -29,7 +30,7 @@ export default async function BillingPage() {
   return (
     <div className="space-y-6">
       <header className="reveal">
-        <h1 className="font-display text-[24px] font-extrabold tracking-tight">Usage &amp; billing</h1>
+        <div className="flex items-center gap-3"><h1 className="font-display text-[24px] font-extrabold tracking-tight">Usage &amp; billing</h1><DocLink path="/product/settings#usage--billing" /></div>
         <p className="mt-1.5 max-w-2xl text-[14px] text-fg-muted">
           Traces ingested this month, your plan, and — on the hosted cloud — the subscription
           behind it. Billing belongs to{" "}

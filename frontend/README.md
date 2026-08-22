@@ -30,7 +30,8 @@ There are **two** ways the UI talks to the backend, and which one you use depend
 | File | Role |
 |---|---|
 | `app/layout.tsx` | Root layout: `_providers` (auth context) + `Sidebar` + content (`Topbar` + `<main>`) + `CommandPalette`. Loads display/sans/mono fonts. `<main>` is capped at `max-w-[1240px]` (the trace table can break out of this — see Enlarge). |
-| `components/Sidebar.tsx` | Left nav (244px), grouped by the spine: **Observe** (Dashboard, Traces, Trends) · **Triage** (Failure clusters) · **Test** (Regression cases) · **Ship** (CI gates) · **Configure** (Settings). Footer shows the project + `prod` env. |
+| `components/Sidebar.tsx` | Left nav (244px), grouped by the spine: **Observe** (Dashboard, Traces, Trends) · **Triage** (Failure clusters) · **Test** (Regression cases) · **Ship** (CI gates) · **Configure** (Settings) · **Learn** (Documentation, external). Footer shows the project + `prod` env. |
+| `components/DocLink.tsx` | The **Docs ↗** pill next to every page/panel title — deep-links into the docs site's product guide (`DOCS_URL` from `lib/site.ts` + a path such as `/product/trends#cross-metric-analysis`). Add one whenever a new screen or non-obvious panel ships, and a matching section under `docs/pages/product/`. |
 | `components/Topbar.tsx` | Breadcrumbs + the ⌘K trigger + the onboarding-quest launcher + the theme toggle. |
 | `components/CommandPalette.tsx` | ⌘K/Ctrl-K global search → `/api/search`; result types trace / issue / case / gate with keyboard nav. |
 | `components/AccountMenu.tsx` | User avatar menu (top-right) — profile, sign out, links to settings. Renders only in `local`/`clerk` auth modes. |

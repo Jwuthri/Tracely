@@ -1,0 +1,41 @@
+---
+description: "Failure clusters: how failing runs are grouped into issues — structural signatures at ingest, then embedding + HDBSCAN + an LLM analyst on demand — and what to do with an issue: promote it to a regression case, or ignore it."
+---
+
+import { Callout } from "nextra/components";
+
+# Failure clusters
+
+Triage works on **kinds** of failure, not on traces. A cluster (an *issue*) is a group of failing runs that broke the same way, with a count, a history, a written analysis and a proposed fix.
+
+<img className="screenshot" src="/screenshots/clusters.png" alt="The failure clusters list" />
+
+## How runs end up in a cluster
+
+Two stages, cheap first:
+
+1. **At ingest — structural.** The moment a trace fails an evaluator, Tracely builds a signature from *which* evaluators failed plus the error text with ids, numbers and quoted strings masked out, hashes it, and files the run into the cluster with that signature. No model, no delay — two runs that raised the same exception land together within seconds.
+2. **On demand — semantic.** **Analyze failures** re-clusters everything: each failing run is described by its *mechanism* (what was asked, which tool broke, how the answer went wrong), embedded, and grouped with HDBSCAN (UMAP first only when there are many). A model then writes each cluster up as an issue — title, analysis, proposed fix, a **suggested evaluator** — and a second pass merges issues that are really one and splits ones that are really two. Promotion and ignore state carry over from the previous clustering.
+
+Stage 2 needs the workspace's OpenRouter key; without one the button is disabled and you keep the structural clusters.
+
+**Min occurrences** hides the long tail: set it to 3 and you only see issues that happened at least three times.
+
+## An issue
+
+<img className="screenshot" src="/screenshots/cluster-detail.png" alt="An issue: occurrences over time, analysis, proposed fix, suggested evaluator, signature, member traces" />
+
+- **Occurrences** — when it happened, per day. A spike says *a deploy did this*; a flat line says *it has always done this*.
+- **Analysis / Proposed fix** — the written-up mechanism and what to change.
+- **Suggested evaluator** — a draft column that would catch this class of failure going forward. *Add it* opens the [Add Column](/product/traces#add-column) form pre-filled so you can review, edit, and save it.
+- **Signature** — the masked structural key.
+- **Member traces** — every run in the cluster, with links.
+
+## Actions
+
+- **Promote cluster to regression test** — freezes a representative failing run into a [regression case](/product/cases). The case remembers which issue it came from.
+- **Ignore** — hides the issue from the open count (a known limitation, noise, a third-party outage) without deleting the traces.
+
+<Callout type="info">
+  A cluster is a *view* over the scores. Change an evaluator — make a check advisory, tighten a threshold — and the next clustering reflects it; there is no separate list of issues to keep in sync.
+</Callout>

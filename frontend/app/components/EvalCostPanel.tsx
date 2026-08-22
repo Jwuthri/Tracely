@@ -1,3 +1,4 @@
+import { DocLink } from "@/app/components/DocLink";
 import { getEvaluatorCost, type EvaluatorCostRow } from "@/app/lib/api";
 
 // Format USD cents into a compact label. Shows "<¢" for sub-cent totals so a real $0.003 doesn't
@@ -46,7 +47,9 @@ export async function EvalCostPanel({ days = 30 }: { days?: number }) {
     <section className="reveal card p-5" style={{ animationDelay: "210ms" }}>
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <h2 className="text-[13px] font-semibold text-fg">Judge column cost</h2>
+          <h2 className="flex items-center gap-2 text-[13px] font-semibold text-fg">
+            Judge column cost <DocLink path="/product/trends#judge-column-cost" />
+          </h2>
           <p className="mt-1 text-[12px] text-fg-muted">
             What each LLM-judge column has cost to run over the last {s.days} days — priced from
             OpenRouter when reachable, else a static fallback table.

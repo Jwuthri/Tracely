@@ -1,3 +1,4 @@
+import { DocLink } from "@/app/components/DocLink";
 import { getClusters, getLlmKeyConfigured, PAGE_SIZE } from "@/app/lib/api";
 import { Badge } from "@/app/components/ui";
 import { ClusterList } from "@/app/components/ClusterList";
@@ -29,7 +30,7 @@ export default async function ClustersPage({
     <div className="space-y-6">
       <header className="reveal flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-[26px] font-extrabold tracking-tight">Failure clusters</h1>
+          <div className="flex items-center gap-3"><h1 className="font-display text-[26px] font-extrabold tracking-tight">Failure clusters</h1><DocLink path="/product/clusters" /></div>
           <p className="mt-1.5 max-w-2xl text-[14px] text-fg-muted">
             Auto-detected failures grouped into issues — run <span className="text-fg">Analyze</span> to
             cluster with embeddings + LLM agents, then promote an issue into a regression test.

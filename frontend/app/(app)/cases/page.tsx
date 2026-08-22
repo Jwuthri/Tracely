@@ -1,3 +1,4 @@
+import { DocLink } from "@/app/components/DocLink";
 import { getCases, PAGE_SIZE } from "@/app/lib/api";
 import { Badge, statusVariant, verdictVariant } from "@/app/components/ui";
 import { CopyId } from "@/app/components/CopyId";
@@ -16,7 +17,7 @@ export default async function CasesPage({
     <div className="space-y-6">
       <header className="reveal flex items-end justify-between">
         <div>
-          <h1 className="font-display text-[26px] font-extrabold tracking-tight">Regression cases</h1>
+          <div className="flex items-center gap-3"><h1 className="font-display text-[26px] font-extrabold tracking-tight">Regression cases</h1><DocLink path="/product/cases" /></div>
           <p className="mt-1.5 text-[14px] text-fg-muted">
             Each case is a production trace promoted into a forever-running regression test,
             attached to the agent it came from — <a href="/gates" className="text-signal">the gate</a>{" "}

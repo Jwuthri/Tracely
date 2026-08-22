@@ -1,0 +1,35 @@
+---
+description: "The Tracely dashboard: the 'Get to your first gate' activation checklist, headline counts, the operations strip, and the biggest failure clusters."
+---
+
+# Dashboard
+
+The landing page of a workspace. It exists to answer one question — *has this workspace closed the loop yet?* — and then to be a quick glance at the numbers.
+
+<img className="screenshot" src="/screenshots/dashboard.png" alt="The dashboard: activation checklist, stat cards, operations strip, biggest failure clusters, recent traces and cases" />
+
+## Get to your first gate
+
+The activation card walks the whole loop once, in order. Every step is derived from a **real count** in the workspace, never from a flag you tick:
+
+| Step | Done when |
+|---|---|
+| Send your first trace | the workspace holds at least one trace |
+| Let Tracely grade every run | at least one evaluator column is enabled on the Traces table |
+| Catch a real failure | at least one trace has failed a non-advisory evaluator |
+| Promote a failure to a regression case | a case exists |
+| Gate a pull request | a gate run exists |
+
+Each step shows the exact snippet or the button that completes it (an instrumented Python snippet, a `tracely gate` command, a link to the right screen). Once every step has happened the card disappears for good — it is an onboarding aid, not a status page.
+
+## Stat cards
+
+**Traces**, **Failure clusters** (open issues), **Auto failures** (runs a non-advisory evaluator failed) and **Regression cases**. The same counts feed the [Trends](/product/trends) page; here they are the current totals.
+
+## Operations strip
+
+The health row under the stats — latency percentiles, error rate, throughput, tokens and cost for the last days — is the compact form of the operations panel described in [Trends → Operations](/product/trends#operations).
+
+## Biggest failure clusters · recent traces · recent cases
+
+Three short lists that are just links into the pages they summarise: the largest open issues (→ [Failure clusters](/product/clusters)), the latest conversations (→ [Traces](/product/traces)) and the latest regression cases (→ [Regression cases](/product/cases)).

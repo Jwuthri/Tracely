@@ -1,0 +1,34 @@
+---
+description: "Judge calibration: grade a sample of runs yourself, compare with the LLM judge, and read agreement, missed failures and over-flags per evaluator before you let a judge block CI."
+---
+
+import { Callout } from "nextra/components";
+
+# Judge calibration
+
+Before an LLM judge is allowed to block a merge, check it against yourself. Calibration is a labelling queue: you grade a run first, the judge's verdict is revealed after, and Tracely keeps score per evaluator.
+
+<img className="screenshot" src="/screenshots/calibration.png" alt="Judge calibration: per-evaluator agreement cards and the labelling queue" />
+
+## The cards
+
+One per judge column:
+
+| Number | Meaning |
+|---|---|
+| **Agreement** | share of your labels where the judge said the same thing — green from 80 %, amber from 50 %, red below |
+| **Reviewed** | how many of its recent verdicts you have labelled |
+| **Missed fails** | you said `FAIL`, the judge did not — the dangerous direction: a gate built on this judge would let that failure ship |
+| **Over-flags** | the judge said `FAIL`, you did not — the annoying direction: good PRs it would have blocked |
+
+## The queue
+
+Recent judge decisions for the selected evaluator, newest first, each with the judge's verdict, its rationale, the run's input and output, and a link to the trace. **✓ agree** records your label as the judge's verdict; **✗ disagree** records the opposite; clicking the active one again clears it. Labels are per reviewer, one per score, and the summary updates as you go.
+
+Labels are kept with a snapshot of the judge's verdict at the time, so re-running the column later does not rewrite history.
+
+<Callout type="info">
+  Calibration needs an LLM judge to calibrate. With no OpenRouter key configured the page points you to [Settings → API keys](/product/settings#api-keys).
+</Callout>
+
+What to do with a bad number: tighten the rubric (the [Add Column](/product/traces#add-column) form edits a live column), switch the level (a step judge sees far less than a message judge), or mark the column **advisory** until it agrees with you.

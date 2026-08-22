@@ -491,3 +491,14 @@ button:focus-visible {
     0 0 18px -4px rgba(34, 211, 238, 0.6);
   border-radius: 8px;
 }
+
+/* ─── product screenshots ─────────────────────────────────────────────────── */
+
+img.screenshot {
+  display: block;
+  width: 100%;
+  margin: 1.25rem 0;
+  border: 1px solid var(--line-bright);
+  border-radius: 10px;
+  box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.8);
+}

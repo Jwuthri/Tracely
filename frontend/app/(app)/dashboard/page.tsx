@@ -1,3 +1,4 @@
+import { DocLink } from "@/app/components/DocLink";
 import { getCases, getClusters, getEvaluators, getGates, getStats, getTraces, getTrends, type FailureCluster } from "@/app/lib/api";
 import { getMe } from "@/app/lib/auth";
 import { Activation } from "@/app/components/Activation";
@@ -87,7 +88,7 @@ export default async function Dashboard() {
   return (
     <div className="space-y-8">
       <header className="reveal">
-        <h1 className="font-display text-[27px] font-extrabold tracking-tight">Dashboard</h1>
+        <div className="flex items-center gap-3"><h1 className="font-display text-[27px] font-extrabold tracking-tight">Dashboard</h1><DocLink path="/product/dashboard" /></div>
         <p className="mt-1.5 text-[14px] text-fg-muted">
           Production traces become regression tests — detect a failure, promote it, gate it forever.
         </p>

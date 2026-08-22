@@ -1,5 +1,6 @@
 "use client";
 
+import { DocLink } from "@/app/components/DocLink";
 import clsx from "clsx";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -443,6 +444,7 @@ export function Assistant() {
               <h2 className="truncate text-[13.5px] font-semibold text-fg">
                 {view === "history" ? "Conversations" : "Assistant"}
               </h2>
+              {view === "chat" && <DocLink path="/product/assistant" />}
             </div>
             <div className="flex items-center gap-1.5">
               {view === "chat" && !empty && (

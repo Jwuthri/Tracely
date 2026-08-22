@@ -1,0 +1,42 @@
+---
+description: "Regression cases: how a failing production trace is frozen into a forever-running test — input, fixture bundle, reference trajectory and a fail-to-pass contract — and how a case is replayed."
+---
+
+import { Callout } from "nextra/components";
+
+# Regression cases
+
+A case is a production trace that must never recur. You do not write it; you **promote** it — from a failing trace, or from a [failure cluster](/product/clusters) — and from then on every [CI gate](/product/gates) for that agent replays it.
+
+<img className="screenshot" src="/screenshots/cases.png" alt="The regression cases list" />
+
+## What promoting captures
+
+1. **The input** — the user request exactly as it arrived, plus a digest of it so the same input is never promoted twice and a CI run can be matched to its case without any wiring.
+2. **A fixture bundle** — every tool call and model call the run made, in order, with arguments, outputs and error status, stored in object storage. This is what makes [hermetic replay](/replay) possible: in CI the agent's code runs for real, but its tools and model calls are served from the recording.
+3. **The reference trajectory** — the ordered list of steps the failing run took.
+4. **A fail-to-pass contract** — the assertions a candidate run must satisfy: no run error; the tools the agent was *asked* for and must actually execute; whether the tool sequence must match; whether a tool error is tolerated when the agent handles it gracefully.
+
+Then the contract is **validated against the source trace**: the failing run must fail its own case. A case the original failure would pass is not a regression test, and Tracely refuses to create it.
+
+## Statuses
+
+| Status | Meaning |
+|---|---|
+| **DRAFT** | promoted, not yet part of the gate |
+| **PROMOTED** | replayed by every gate for this agent |
+| **QUARANTINED** | set aside — flaky or superseded; ignored by the gate |
+| **UNREPRODUCIBLE** | the fixture could not be replayed |
+
+## A case
+
+<img className="screenshot" src="/screenshots/case-detail.png" alt="A case: assertions, reference trajectory, replay controls and history" />
+
+- **Assertions** — the contract, one line each, with the last verdict.
+- **Reference trajectory** — the source run's steps.
+- **Replay** — paste the trace id of a candidate run (a fixed version of the agent, run in staging or CI) and Tracely evaluates it against the contract right here: `FAIL` while the bug is present, `PASS` once it is fixed. Every replay is kept as history, so a case carries its own red → green story.
+- **Source trace** — the production run it came from, one click away.
+
+<Callout type="info">
+  In CI the same evaluation runs for every promoted case at once — that is a [gate](/product/gates). `tracely replay <agent> --entrypoint module:function` re-runs your agent on each case's input with the recorded fixtures and submits the results; `tracely gate <agent>` evaluates traces your CI produced on its own.
+</Callout>
